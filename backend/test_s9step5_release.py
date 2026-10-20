@@ -221,7 +221,17 @@ def test_manifest_excludes_real_data_files():
     for pat in (r"^亚马逊FBA表\d*\.csv$", r"^J-US.*发票\.xlsx$", r"^箱唛.*\.pdf$", r"^发货录入样表\.xlsx$",
                 r"^已填写好的send to amazong\.xlsx$", r"^工厂表\.xlsx$", r"^货代表\.xlsx$", r"^Send to Amazon表格\.xlsx$"):
         assert not any(re.search(pat, r) for r in tpl), pat
-    assert len(excluded) >= 19
+    # Marco 2026-10-20：3 份真实数据模板原样留在仓库，不再要求“排除数 ≥ 19”。
+    assert M.ALLOWED_REAL_TEMPLATES_DECISION_DATE == "2026-10-20"
+    assert set(M.ALLOWED_REAL_TEMPLATES) == {"发货录入样表.xlsx", "工厂表.xlsx", "货代表.xlsx"}
+    for name in M.ALLOWED_REAL_TEMPLATES:
+        assert (BACKEND / "templates" / name).is_file(), name
+        assert name not in tpl
+    assert set(M.KNOWN_BLANK_TEMPLATES) == {"Send to Amazon表格.xlsx"}
+    allowed_repo_binaries = set(tpl) | set(M.ALLOWED_REAL_TEMPLATES) | set(M.KNOWN_BLANK_TEMPLATES)
+    assert excluded <= allowed_repo_binaries, sorted(excluded - allowed_repo_binaries)
+    stray = Path("backend/not-allowed-real.xlsx")
+    assert stray.as_posix() not in {f"templates/{n}" for n in allowed_repo_binaries}
     assert not any(app_paths.is_private_template(Path(r)) for r in tpl)
     cfg = set(M.CONFIG_WHITELIST)
     assert "invoice_history.default.json" not in cfg and "lingxing.json" not in cfg

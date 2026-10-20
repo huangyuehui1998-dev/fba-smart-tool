@@ -54,6 +54,23 @@ def _sha256(path: Path) -> Optional[bytes]:
     return h.digest()
 
 
+def _checkpoint_sqlite(path: Path) -> None:
+    """把已提交的 WAL 页折进主库文件。失败就保持原样（只读环境、锁占用）。
+
+    不改表里的行，只让主文件包含已经 commit 的内容，供随后的 SHA-256 / 行指纹使用。
+    """
+    if not path.is_file() or not _is_sqlite(path):
+        return
+    try:
+        con = sqlite3.connect(str(path))
+        try:
+            con.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return
+
+
 def _is_sqlite(path: Path) -> bool:
     try:
         with open(path, "rb") as fh:
@@ -92,6 +109,10 @@ class RealDataIndex:
         self.count = 0
         for p in sources:
             p = Path(p)
+            # init 之前把已提交的 WAL 折进主文件，再记基线哈希。
+            # 否则 journal_mode=WAL 时主文件仍是空壳，immutable 读不到 product_master，
+            # 复制后被 init 改写也认不出来。
+            _checkpoint_sqlite(p)
             try:
                 size = p.stat().st_size
             except OSError:

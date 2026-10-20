@@ -71,6 +71,11 @@ def test_d15_empty_routing_export_400():
 
 # ---------- D3 模板识别 ----------
 def test_d3_t4_detect_only_order_sheet():
+    from tests._realdata import REALDATA_REASON
+
+    sample = ROOT / "tests/golden/samples/invoice_templates/T4_第4批第一票_FWA4-27箱_去图片副本.xlsx"
+    if not sample.is_file():
+        pytest.skip(f"{REALDATA_REASON}: {sample}")
     """真实样本识别：T4 原件 → T4；只剩“下单模板”以外表的 T4 副本不再被认成 T4；T7 空白 → T7，T6 → T6。"""
     from openpyxl import load_workbook
     from fba_tool.invoice_templates import detect_template
@@ -263,7 +268,7 @@ def test_d12_duplicate_upload_is_error():
     tpl = ROOT / "templates"
     a, b = tpl / "亚马逊FBA表.csv", tpl / "亚马逊FBA表1.csv"
     if not (a.exists() and b.exists()):
-        pytest.skip("templates 缺样例")
+        pytest.skip("需要 box realdata: templates 缺样例")
     res = validate_shipments([(a.name, a.read_bytes()), (b.name, b.read_bytes())], [])
     assert not res.ok and any("重复上传" in e for e in res.errors)
 

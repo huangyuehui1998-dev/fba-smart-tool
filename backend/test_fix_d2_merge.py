@@ -20,7 +20,7 @@ FILES = [
 ]
 PROFILE = {"id": "t", "name": "测试公司", "credit_code": "X", "signed_at": "武汉", "domestic_source": "武汉"}
 
-pytestmark = pytest.mark.skipif(not TEST1.is_dir(), reason="缺 test1 样例")
+pytestmark = pytest.mark.skipif(not TEST1.is_dir(), reason="需要 box realdata: 缺 test1 样例")
 
 
 def _pairs():

@@ -10,6 +10,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from fba_tool.master_db import init_master_db
+from tests._realdata import requires_realdata
 from fba_tool.ticket_import import (
     apply_ticket_import,
     detect_ticket_source,
@@ -24,6 +25,8 @@ FX = Path(__file__).parent / "tests" / "fixtures" / "tickets"
 TENCENT = FX / "tencent_b14.xlsx"
 FREIGHT = FX / "freight_records.xlsx"
 JIUFANG = FX / "jiufang_LCL2609EZGXA.xlsx"
+pytestmark = requires_realdata(TENCENT, FREIGHT, JIUFANG)
+
 B14_GROSS = {  # 腾讯表格文档.xlsx Sheet1!T3:T7
     "FBA19RJCXY6X": 267.2, "FBA19RJH13MS": 115.2, "FBA19RJD3V7G": 228.0, "FBA19RJCV4RX": 200.4, "FBA19RJCC1BM": 191.2,
 }

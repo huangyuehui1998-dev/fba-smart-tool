@@ -101,7 +101,7 @@ def test_extra_data_aligns_after_sku_row_filter():
     assert records[0]["extra_data"]
 
 
-@pytest.mark.skipif(not PET_COURTYARD_FIXTURE.is_file(), reason="fixture xlsx not present")
+@pytest.mark.skipif(not PET_COURTYARD_FIXTURE.is_file(), reason="需要 box realdata: fixture xlsx not present")
 def test_parse_pet_courtyard_product_info_fixture():
     """回归：宠物庭院内部产品信息总表（可持续更新同路径文件）。"""
     raw = PET_COURTYARD_FIXTURE.read_bytes()

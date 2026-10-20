@@ -285,7 +285,7 @@ def test_e2e_workflow_step1_to_45():
     import pytest
 
     if not (TPL / PRIMARY_CSV).exists() or not list(TPL.glob("*.pdf")):
-        pytest.skip("backend/templates 下没有货件 CSV / 箱唛 PDF 素材（不受 git 管理），跳过端到端用例")
+        pytest.skip("需要 box realdata: backend/templates 下没有货件 CSV / 箱唛 PDF 素材（不受 git 管理），跳过端到端用例")
     steps = _run_workflow()
     assert len(steps) == 5
 

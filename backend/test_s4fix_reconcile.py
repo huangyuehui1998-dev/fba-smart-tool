@@ -13,6 +13,8 @@ import pytest
 
 from fba_tool import invoice_templates as it
 
+from tests._realdata import skip_module_if_missing
+
 HERE = Path(__file__).resolve().parent
 G = HERE / "tests" / "golden"
 S = G / "samples"
@@ -21,6 +23,7 @@ INP = S / "inputs"
 T7_BLANK = S / "invoice_templates" / "T7_义乌宁波运单下单模板_空白.xlsx"
 T5_FILE = LEG / "J-US-第五批9810第一票美国海运ORF2-35箱-PetCarMat发票.xlsx"
 B6T5 = LEG / "J-US-第6批9810第5票美国海运MGE3-6箱-PETBARRIERS发票.xlsx"
+skip_module_if_missing(HERE / "tests/fixtures/warehouse/fba_warehouse_qiluo.xlsx", T5_FILE, T7_BLANK, B6T5)
 
 
 def _wh():

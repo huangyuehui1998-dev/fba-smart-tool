@@ -62,6 +62,18 @@ def _guard_no_real_data_copies(request):
         _assert_no_real_copies(tmp, request.node.nodeid + " (tmp_path)")
 
 
+def pytest_configure(config):
+    config.addinivalue_line("markers", "acceptance: 验收脚本复现项，默认不进门禁（pytest -m acceptance）")
+
+
+def pytest_collection_modifyitems(config, items):
+    """acceptance 默认不收集。显式 -m acceptance 时保留。"""
+    markexpr = getattr(config.option, "markexpr", "") or ""
+    if "acceptance" in markexpr:
+        return
+    items[:] = [item for item in items if "acceptance" not in item.keywords]
+
+
 def pytest_sessionfinish(session, exitstatus):
     """会话结束：再查全局临时 app_data 和本次 pytest 的全部 tmp_path；发现副本就让整次测试失败。"""
     roots = [_TMP_APP_DATA]

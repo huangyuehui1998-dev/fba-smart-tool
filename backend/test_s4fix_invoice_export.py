@@ -16,11 +16,17 @@ from fba_tool.invoice_rules import (
     to_number,
 )
 from fba_tool.shipment_parser import parse_csv_shipment
+from tests._realdata import skip_module_if_missing
 from tests.golden.compare_golden import VERDICT_FAIL, VERDICT_KNOWN, failures, write_report
 from tests.golden.compare_invoice_export import compare_jiufang, compare_send
 
 HERE = Path(__file__).resolve().parent
 G = HERE / "tests" / "golden"
+skip_module_if_missing(
+    G / "invoice_export_inputs.json",
+    G / "product_master_golden.json",
+    HERE / "tests/fixtures/warehouse/fba_warehouse_qiluo.xlsx",
+)
 INPUTS = json.loads((G / "invoice_export_inputs.json").read_text(encoding="utf-8"))["cases"]
 SNAP = {p["fnsku"]: p for p in json.loads((G / "product_master_golden.json").read_text(encoding="utf-8"))["products"]}
 
