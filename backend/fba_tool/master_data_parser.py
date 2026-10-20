@@ -2,7 +2,7 @@
 
 入库规范：尺寸统一 cm，重量统一 kg。
 - 英寸 → cm：× inch_to_cm_factor（默认 2.54）
-- 磅   → kg：× lb_to_kg_factor（默认 0.453592，等价于 ÷ 2.20462）
+- 磅   → kg：× lb_to_kg_factor（1 lb = 0.45359237 kg，见 fba_tool.units）
 """
 from __future__ import annotations
 

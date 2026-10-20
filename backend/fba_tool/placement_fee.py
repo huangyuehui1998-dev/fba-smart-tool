@@ -5,10 +5,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
 from fba_tool.master_data_apply import build_placement_unit_rows
+from fba_tool.units import CM_TO_INCH, KG_TO_LB
 
 # S1e：判定用精确系数（1 in = 2.54 cm，1 lb = 0.45359237 kg）
-CM_TO_IN = 1 / 2.54
-KG_TO_LB = 1 / 0.45359237
+CM_TO_IN = CM_TO_INCH
 DIM_WEIGHT_DIVISOR = 139.0
 
 FeeRange = Tuple[float, float]
@@ -440,8 +440,29 @@ def _scenario_line_totals(line_items: List[Dict[str, Any]], scenario: str) -> Tu
     return round(total_min, 2), round(total_max, 2)
 
 
+# 第13–15批公开仓码。表里没有的码再查 fba_warehouse.region。
+WAREHOUSE_REGIONS.update({
+    "CLT2": "美东",
+    "LAS1": "美西",
+    "LAX9": "美西",
+    "TEB9": "美东",
+})
+
+
 def warehouse_region(code: str) -> str:
-    return WAREHOUSE_REGIONS.get(str(code or "").strip().upper(), "其他")
+    key = str(code or "").strip().upper()
+    if not key:
+        return "其他"
+    try:
+        from fba_tool.warehouse_db import get_warehouse
+
+        row = get_warehouse(key) or {}
+        region = str(row.get("region") or "").strip()
+        if region:
+            return region
+    except Exception:  # noqa: BLE001
+        pass
+    return WAREHOUSE_REGIONS.get(key, "其他")
 
 
 def compute_locked_placement_fee(

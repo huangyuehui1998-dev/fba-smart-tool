@@ -88,10 +88,18 @@ def _apply_style(ws, row: int, styles: List[Any]) -> None:
 
 
 def _fmt_dim(v: Any) -> str:
+    """尺寸文本固定两位小数，避免 10 和 10.00 在发票里看起来像不同精度。"""
     if v is None:
         return ""
-    f = round2(v)
-    return str(int(f)) if f == int(f) else str(f)
+    return f"{round2(v):.2f}"
+
+
+def _numeric_format(ws, row: int, cols: str, fmt: str) -> None:
+    for col in cols:
+        cell = ws[f"{col}{row}"]
+        if isinstance(cell.value, bool) or not isinstance(cell.value, (int, float)):
+            continue
+        cell.number_format = fmt
 
 
 def _sheet(wb, name: str):
@@ -135,6 +143,8 @@ def write_send(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, Any])
         }
         for col, v in vals.items():
             ws[f"{col}{row}"] = v
+        _numeric_format(ws, row, "F", "0")
+        _numeric_format(ws, row, "Q", "0.00")
 
 
 # ---------------------------------------------------------------- 九方
@@ -202,6 +212,8 @@ def write_jiufang(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, An
             for col, v in vals.items():
                 pk[f"{col}{row}"] = v
             if first:
+                _numeric_format(pk, row, "IJK", "0.00")
+                _numeric_format(pk, row, "H", "0")
                 total_cbm += box_cbm or 0
                 total_w += b.weight or 0
             row += 1
@@ -307,6 +319,9 @@ def write_deshu_t3(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, A
                 "U": r.dims[0], "V": r.dims[1], "W": r.dims[2]}
         for col, v in vals.items():
             ws[f"{col}{row}"] = v
+        _numeric_format(ws, row, "N", "0")
+        _numeric_format(ws, row, "Q", "0.00")
+        _numeric_format(ws, row, "UVW", "0.00")
     _warn_weight_basis(model, ctx, "德速")
 
 
@@ -338,6 +353,8 @@ def write_qiluo_t6(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, A
                 "R": f"https://www.amazon.com/dp/{l['asin']}" if l["asin"] else ""}
         for col, v in vals.items():
             ws[f"{col}{row}"] = v
+        _numeric_format(ws, row, "F", "0")
+        _numeric_format(ws, row, "NOP", "0.00")
     _warn_weight_basis(model, ctx, "琪珞")
 
 
