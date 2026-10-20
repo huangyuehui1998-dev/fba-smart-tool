@@ -33,7 +33,16 @@ def test_acceptance_baseline_eleven_reproduced_one_skipped():
     assert proc.returncode == 0, out
     tags = re.findall(r"^\[(REPRODUCED|NOT REPRODUCED|SKIPPED)\] (.+?):", out, flags=re.M)
     status = {code: tag for tag, code in tags}
-    fixed = {"R1/N-08", "N-07", "N-02", "D-01"}
+    fixed = {
+        "R1/N-08",
+        "N-07",
+        "N-02",
+        "D-01",
+        "D-03a 单SKU箱配Mixed箱唛",
+        "D-03b 箱唛SKU/数量未识别",
+        "D-04 重复箱唛",
+        "R2 合成",
+    }
     assert {code for code, tag in status.items() if tag == "NOT REPRODUCED"} == fixed, out
     assert status["R2 真实第13批CL2"] == "SKIPPED"
-    assert sum(tag == "REPRODUCED" for tag in status.values()) == 7, out
+    assert sum(tag == "REPRODUCED" for tag in status.values()) == 3, out

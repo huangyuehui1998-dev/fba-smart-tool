@@ -150,6 +150,13 @@ def cross_validate_pair(
     ]
 
     pdf_with_id = [p for p in pdf_pages if normalize_fba_box_id(p.fba_box_id)]
+    seen_fba: Dict[str, int] = {}
+    for page in pdf_with_id:
+        key = normalize_fba_box_id(page.fba_box_id)
+        seen_fba[key] = seen_fba.get(key, 0) + 1
+    for key, count in seen_fba.items():
+        if count > 1:
+            errors.append(f"❌ 【重复箱唛】箱号 {key} 在 PDF 中出现了 {count} 次。")
     if len(pdf_with_id) != len(csv_box_nos):
         errors.append(
             f"❌ 【箱数不一致】[{warehouse}] 货件 {shipment_id}：CSV 共 {len(csv_box_nos)} 箱，"
@@ -189,6 +196,15 @@ def cross_validate_pair(
             pdf_qty = int(pdf_page.qty or 0)
 
             if pdf_page.is_mixed:
+                errors.append(
+                    f"❌ 【箱唛类型不符】箱号 {label} CSV 是单 SKU {csv_sku}，PDF 却标注 Mixed SKUs。"
+                )
+                continue
+
+            if not pdf_sku or pdf_qty <= 0:
+                errors.append(
+                    f"❌ 【箱唛未识别】箱号 {label} 的 PDF 没有识别出 SKU 或数量。"
+                )
                 continue
 
             if pdf_sku and pdf_qty > 0:
