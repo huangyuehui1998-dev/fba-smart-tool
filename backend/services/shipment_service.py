@@ -3,7 +3,10 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from typing import Any, Dict, Iterator, List, Tuple
+
+logger = logging.getLogger("fba_tool.shipment")
 
 from fastapi import HTTPException
 
@@ -245,6 +248,20 @@ def build_validate_response(
     return response
 
 
+def write_validation_snapshot(ctx: Dict[str, Any]) -> str | None:
+    """两个校验接口共用。失败时记日志并返回 snapshot_warning，不再吞掉异常。"""
+    if ctx.get("hard_fail"):
+        return None
+    try:
+        from fba_tool.carton_store import snapshot_from_validation
+
+        snapshot_from_validation(ctx)
+    except Exception:
+        logger.exception("申报快照写入失败")
+        return "申报快照没有写入"
+    return None
+
+
 def iter_shipment_validation_events(
     csv_payload: List[Tuple[str, bytes]],
     pdf_payload: List[Tuple[str, bytes]],
@@ -262,5 +279,8 @@ def iter_shipment_validation_events(
     yield from yield_progress_events(progress)
 
     response = build_validate_response(ctx, ratio, progress=progress)
+    warning = write_validation_snapshot(ctx)
+    if warning:
+        response["snapshot_warning"] = warning
     yield from yield_progress_events(progress)
     yield ndjson_result(response)

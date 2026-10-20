@@ -585,6 +585,7 @@ def snapshot_from_validation(ctx: Dict[str, Any]) -> None:
         return
     parsed = ctx.get("parsed")
     csv_map = getattr(parsed, "csv_map", None) or {}
+    batch = _batch_label(ctx)
     for ship in csv_map.values():
         boxes = []
         specs = getattr(ship, "box_specs", None)
@@ -593,17 +594,68 @@ def snapshot_from_validation(ctx: Dict[str, Any]) -> None:
             for _, spec in specs.iterrows():
                 box_no = spec.get("箱号")
                 box_id = str(spec.get("FBA箱号") or ids.get(box_no) or ids.get(int(box_no or 0)) or "")
+                declared = _declared_to_amazon(spec)
+                dims = _stored_dims(spec, declared)
                 boxes.append({
                     "fba_box_id": box_id,
                     "box_no": box_no,
-                    "length_cm": spec.get("长(cm)"),
-                    "width_cm": spec.get("宽(cm)"),
-                    "height_cm": spec.get("高(cm)"),
-                    "gross_kg": spec.get("实重(kg)"),
-                    "declared_to_amazon": {},
+                    "length_cm": dims["length_cm"],
+                    "width_cm": dims["width_cm"],
+                    "height_cm": dims["height_cm"],
+                    "gross_kg": dims["gross_kg"],
+                    "declared_to_amazon": declared,
                 })
         if boxes and getattr(ship, "shipment_id", ""):
-            record_box_snapshot(ship.shipment_id, "step4_validated", boxes)
+            record_box_snapshot(ship.shipment_id, "step4_validated", boxes, batch=batch)
+
+
+def _batch_label(ctx: Dict[str, Any]) -> str:
+    import re
+
+    parsed = ctx.get("parsed")
+    names = list(getattr(parsed, "csv_names", {}).values()) if parsed is not None else []
+    match = re.search(r"第\s*(\d+)\s*批", " ".join(str(name) for name in names))
+    if match:
+        return match.group(1)
+    return str(ctx.get("batch") or "")
+
+
+def _declared_to_amazon(spec: Any) -> Dict[str, Any]:
+    declared: Dict[str, Any] = {}
+    raw_in = spec.get("declared_in")
+    if isinstance(raw_in, list) and len(raw_in) == 3:
+        declared["in"] = [raw_in[0], raw_in[1], raw_in[2]]
+    raw_lb = spec.get("declared_lb")
+    if raw_lb not in (None, ""):
+        declared["lb"] = raw_lb
+    return declared
+
+
+def _stored_dims(spec: Any, declared: Dict[str, Any]) -> Dict[str, Any]:
+    from fba_tool.carton_math import inches_to_cm_exact, lb_to_kg_exact
+
+    length = spec.get("长(cm)")
+    width = spec.get("宽(cm)")
+    height = spec.get("高(cm)")
+    gross = spec.get("实重(kg)")
+    raw_in = declared.get("in")
+    if isinstance(raw_in, list) and len(raw_in) == 3:
+        length = float(inches_to_cm_exact(raw_in[0]))
+        width = float(inches_to_cm_exact(raw_in[1]))
+        height = float(inches_to_cm_exact(raw_in[2]))
+    if declared.get("lb") not in (None, ""):
+        gross = float(lb_to_kg_exact(declared["lb"]))
+    return {"length_cm": length, "width_cm": width, "height_cm": height, "gross_kg": gross}
+
+
+def display_declared(declared: Dict[str, Any]) -> Dict[str, Any]:
+    """显示用舍入。库里的厘米和千克保持全精度。"""
+    from fba_tool.carton_math import inches_to_cm_exact, lb_to_kg_exact, q
+
+    raw_in = declared.get("in") or []
+    cm = [float(q(inches_to_cm_exact(value), 2)) for value in raw_in]
+    kg = float(q(lb_to_kg_exact(declared.get("lb") or 0), 3)) if declared.get("lb") not in (None, "") else None
+    return {"cm": cm, "kg": kg}
 
 
 def snapshot_from_editor(fba_id: str, editor_rows: List[Dict[str, Any]], sku_rows: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -782,6 +834,17 @@ def compare_carton(fba_id: str = "", batch: str = "", source: str = "", threshol
             "SELECT * FROM forwarder_bill WHERE (?='' OR fba_id=?)",
             (fba_id, fba_id),
         )
+    if not declared_rows:
+        return {
+            "mode": "ticket_only",
+            "message": "尚无申报快照，请先完成第 4 步校验",
+            "columns": COMPARE_COLUMNS,
+            "rows": [],
+            "quality": [],
+            "summary": {},
+            "dim_divisor": float(divisor),
+            "dim_source_label": source_label(measured_by),
+        }
     if not measured_rows:
         declared_sum = sum((q(row.get("gross_kg") or 0, 3) for row in declared_rows), Decimal("0"))
         bill_sum = sum((q(row.get("bill_chargeable_kg") or 0, 2) for row in bills), Decimal("0"))

@@ -415,11 +415,19 @@ def _extract_box_specs(
         if normalized["实重(kg)"] <= 0:
             continue
 
+        declared_in = None
+        declared_lb = None
+        if str(length_unit).lower() in {"in", "inch", "inches", "英寸"}:
+            declared_in = [l_raw, w_raw, h_raw]
+        if str(weight_unit).lower() in {"lb", "lbs", "pound", "pounds", "磅"}:
+            declared_lb = wt_raw
         records.append({
             "仓库代码": warehouse,
             "箱号": true_box,
             **normalized,
             "FBA箱号": fba_ids.get(col_idx, ""),
+            "declared_in": declared_in,
+            "declared_lb": declared_lb,
         })
     return records
 
