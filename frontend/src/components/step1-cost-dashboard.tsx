@@ -158,6 +158,12 @@ export function Step1CostDashboard({
             />
           </div>
 
+          {placement && (
+            <p className="text-[11px] text-muted-foreground">
+              {placement.fee_disclaimer || "估算区间，以 STA 报价为准（费率来源：第三方转录）"}
+            </p>
+          )}
+
           {placement && placement.total_units > 0 && (
             <p className="text-[11px] text-muted-foreground">
               共 {placement.total_units} 件 · 可计费 {placement.eligible_units} 件

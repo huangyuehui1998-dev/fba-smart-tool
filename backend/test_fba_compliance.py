@@ -7,7 +7,6 @@ from fba_tool.fba_compliance import (
     check_box_count_limit,
     evaluate_fba_boxing_compliance,
 )
-from fba_tool.user_config import amazon_max_boxes
 import pandas as pd
 
 
@@ -27,7 +26,7 @@ def _sku_row(sku: str, qty: int, per_box: int, l: float, w: float, h: float, uni
 
 
 def test_carton_side_warning():
-    df = pd.DataFrame([_sku_row("BIG", 10, 10, 70, 40, 30, 1.0)])
+    df = pd.DataFrame([_sku_row("BIG", 10, 10, 100, 40, 30, 1.0)])
     sku_rows = dataframe_to_sku_rows(df)
     comp = evaluate_fba_boxing_compliance(pd.DataFrame(), sku_rows, pd.DataFrame())
     assert comp["side_warning_count"] == 1
@@ -83,23 +82,24 @@ def test_box_count_within_limit_is_silent():
     assert check_box_count_limit(pd.DataFrame()) is None
 
 
-def test_box_count_over_limit_warns_without_blocking():
-    editor = _editor_with_boxes(140)
+def test_box_count_over_partnered_limit_warns_without_blocking():
+    editor = _editor_with_boxes(201)
     warning = check_box_count_limit(editor)
     assert warning is not None
-    assert warning["box_count"] == 140
-    assert warning["limit"] == amazon_max_boxes()
+    assert warning["box_count"] == 201
+    assert warning["limit"] == 200
+    assert warning["level"] == "info"
+    assert "需拆分" not in warning["message"]
 
     comp = evaluate_fba_boxing_compliance(editor, [], pd.DataFrame())
     assert comp["box_count_warning"] == warning
     assert warning["message"] in comp["summary_lines"]
-    # 箱数超限只提示拆分货件，不阻断流程（只有毛重红线才 blocked）
     assert comp["blocked"] is False
 
 
 def test_box_matrix_does_not_drop_boxes_over_amazon_limit():
     """曾用 min(actual, 130) 静默截断，导致第 131 箱起的箱内明细从内部表/STA 消失。"""
-    over_limit = amazon_max_boxes() + 10
+    over_limit = 210
     matrix = build_box_matrix(_editor_with_boxes(over_limit))
     box_cols = [c for c in matrix.columns if c != "SKU简称"]
     assert len(box_cols) == over_limit
@@ -111,6 +111,6 @@ if __name__ == "__main__":
     test_single_oversize_exempt_from_gross_block()
     test_limits_constants()
     test_box_count_within_limit_is_silent()
-    test_box_count_over_limit_warns_without_blocking()
+    test_box_count_over_partnered_limit_warns_without_blocking()
     test_box_matrix_does_not_drop_boxes_over_amazon_limit()
     print("ALL OK")

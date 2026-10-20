@@ -19,7 +19,7 @@ from fba_tool.data_processing import (
 from fba_tool.input_template import generate_input_template_bytes, ensure_template_on_disk
 from fba_tool.deepseek_parser import parse_with_deepseek
 from fba_tool.settings_ui import render_user_config_panel
-from fba_tool.user_config import amazon_max_boxes, throw_ratio, weight_limit_kg
+from fba_tool.user_config import throw_ratio, weight_limit_kg
 from fba_tool.excel_export import build_factory_horizontal
 from fba_tool.fba_parser import build_factory_df, build_forwarder_df
 from fba_tool.invoice_automation import (
@@ -83,7 +83,7 @@ def _clear_step4_validation():
 
 st.set_page_config(page_title="FBA智能装箱工具", layout="wide", page_icon="📦")
 
-MAX_BOX_COLS = amazon_max_boxes()
+MAX_BOX_COLS = 5000
 
 
 def _session_has_data() -> bool:

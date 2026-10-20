@@ -140,6 +140,13 @@ def parse_listing_rows(data: bytes, file_name: str) -> Tuple[List[Dict[str, Any]
             v = _pick(row, _listing_aliases(f))
             if v not in (None, ""):
                 values[f] = str(v).strip()
+        from fba_tool.policy import map_category_name
+
+        mapped_category = map_category_name(
+            _pick(row, ["品类", "分类", "category", "category_name", "Category"])
+        )
+        if mapped_category:
+            values["category"] = mapped_category
         records.append({"row": row_no, "sku": sku, "values": values})
     return records, errors
 

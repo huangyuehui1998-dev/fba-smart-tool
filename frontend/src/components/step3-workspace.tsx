@@ -16,6 +16,15 @@ import { useStep3Export } from "@/hooks/use-step3-export";
 import { TableScrollArea } from "@/components/table-scroll-area";
 import { useWorkflow } from "@/context/workflow-context";
 import { StaleDataBanner } from "@/components/stale-data-banner";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { TRANSPORT_MODES, type TransportMode } from "@/lib/transport-mode";
 
 function MatrixTable({ matrix }: { matrix: Record<string, unknown>[] }) {
   const boxCols = matrixBoxColumns(matrix);
@@ -85,7 +94,7 @@ function MatrixTable({ matrix }: { matrix: Record<string, unknown>[] }) {
 }
 
 export function Step3Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext?: () => void }) {
-  const { staleness } = useWorkflow();
+  const { staleness, transportMode, setTransportMode } = useWorkflow();
   const {
     boxLocked,
     loading,
@@ -136,6 +145,28 @@ export function Step3Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
+
+      <div className="flex max-w-sm flex-col gap-1.5">
+        <Label htmlFor="transport-mode">运输方式</Label>
+        <Select
+          value={transportMode}
+          onValueChange={(value) => setTransportMode(value as TransportMode)}
+        >
+          <SelectTrigger id="transport-mode" className="bg-card">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {TRANSPORT_MODES.map((mode) => (
+              <SelectItem key={mode.value} value={mode.value}>
+                {mode.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-[11px] text-muted-foreground">
+          默认 SPD-合作承运人。箱数上限按所选方式检查，并随任务快照保存。
+        </p>
+      </div>
 
       {boxLocked && !staleness.export && (
         <Alert className="border-emerald-200 bg-emerald-50">

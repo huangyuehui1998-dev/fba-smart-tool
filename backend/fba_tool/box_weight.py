@@ -45,6 +45,8 @@ def _sku_name(item: Any) -> str:
         return item.strip()
     if isinstance(item, dict):
         return str(item.get("sku") or item.get("SKU简称") or "").strip()
+    if isinstance(item, (tuple, list)) and item:
+        return str(item[0] or "").strip()
     return str(getattr(item, "sku", "") or "").strip()
 
 
@@ -67,6 +69,18 @@ def carrier_sku(items: Iterable[Any], sku_map: Dict[str, Any]) -> Any:
         if vol > best_vol:
             best, best_vol = sku, vol
     return best
+
+
+def outer_dims_cm(items: Iterable[Any], sku_map: Dict[str, Any]) -> tuple[float, float, float]:
+    """外箱尺寸取承载 SKU 的外箱，不再把各 SKU 的长宽高分别取最大。"""
+    sku = carrier_sku(items, sku_map)
+    if sku is None:
+        return 0.0, 0.0, 0.0
+    return (
+        float(getattr(sku, "length_cm", 0) or 0),
+        float(getattr(sku, "width_cm", 0) or 0),
+        float(getattr(sku, "height_cm", 0) or 0),
+    )
 
 
 def carrier_tare(items: Iterable[Any], sku_map: Dict[str, Any]) -> float:
