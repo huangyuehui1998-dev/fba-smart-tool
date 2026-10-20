@@ -141,8 +141,26 @@ def api_compute_preview(body: ComputePreviewRequest):
                     "message": f"混装箱 {int(row['箱号'])} 毛重 {row.get('毛重(kg)')} kg 超过上限 {limit:g} kg",
                 }
             )
+    from fba_tool.master_db import get_product_by_sku
+
+    gaps = []
+    for row in body.rows:
+        sku = str(row.get("SKU简称") or row.get("sku") or "").strip()
+        if not sku:
+            continue
+        product = get_product_by_sku(sku) or {}
+        missing = []
+        if not str(product.get("asin") or "").strip():
+            missing.append("asin")
+        if not any(str(product.get(key) or "").strip() for key in ("chinese_name", "english_name", "local_name")):
+            missing.append("name")
+        if not all(product.get(key) not in (None, "", 0) for key in ("unit_length", "unit_width", "unit_height")):
+            missing.append("unit_dims")
+        if missing:
+            gaps.append({"sku": sku, "missing": missing})
     return {
         "rows": df_to_records(computed),
+        "master_gaps": gaps,
         "merged_rows": merged_rows,
         "data_sources": data_sources,
         "total_cbm": totals["total_cbm"],

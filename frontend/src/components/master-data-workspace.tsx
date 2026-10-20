@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearch } from "@tanstack/react-router";
 import { Database, FileSpreadsheet, Loader2, RefreshCw, Upload, ArrowLeft, CloudDownload } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
@@ -130,6 +131,7 @@ function ReportDropzone({
 type UploadKind = "fee_preview" | "inventory" | "product_info";
 
 export function MasterDataWorkspace() {
+  const search = useSearch({ from: "/master-data" });
   const [items, setItems] = useState<MasterProduct[]>([]);
   const [skuConflicts, setSkuConflicts] = useState<string[][]>([]);
   const [onlyMissingCustoms, setOnlyMissingCustoms] = useState(false);
@@ -152,6 +154,11 @@ export function MasterDataWorkspace() {
   const [lxConfirming, setLxConfirming] = useState(false);
 
   usePreventBrowserFileDrop();
+
+  useEffect(() => {
+    if (search.import !== "product-info") return;
+    document.getElementById("product-info-import")?.scrollIntoView({ block: "center" });
+  }, [search.import]);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -365,7 +372,7 @@ export function MasterDataWorkspace() {
       <Card className="shrink-0">
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-3">
           <div>
-            <CardTitle className="text-sm">领星 ERP 一键同步</CardTitle>
+            <CardTitle id="lingxing-sync" className="text-sm">领星 ERP 一键同步</CardTitle>
             <p className="mt-1 text-xs text-muted-foreground">
               从领星拉取 Listing / FBA 库存 / 补货建议 / 近 30 天表现。Listing 先预览再写入主表；箱规与报关字段不会被覆盖。
               {lxLastSynced
@@ -448,7 +455,7 @@ export function MasterDataWorkspace() {
             />
           </CardContent>
         </Card>
-        <Card>
+        <Card id="product-info-import">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm">产品信息总表（报关字段）</CardTitle>
           </CardHeader>

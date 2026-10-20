@@ -97,3 +97,23 @@ def pyinstaller_datas(root: Path = None) -> List[Tuple[str, str]]:
     if missing:
         raise FileNotFoundError("白名单文件缺失：%s" % "; ".join(missing))
     return [(str(src), str(Path(dest).parent).replace("\\", "/")) for src, dest in entries(root)]
+
+
+FORBIDDEN_REAL_NAMES = ("lingxing_listing_prices.xlsx",)
+# 真实领星在售导出不得进仓库。合成用例只用内存里的 xlsx，不落这个文件名。
+FORBIDDEN_REAL_GLOBS = ("*listing*.xlsx",)
+
+
+def forbidden_real_hits(root: Path = None) -> List[str]:
+    base = _root(root)
+    skip = {"node_modules", ".git", "dist", ".venv", "__pycache__"}
+    hits: List[str] = []
+    for path in base.rglob("*"):
+        if any(part in skip for part in path.parts):
+            continue
+        if not path.is_file():
+            continue
+        name = path.name.lower()
+        if name in FORBIDDEN_REAL_NAMES or ("listing" in name and name.endswith(".xlsx")):
+            hits.append(str(path.relative_to(base)))
+    return hits

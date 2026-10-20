@@ -30,7 +30,7 @@ PET_TEMPLATES = (
 
 DEFAULT_RULE_PROFILE = {
     "name": "default",
-    "net_weight_mode": "minus_per_box",
+    "net_weight_mode": "tare_from_carton",
     "net_minus_per_box": 0.2,
     "net_ratio": None,
     "total_price_rule": "rounded_unit_price_x_qty",
@@ -169,6 +169,33 @@ def ensure_v3(conn) -> None:
     cols = {r[1] for r in conn.execute("PRAGMA table_info(customs_rule_profile)").fetchall()}
     if "forwarder_gross_tolerance_kg" not in cols:
         conn.execute("ALTER TABLE customs_rule_profile ADD COLUMN forwarder_gross_tolerance_kg REAL DEFAULT 0.5")
+    for name, ddl in (
+        ("declared_value_basis", "TEXT DEFAULT 'retail'"),
+        ("trade_term", "TEXT DEFAULT 'C&F'"),
+        ("tax_fx_basis", "TEXT DEFAULT 'month_first'"),
+        ("min_declared_ratio_of_retail", "REAL DEFAULT 0.30"),
+        ("tax_fx_locked_until", "TEXT"),
+    ):
+        if name not in cols:
+            conn.execute(f"ALTER TABLE customs_rule_profile ADD COLUMN {name} {ddl}")
+    ticket_cols = {r[1] for r in conn.execute("PRAGMA table_info(shipment_ticket)").fetchall()}
+    if "sta_placement_fee" not in ticket_cols:
+        conn.execute("ALTER TABLE shipment_ticket ADD COLUMN sta_placement_fee REAL")
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS fx_rate (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            currency_pair TEXT NOT NULL,
+            rate REAL NOT NULL,
+            rate_type TEXT NOT NULL,
+            applicable_month TEXT NOT NULL,
+            publish_date TEXT,
+            source_url TEXT,
+            source_note TEXT,
+            entered_by TEXT,
+            entered_at TEXT NOT NULL,
+            UNIQUE(currency_pair, rate_type, applicable_month)
+        )"""
+    )
     p = DEFAULT_RULE_PROFILE
     conn.execute(
         """INSERT OR IGNORE INTO customs_rule_profile

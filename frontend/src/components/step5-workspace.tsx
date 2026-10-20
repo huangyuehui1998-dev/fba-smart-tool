@@ -17,6 +17,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCustoms } from "@/hooks/use-customs";
 import { useWorkflow } from "@/context/workflow-context";
 import { StaleDataBanner } from "@/components/stale-data-banner";
+import { Step5DeclaredValue } from "@/components/step5-declared-value";
 import { cn } from "@/lib/utils";
 
 function FieldRow({
@@ -95,6 +96,7 @@ export function Step5Workspace({ onPrev }: { onPrev?: () => void }) {
   return (
     <div className="flex h-full flex-col gap-4 p-6 pb-24">
       <StaleDataBanner step={5} staleness={staleness} />
+      <Step5DeclaredValue data={data} onPatch={patchData} />
       <div className="flex flex-wrap items-end gap-4">
         <div className="space-y-1.5">
           <Label>出口商</Label>

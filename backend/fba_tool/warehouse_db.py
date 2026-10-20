@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import io
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from typing import Optional, Any, Dict, List, Tuple
 
 WAREHOUSE_FIELDS = ("name", "company", "address1", "address2", "address3", "city", "state", "zip", "country", "region", "phone")
@@ -224,7 +224,10 @@ def apply_warehouse_import(data: bytes, file_name: str = "") -> Dict[str, Any]:
 
 
 # ---------------- customs_rule_profile ----------------
-_PROFILE_TEXT = ("net_weight_mode", "total_price_rule", "loading_port", "entrust_valid_until_rule", "exemption_nature", "transport_mode")
+_PROFILE_TEXT = (
+    "net_weight_mode", "total_price_rule", "loading_port", "entrust_valid_until_rule",
+    "exemption_nature", "transport_mode", "declared_value_basis", "trade_term", "tax_fx_basis",
+)
 _PROFILE_NUM = ("net_minus_per_box", "net_ratio", "forwarder_gross_tolerance_kg")
 _PROFILE_BOOL = ("fill_freight", "fill_export_declare_date")
 
@@ -236,21 +239,48 @@ def get_default_rule_profile() -> Dict[str, Any]:
         return dict(zip([d[0] for d in cur.description], row)) if row else {}
 
 
-NET_WEIGHT_MODES = ("minus_per_box", "ratio")
+NET_WEIGHT_MODES = ("tare_from_carton", "minus_per_box", "ratio")
+DECLARED_VALUE_BASES = ("retail", "fob", "cost")
+
+
+TAX_FX_LOCK_MESSAGE = "出口退税折合率确定后 12 个月内不得变更"
+
+
+def _plus_twelve_months(day: date) -> date:
+    try:
+        return day.replace(year=day.year + 1)
+    except ValueError:
+        return day.replace(year=day.year + 1, day=28)
 
 
 def update_rule_profile(values: Dict[str, Any]) -> Dict[str, Any]:
     prof = get_default_rule_profile()
     if not prof:
         raise ValueError("没有默认报关规则")
-    mode = str((values or {}).get("net_weight_mode") or prof.get("net_weight_mode") or "minus_per_box").strip()
+    incoming = dict(values or {})
+    confirm = bool(incoming.pop("confirm", False))
+    mode = str(incoming.get("net_weight_mode") or prof.get("net_weight_mode") or "tare_from_carton").strip()
     if mode not in NET_WEIGHT_MODES:
         raise ValueError(f"净重算法只能是 {' / '.join(NET_WEIGHT_MODES)}：{mode}")
-    ratio = (values or {}).get("net_ratio", prof.get("net_ratio"))
+    basis = str(incoming.get("declared_value_basis") or prof.get("declared_value_basis") or "retail").strip()
+    if "declared_value_basis" in incoming and basis not in DECLARED_VALUE_BASES:
+        raise ValueError(f"申报价口径只能是 {' / '.join(DECLARED_VALUE_BASES)}：{basis}")
+    ratio = incoming.get("net_ratio", prof.get("net_ratio"))
     if mode == "ratio" and ratio in (None, ""):
         raise ValueError("净重算法为 ratio 时必须填写 net_ratio")
+    if "tax_fx_basis" in incoming:
+        new_basis = str(incoming.get("tax_fx_basis") or "").strip()
+        old_basis = str(prof.get("tax_fx_basis") or "month_first").strip()
+        locked_until = str(prof.get("tax_fx_locked_until") or "").strip()[:10]
+        if new_basis and new_basis != old_basis and locked_until and not confirm:
+            try:
+                until = date.fromisoformat(locked_until)
+            except ValueError:
+                until = None
+            if until and date.today() < until:
+                raise ValueError(TAX_FX_LOCK_MESSAGE)
     sets: Dict[str, Any] = {}
-    for k, v in (values or {}).items():
+    for k, v in incoming.items():
         if k in _PROFILE_TEXT:
             text = str(v or "").strip()
             if not text:
@@ -271,6 +301,11 @@ def update_rule_profile(values: Dict[str, Any]) -> Dict[str, Any]:
             sets[k] = 1 if v in (True, 1, "1", "true", "True") else 0
         else:
             raise ValueError(f"不允许修改的字段：{k}")
+    if "tax_fx_basis" in incoming:
+        old_basis = str(prof.get("tax_fx_basis") or "month_first").strip()
+        new_basis = str(incoming.get("tax_fx_basis") or "").strip()
+        if new_basis and new_basis != old_basis:
+            sets["tax_fx_locked_until"] = _plus_twelve_months(date.today()).isoformat()
     if sets:
         sets["updated_at"] = _now()
         with _conn() as conn:

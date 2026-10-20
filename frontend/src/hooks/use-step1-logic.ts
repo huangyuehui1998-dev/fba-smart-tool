@@ -28,6 +28,7 @@ import {
   type Row,
 } from "@/lib/step1-rows";
 import { shouldPromptWeightConfirm, weightRowsHash } from "@/lib/weight-confirm";
+import type { MasterDataGap } from "@/lib/master-data-gap";
 import {
   stageInvalidatedByInputField,
   shouldUnlockBoxingOnInputField,
@@ -59,6 +60,7 @@ export function useStep1Logic() {
   const [costDashboard, setCostDashboard] = useState<CostDashboard | null>(null);
   const [validationErrors, setValidationErrors] = useState<ValidationErrorItem[]>([]);
   const [weightWarnings, setWeightWarnings] = useState<GrossWeightWarning[]>([]);
+  const [masterGaps, setMasterGaps] = useState<MasterDataGap[]>([]);
   const [acknowledgedWeightHash, setAcknowledgedWeightHash] = useState<string | null>(null);
   const [parseAction, setParseAction] = useState<ParseAction>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -75,6 +77,7 @@ export function useStep1Logic() {
         setComputed(nextRows.map(() => emptyComputed()));
         setValidationErrors([]);
         setWeightWarnings([]);
+        setMasterGaps([]);
         setTotalCbm(0);
         setTotalVolWeight(0);
         setCargoDensity(0);
@@ -130,6 +133,7 @@ export function useStep1Logic() {
         setCargoDensity(previewRes.cargo_density ?? 0);
         setCostDashboard(previewRes.cost_dashboard ?? null);
         setWeightWarnings(previewRes.weight_warnings ?? []);
+        setMasterGaps(previewRes.master_gaps ?? []);
         setValidationErrors(validateRes.errors);
       } catch (err) {
         if (seq !== previewSeq.current) return;
@@ -190,6 +194,7 @@ export function useStep1Logic() {
     setComputed([emptyComputed()]);
     setValidationErrors([]);
     setWeightWarnings([]);
+    setMasterGaps([]);
     setTotalCbm(0);
     setTotalVolWeight(0);
     setCargoDensity(0);
@@ -337,6 +342,7 @@ export function useStep1Logic() {
     actualPlacementFee,
     validationErrors,
     weightWarnings,
+    masterGaps,
     weightConfirmOpen,
     weightHash,
     keepDeclaredWeights,

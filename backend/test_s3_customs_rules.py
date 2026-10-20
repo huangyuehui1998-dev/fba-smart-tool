@@ -29,13 +29,14 @@ def _ticket(boxes, lines, sid="FBA1", wh="SBD1"):
     return {"shipment_id": sid, "warehouse": wh, "boxes": boxes, "lines": lines}
 
 
-def test_net_weight_default_minus_per_box_from_profile():
-    assert get_default_rule_profile()["net_weight_mode"] == "minus_per_box"
+def test_net_weight_default_tare_from_carton():
+    """缺皮重时按 0.2kg/箱，和旧 minus_per_box 数字相同。有皮重时改为毛重 − 皮重（CL2 250.8 → 254.4 是预期）。"""
+    assert get_default_rule_profile()["net_weight_mode"] == "tare_from_carton"
     assert compute_net_weight(Decimal("173.50"), 21) == 169.30
 
 
 def test_net_weight_follows_profile_change():
-    update_rule_profile({"net_minus_per_box": 0.5})
+    update_rule_profile({"net_weight_mode": "minus_per_box", "net_minus_per_box": 0.5})
     assert compute_net_weight(100, 10) == 95.0
     update_rule_profile({"net_weight_mode": "ratio", "net_ratio": 0.95})
     assert compute_net_weight(173.5, 21) == 164.83  # 164.825 HALF_UP

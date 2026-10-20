@@ -597,6 +597,36 @@ def patch_product_field(sku: str, field: str, value: Any) -> Dict[str, Any]:
             or field_key in ("listing_price", "carton_gross_weight")) and str(value if value is not None else "").strip() != "":
         if _opt_float(value) is None:
             raise ValueError(f"{field_key} 必须是数字，收到「{value}」，未保存")
+    invoice_extra = {
+        "invoice_unit": "unit",
+        "pcs_per_set": "pcs_per_set",
+        "purchase_price": "purchase_price",
+        "material_en": "material_en",
+        "purpose_en": "purpose_en",
+        "dest_hs_code": "dest_hs_code",
+        "fob_unit_value": "fob_unit_value",
+    }
+    if field_key in invoice_extra:
+        existing = get_product_by_sku(key) or {"sku": key}
+        extra = _json_dict(existing.get("extra_data"))
+        inv = dict(extra.get("invoice") or {})
+        stored = invoice_extra[field_key]
+        if field_key in ("pcs_per_set", "purchase_price", "fob_unit_value"):
+            inv[stored] = _opt_float(value)
+        else:
+            inv[stored] = _opt_str(value)
+        if field_key == "purchase_price" and inv.get(stored) not in (None, ""):
+            inv["purchase_price_currency"] = "CNY"
+        if field_key == "fob_unit_value" and inv.get(stored) not in (None, ""):
+            inv.setdefault("fob_currency", "USD")
+        extra["invoice"] = inv
+        existing["extra_data"] = json.dumps(extra, ensure_ascii=False)
+        existing["sku"] = key
+        upsert_product(existing)
+        rec = get_product_by_sku(key)
+        if not rec:
+            raise ValueError(f"更新失败：{key}")
+        return rec
     if field_key in OWN_FIELDS:
         set_product_fields(key, {field_key: value}, SOURCE_MANUAL)
         rec = get_product_by_sku(key)
@@ -833,6 +863,14 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         "category": _col_str(row, "category") if "category" in keys else "",
         "carton_gross_weight": _col_float(row, "carton_gross_weight") if "carton_gross_weight" in keys else None,
         "field_sources": _json_dict(row["field_source_json"]) if "field_source_json" in keys else {},
+        "invoice_unit": "",
+        "pcs_per_set": None,
+        "purchase_price": None,
+        "purchase_price_currency": "",
+        "material_en": "",
+        "purpose_en": "",
+        "dest_hs_code": "",
+        "fob_unit_value": None,
         # S8-fix1 N1：D-12 正常价相关列（以前漏读，导致促销按正常价申报在真实链路上不生效）
         "regular_price": _col_float(row, "regular_price") if "regular_price" in keys else None,
         "regular_price_at": _col_str(row, "regular_price_at") if "regular_price_at" in keys else "",
@@ -843,6 +881,16 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     for k in keys:
         if k not in out and k not in _ROW_SKIP:
             out[k] = row[k]
+    inv = _json_dict(out.get("extra_data")).get("invoice") or {}
+    if isinstance(inv, dict):
+        out["invoice_unit"] = inv.get("unit") or ""
+        out["pcs_per_set"] = inv.get("pcs_per_set")
+        out["purchase_price"] = inv.get("purchase_price")
+        out["purchase_price_currency"] = inv.get("purchase_price_currency") or ""
+        out["material_en"] = inv.get("material_en") or ""
+        out["purpose_en"] = inv.get("purpose_en") or ""
+        out["dest_hs_code"] = inv.get("dest_hs_code") or ""
+        out["fob_unit_value"] = inv.get("fob_unit_value")
     return out
 
 
