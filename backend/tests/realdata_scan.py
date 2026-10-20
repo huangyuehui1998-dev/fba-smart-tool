@@ -36,17 +36,54 @@ def repo_root() -> Path:
     return Path(__file__).resolve().parents[2]
 
 
+# 干净导出没有 .git。遍历时跳过依赖目录，避免把安装产物当成仓库文本。
+WALK_SKIP_DIRS = {"node_modules", "dist", ".venv", "__pycache__", ".git"}
+
+
+def _keep_text_rel(rel: str) -> bool:
+    if rel in SKIP_RELS:
+        return False
+    parts = Path(rel).parts
+    if any(part in WALK_SKIP_DIRS for part in parts):
+        return False
+    return Path(rel).suffix.lower() in TEXT_EXTS
+
+
+def _git_available(root: Path) -> bool:
+    try:
+        subprocess.check_output(
+            ["git", "rev-parse", "--is-inside-work-tree"],
+            cwd=root,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError, OSError):
+        return False
+
+
+def walk_text_files(root: Path) -> list[str]:
+    """没有 .git 时的文件清单。扩展名与 git 模式相同。"""
+    files: list[str] = []
+    for path in root.rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.relative_to(root).as_posix()
+        if _keep_text_rel(rel):
+            files.append(rel)
+    return sorted(files)
+
+
 def git_text_files(root: Path | None = None) -> list[str]:
     root = root or repo_root()
+    if not _git_available(root):
+        return walk_text_files(root)
     out = subprocess.check_output(["git", "ls-files", "-z"], cwd=root)
     files: list[str] = []
     for raw in out.split(b"\0"):
         if not raw:
             continue
         rel = raw.decode("utf-8", "surrogateescape")
-        if rel in SKIP_RELS:
-            continue
-        if Path(rel).suffix.lower() in TEXT_EXTS:
+        if _keep_text_rel(rel):
             files.append(rel)
     return files
 

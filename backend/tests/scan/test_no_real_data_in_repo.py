@@ -13,7 +13,15 @@ import pytest
 import importlib.util
 import sys
 
-from tests.realdata_scan import format_baseline, git_text_files, load_baseline, repo_root, scan_files, scan_text
+from tests.realdata_scan import (
+    format_baseline,
+    git_text_files,
+    load_baseline,
+    repo_root,
+    scan_files,
+    scan_text,
+    walk_text_files,
+)
 
 ROOT = repo_root()
 BASELINE = ROOT / "backend" / "tests" / "fixtures" / "synthetic" / "realdata_text_baseline.txt"
@@ -69,6 +77,41 @@ def test_docs_policy_url_is_whitelisted_and_plain_text_is_not():
     text = f"出处 https://example.com/policy/{_REAL_SHIPMENT}\n"
     assert scan_text("docs/policy.md", text) == []
     assert scan_text("backend/foo.txt", text)
+
+
+def test_walk_matches_git_listing_in_worktree(tmp_path):
+    """同一棵已提交的树，git 模式和文件系统遍历必须得到同一份清单。"""
+    import subprocess
+
+    root = tmp_path / "repo"
+    (root / "backend").mkdir(parents=True)
+    (root / "node_modules").mkdir()
+    (root / "dist").mkdir()
+    (root / ".venv").mkdir()
+    (root / "pkg" / "__pycache__").mkdir(parents=True)
+    (root / "keep.py").write_text("x = 1\n", encoding="utf-8")
+    (root / "backend" / "note.txt").write_text("hello\n", encoding="utf-8")
+    (root / "node_modules" / "skip.py").write_text("nope\n", encoding="utf-8")
+    (root / "dist" / "bundle.js").write_text("nope\n", encoding="utf-8")
+    (root / ".venv" / "lib.py").write_text("nope\n", encoding="utf-8")
+    (root / "pkg" / "__pycache__" / "c.py").write_text("nope\n", encoding="utf-8")
+    (root / "binary.bin").write_bytes(b"\x00\x01")
+    subprocess.check_call(["git", "init"], cwd=root, stdout=subprocess.DEVNULL)
+    subprocess.check_call(["git", "add", "-A"], cwd=root)
+    subprocess.check_call(
+        ["git", "-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-m", "init"],
+        cwd=root,
+        stdout=subprocess.DEVNULL,
+    )
+    listed = set(git_text_files(root))
+    assert listed == set(walk_text_files(root))
+    assert listed == {"keep.py", "backend/note.txt"}
+
+    git_dir = root / ".git"
+    import shutil
+
+    shutil.rmtree(git_dir)
+    assert git_text_files(root) == ["backend/note.txt", "keep.py"]
 
 
 def test_synthetic_ids_do_not_match():

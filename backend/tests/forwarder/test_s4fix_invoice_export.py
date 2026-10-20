@@ -16,7 +16,8 @@ from fba_tool.invoice_rules import (
     to_number,
 )
 from fba_tool.shipment_parser import parse_csv_shipment
-from tests._realdata import skip_module_if_missing
+from tests._realdata import requires_realdata, skip_module_if_missing
+from tests.realdata_scan import repo_root
 from tests.golden.compare_golden import VERDICT_FAIL, VERDICT_KNOWN, failures, write_report
 from tests.golden.compare_invoice_export import compare_jiufang, compare_send
 
@@ -310,9 +311,10 @@ def test_bad_json_forwarder_config_gives_clear_error(monkeypatch, tmp_path):
         export_forwarders()
 
 
+@requires_realdata(repo_root() / "test1")
 def test_test1_five_tickets_export_smoke(tmp_path):
     """repo test1/ 的 5 票 CSV 用 SEND 和九方各导一遍：能出文件、箱数/数量与 CSV 一致；缺产品资料的按拦截列出。"""
-    root = HERE.parent / "test1"
+    root = repo_root() / "test1"
     files = sorted(root.glob("*.csv"))
     assert len(files) == 5
     done = []
