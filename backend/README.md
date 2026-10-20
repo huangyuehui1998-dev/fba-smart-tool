@@ -29,7 +29,7 @@ API 文档：`http://127.0.0.1:8002/docs`
 
 ```powershell
 cd frontend
-npm install
+npm ci
 $env:FBA_BACKEND_PORT="8002"
 npm run dev
 ```
