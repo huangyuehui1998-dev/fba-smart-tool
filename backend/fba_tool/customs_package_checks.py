@@ -18,6 +18,7 @@ from fba_tool.customs_package import (
     _rows_from_invoice_draft,
     _rule_profile,
     _sku_rows_from_pairs,
+    box_tares_for_count,
     compute_net_weight,
     default_dates,
     money_half_up,
@@ -263,7 +264,11 @@ def build_customs_data(
     else:
         total_gross = float(money_half_up(sum((to_dec(l.gross_kg) for l in lines), Decimal("0"))))
     if total_gross and total_boxes:
-        total_net = compute_net_weight(total_gross, int(total_boxes))
+        total_net = compute_net_weight(
+            total_gross,
+            int(total_boxes),
+            box_tares_for_count(int(total_boxes), step1_rows=step1_rows),
+        )
     else:
         total_net = float(money_half_up(sum((to_dec(l.net_kg) for l in lines), Decimal("0"))))
 
@@ -276,7 +281,11 @@ def build_customs_data(
                     total_gross += float(ship.box_specs[col].sum())
         total_gross = float(money_half_up(total_gross))
         if not total_net:
-            total_net = compute_net_weight(total_gross, int(total_boxes))
+            total_net = compute_net_weight(
+                total_gross,
+                int(total_boxes),
+                box_tares_for_count(int(total_boxes), step1_rows=step1_rows),
+            )
 
     merged_dates = default_dates()
     if dates:
@@ -435,7 +444,11 @@ def build_customs_from_tickets(
             else:
                 l_boxes, l_gross = 0, Decimal("0")
             # S3-fix2：每票先算自己的行净重，合并时按品名相加（混装票 + 单品名票同名时不漏单品名票那份）
-            l_net = compute_net_weight(float(l_gross), l_boxes) if l_gross and l_boxes else 0.0
+            l_net = (
+                compute_net_weight(float(l_gross), l_boxes, box_tares_for_count(l_boxes, sku=sku))
+                if l_gross and l_boxes
+                else 0.0
+            )
             raw_rows.append({
                 "chinese_name": chinese, "hs_code": hs, "qty": float(qty), "unit": unit,
                 "unit_price": unit_price, "amount": amount, "brand": brand, "model": "无型号",
@@ -471,7 +484,11 @@ def build_customs_from_tickets(
                          "message": "分摊后这些行毛重或净重为 0（总重太小、品名太多），表头合计仍正确，请人工核对装箱单：" + "、".join(zero)})
 
     gross_f = float(money_half_up(total_gross))
-    net_f = compute_net_weight(gross_f, total_boxes) if gross_f and total_boxes else 0.0
+    net_f = (
+        compute_net_weight(gross_f, total_boxes, box_tares_for_count(total_boxes))
+        if gross_f and total_boxes
+        else 0.0
+    )
     total_qty = float(money_half_up(sum((to_dec(l.qty) for l in lines_out), Decimal("0"))))
     total_amount = float(money_half_up(sum((to_dec(l.amount) for l in lines_out), Decimal("0"))))
     remarks = _remarks_from(order_no, [(str(t.get("warehouse") or ""), str(t.get("shipment_id") or "")) for t in tickets])
@@ -628,7 +645,7 @@ def _allocate_mixed(rows: List[Dict[str, Any]], boxes: int, gross: Decimal) -> N
     """S3-fix2 分摊规则（实现方案，规范未规定，见 D-07）：一票多品名混装、行上没给箱数时——
     箱数全部记在第一行（其余行 0，箱数合计 = 件数）；毛重、净重按件数比例用最大余数法分到 0.01，
     不会出现负数，各行合计 = 总毛重 / 总净重。分到 0 的行另出 zero_weight_line 提示（不拦截）。"""
-    net = to_dec(compute_net_weight(gross, boxes)) if gross and boxes else Decimal("0")
+    net = to_dec(compute_net_weight(gross, boxes, box_tares_for_count(boxes))) if gross and boxes else Decimal("0")
     w = [to_dec(r["qty"]) for r in rows]
     gs, ns = _allocate_cents(gross, w), _allocate_cents(net, w)
     for i, r in enumerate(rows):

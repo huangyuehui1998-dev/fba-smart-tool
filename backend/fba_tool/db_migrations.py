@@ -1,4 +1,4 @@
-"""主库迁移。只加不删。当前最新 user_version = 4。"""
+"""主库迁移。只加不删。当前最新 user_version = 5。"""
 from __future__ import annotations
 
 import json
@@ -9,7 +9,7 @@ from typing import Callable, List, Optional, Tuple
 from fba_tool.db_backup import backup_daily, backup_migration, integrity_ok, utc_now
 from fba_tool.sku_keys import sku_key
 
-LATEST_VERSION = 4
+LATEST_VERSION = 5
 Migration = Tuple[int, Callable[[sqlite3.Connection], None]]
 
 _MIGRATION_ERROR: dict[str, str] = {}
@@ -280,7 +280,51 @@ def migrate_v4_carton_lib(conn: sqlite3.Connection) -> None:
         fn(conn)
 
 
-MIGRATIONS: List[Migration] = [(4, migrate_v4_carton_lib)]
+def migrate_v5_net_weight_mode(conn: sqlite3.Connection) -> None:
+    """老库默认 minus_per_box、且没有用户改过口径时，改成 tare_from_carton。"""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS customs_rule_profile_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            profile_name TEXT,
+            field TEXT,
+            old_value TEXT,
+            new_value TEXT,
+            reason TEXT,
+            created_at TEXT
+        )"""
+    )
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "customs_rule_profile" not in tables:
+        return
+    conn.row_factory = sqlite3.Row
+    now = utc_now()
+    rows = conn.execute("SELECT name, net_weight_mode FROM customs_rule_profile").fetchall()
+    for row in rows:
+        if str(row["net_weight_mode"] or "") != "minus_per_box":
+            continue
+        manual = conn.execute(
+            """SELECT 1 FROM customs_rule_profile_history
+               WHERE profile_name=? AND field='net_weight_mode' AND reason='user'""",
+            (row["name"],),
+        ).fetchone()
+        if manual:
+            continue
+        conn.execute(
+            "UPDATE customs_rule_profile SET net_weight_mode='tare_from_carton', updated_at=? WHERE name=?",
+            (now, row["name"]),
+        )
+        conn.execute(
+            """INSERT INTO customs_rule_profile_history
+               (profile_name, field, old_value, new_value, reason, created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (row["name"], "net_weight_mode", "minus_per_box", "tare_from_carton", "r12-09-upgrade", now),
+        )
+
+
+MIGRATIONS: List[Migration] = [
+    (4, migrate_v4_carton_lib),
+    (5, migrate_v5_net_weight_mode),
+]
 
 
 def run_migrations(conn: sqlite3.Connection, db_path: str = "") -> int:

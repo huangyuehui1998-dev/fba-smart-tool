@@ -45,8 +45,8 @@ def test_net_weight_follows_profile_change():
 def test_net_weight_mode_validated():
     with pytest.raises(ValueError):
         update_rule_profile({"net_weight_mode": "abc"})
-    with pytest.raises(ValueError):
-        update_rule_profile({"net_weight_mode": "ratio", "net_ratio": None})
+    update_rule_profile({"net_weight_mode": "ratio", "net_ratio": None})
+    assert compute_net_weight(264, 32) == 250.8
 
 
 def test_user_settings_no_longer_affect_net(monkeypatch):

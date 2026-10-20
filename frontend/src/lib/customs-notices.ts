@@ -4,6 +4,8 @@ export const DECLARED_VALUE_CFR_NOTE =
 export const NET_WEIGHT_MODE_NOTICE =
   "默认净重口径已改为毛重 − 箱皮重（tare_from_carton）；原 ratio 口径仍可在设置中切换";
 
+export const NET_RATIO_NOTICE = "比例法无法规依据，非规范口径";
+
 export const DECLARED_VALUE_BASES = [
   { value: "retail", label: "零售价 retail" },
   { value: "fob", label: "FOB" },

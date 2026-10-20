@@ -267,7 +267,8 @@ def update_rule_profile(values: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"申报价口径只能是 {' / '.join(DECLARED_VALUE_BASES)}：{basis}")
     ratio = incoming.get("net_ratio", prof.get("net_ratio"))
     if mode == "ratio" and ratio in (None, ""):
-        raise ValueError("净重算法为 ratio 时必须填写 net_ratio")
+        incoming["net_ratio"] = 0.95
+        ratio = 0.95
     if "tax_fx_basis" in incoming:
         new_basis = str(incoming.get("tax_fx_basis") or "").strip()
         old_basis = str(prof.get("tax_fx_basis") or "month_first").strip()
@@ -313,5 +314,30 @@ def update_rule_profile(values: Dict[str, Any]) -> Dict[str, Any]:
                 f"UPDATE customs_rule_profile SET {', '.join(f'{k} = ?' for k in sets)} WHERE id = ?",
                 (*sets.values(), prof["id"]),
             )
+            if "net_weight_mode" in incoming and str(incoming.get("net_weight_mode") or "") != str(prof.get("net_weight_mode") or ""):
+                conn.execute(
+                    """CREATE TABLE IF NOT EXISTS customs_rule_profile_history (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        profile_name TEXT,
+                        field TEXT,
+                        old_value TEXT,
+                        new_value TEXT,
+                        reason TEXT,
+                        created_at TEXT
+                    )"""
+                )
+                conn.execute(
+                    """INSERT INTO customs_rule_profile_history
+                       (profile_name, field, old_value, new_value, reason, created_at)
+                       VALUES (?,?,?,?,?,?)""",
+                    (
+                        prof.get("name") or "default",
+                        "net_weight_mode",
+                        str(prof.get("net_weight_mode") or ""),
+                        str(incoming.get("net_weight_mode") or ""),
+                        "user",
+                        sets["updated_at"],
+                    ),
+                )
             conn.commit()
     return get_default_rule_profile()

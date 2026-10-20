@@ -178,17 +178,78 @@ def _apply_date_rules(dates: Dict[str, str]) -> None:
             dates["declare_date"] = etd
 
 
+_pending_tare_notes: List[str] = []
+
+
+def pop_tare_notes() -> List[str]:
+    notes = list(_pending_tare_notes)
+    _pending_tare_notes.clear()
+    return notes
+
+
 def _net_weight_params() -> Tuple[str, Decimal, Decimal]:
-    """S3：净重规则只认 customs_rule_profile（不再读用户设置里的 customs_net_weight_*）。"""
+    """S3：净重规则只认 customs_rule_profile。字段为空时用 tare_from_carton，不再回落 minus_per_box。"""
     rp = _rule_profile()
-    method = str(rp.get("net_weight_mode") or "minus_per_box").strip()
+    method = str(rp.get("net_weight_mode") or "tare_from_carton").strip()
     per_box = DEFAULT_NET_MINUS_PER_BOX if rp.get("net_minus_per_box") in (None, "") else to_dec(rp["net_minus_per_box"])
     ratio = to_dec(DEFAULT_NET_RATIO) if rp.get("net_ratio") in (None, "") else to_dec(rp["net_ratio"])
     return method, per_box, ratio
 
 
-def compute_net_weight(gross: Any, boxes: int, box_tares: Optional[List[Any]] = None) -> float:
-    """净重。默认 tare_from_carton：毛重 − 各箱皮重；皮重缺失时按 0.2kg/箱。"""
+def box_tares_for_count(
+    box_count: int,
+    *,
+    sku: str = "",
+    step1_rows: Optional[List[Dict[str, Any]]] = None,
+    explicit: Optional[List[Any]] = None,
+) -> List[Any]:
+    """按箱给出皮重。顺序：调用方显式值、箱规 tare_kg、Step1 空纸箱重。缺的格子留 None。"""
+    count = max(int(box_count or 0), 0)
+    if explicit is not None:
+        rows = list(explicit)
+        if len(rows) >= count:
+            return rows[:count]
+        return rows + [None] * (count - len(rows))
+    found = _tare_for_sku(sku, step1_rows)
+    if found is None:
+        return [None] * count
+    return [found] * count
+
+
+def _tare_for_sku(sku: str, step1_rows: Optional[List[Dict[str, Any]]]) -> Any:
+    wanted = str(sku or "").strip()
+    for row in step1_rows or []:
+        row_sku = str(row.get("SKU") or row.get("sku") or row.get("SKU简称") or "").strip()
+        if wanted and row_sku and row_sku != wanted:
+            continue
+        for key in ("空纸箱重(kg)", "空纸箱重", "tare_kg"):
+            if row.get(key) not in (None, ""):
+                return row.get(key)
+    if not wanted:
+        return None
+    try:
+        from fba_tool.carton_store import list_specs
+
+        specs = list_specs(wanted)
+    except Exception:  # noqa: BLE001
+        return None
+    chosen = None
+    for spec in specs:
+        if spec.get("tare_kg") in (None, ""):
+            continue
+        if spec.get("is_default"):
+            return spec.get("tare_kg")
+        chosen = chosen if chosen is not None else spec.get("tare_kg")
+    return chosen
+
+
+def compute_net_weight(
+    gross: Any,
+    boxes: int,
+    box_tares: Optional[List[Any]] = None,
+    warnings: Optional[List[Any]] = None,
+) -> float:
+    """净重。默认 tare_from_carton：毛重 − 各箱皮重。某一箱没有皮重时按 0.2kg 并记提示。"""
     method, per_box, ratio = _net_weight_params()
     if method == "ratio":
         return float(money_half_up(to_dec(gross) * ratio))
@@ -197,12 +258,18 @@ def compute_net_weight(gross: Any, boxes: int, box_tares: Optional[List[Any]] = 
     count = int(boxes or 0)
     if count <= 0:
         return 0.0
-    tares = list(box_tares or [])
-    if len(tares) != count:
-        return float(net_weight_minus_per_box(gross, count, Decimal("0.2")))
+    provided = list(box_tares) if box_tares is not None else []
     tare_sum = Decimal("0")
-    for tare in tares:
-        tare_sum += Decimal("0.2") if tare in (None, "") else to_dec(tare)
+    for index in range(count):
+        tare = provided[index] if index < len(provided) else None
+        if tare in (None, ""):
+            tare_sum += Decimal("0.2")
+            message = f"第 {index + 1} 箱缺皮重，按 0.2kg 计"
+            _pending_tare_notes.append(message)
+            if warnings is not None:
+                warnings.append({"code": "missing_tare", "message": message})
+        else:
+            tare_sum += to_dec(tare)
     net = to_dec(gross) - tare_sum
     if net < 0:
         net = Decimal("0")
@@ -371,7 +438,11 @@ def _sku_rows_from_pairs(
             if unit_net and qty:
                 net = float(money_half_up(to_dec(unit_net) * qty))
             elif gross:
-                net = compute_net_weight(gross, box_count)
+                net = compute_net_weight(
+                    gross,
+                    box_count,
+                    box_tares_for_count(box_count, sku=sku_str, step1_rows=step1_rows),
+                )
 
             rows.append(
                 {
@@ -469,7 +540,7 @@ def _rows_from_invoice_draft(invoice_draft: Dict[str, Any]) -> List[Dict[str, An
             except (TypeError, ValueError, ArithmeticError):
                 pass
         if not net and gross:
-            net = compute_net_weight(gross, box_count)
+            net = compute_net_weight(gross, box_count, box_tares_for_count(box_count, sku=sku))
 
         rows.append(
             {
@@ -564,7 +635,11 @@ def _merge_rows(raw_rows: List[Dict[str, Any]], source_place: str) -> List[Custo
         if g.get("net_fixed"):
             line_net = float(money_half_up(g["net_kg"]))  # 混装分摊过的净重，合计已对齐总净重
         elif g["gross_kg"] and g["box_count"]:
-            line_net = compute_net_weight(g["gross_kg"], int(g["box_count"]))
+            line_net = compute_net_weight(
+                g["gross_kg"],
+                int(g["box_count"]),
+                box_tares_for_count(int(g["box_count"]), sku=str(g.get("sku") or "")),
+            )
         else:
             line_net = float(money_half_up(g["net_kg"]))
         brand = g["brand"] or "无品牌"

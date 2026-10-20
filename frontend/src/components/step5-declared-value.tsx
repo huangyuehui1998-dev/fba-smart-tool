@@ -8,6 +8,7 @@ import { updateCustomsRuleProfile } from "@/lib/api/master-data";
 import {
   DECLARED_VALUE_BASES,
   DECLARED_VALUE_CFR_NOTE,
+  NET_RATIO_NOTICE,
   NET_WEIGHT_MODE_NOTICE,
   NET_WEIGHT_MODES,
 } from "@/lib/customs-notices";
@@ -81,6 +82,7 @@ export function Step5DeclaredValue({
             <AlertDescription>{NET_WEIGHT_MODE_NOTICE}</AlertDescription>
           </Alert>
         )}
+        {mode === "ratio" && <p className="text-xs text-muted-foreground">{NET_RATIO_NOTICE}</p>}
       </div>
       <FxField label="汇率 fx_rate" value={data?.fx_rate ?? ""} onChange={(v) => onPatch({ fx_rate: v === "" ? null : Number(v) })} />
       <FxField label="汇率类型" value={data?.fx_rate_type ?? ""} onChange={(v) => onPatch({ fx_rate_type: v })} />
