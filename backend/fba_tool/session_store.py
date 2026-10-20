@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -19,6 +20,7 @@ SESSIONS_DIR = sessions_dir()
 AUTOSAVE_PATH = SESSIONS_DIR / "autosave.json"
 HISTORY_INDEX_PATH = SESSIONS_DIR / "history_index.json"
 HISTORY_DIR = SESSIONS_DIR / "history"
+_TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$")
 ROUTING_SNAPSHOTS_DIR = HISTORY_DIR / "routing_snapshots"
 
 PERSIST_KEYS = {
@@ -355,11 +357,24 @@ def list_history_tasks() -> List[dict]:
     return sorted(tasks, key=lambda x: x.get("updated_at", ""), reverse=True)
 
 
+def safe_history_id(task_id: str) -> str:
+    """历史文件名只允许本目录里的一段名字，拒绝 ../ 和路径分隔符。"""
+    text = str(task_id or "").strip()
+    if not _TASK_ID_RE.fullmatch(text) or ".." in text:
+        raise ValueError("task_id 含有非法路径字符")
+    path = (HISTORY_DIR / f"{text}.json").resolve()
+    root = HISTORY_DIR.resolve()
+    if path.parent != root:
+        raise ValueError("task_id 含有非法路径字符")
+    return text
+
+
 def save_history_payload(payload: dict, name: str | None = None) -> str:
     """将工作流快照写入历史库（兼容 Streamlit / React 快照结构）。"""
     _ensure_dirs()
     data = dict(payload)
-    task_id = data.get("task_id") or str(uuid.uuid4())
+    raw_id = str(data.get("task_id") or "").strip()
+    task_id = safe_history_id(raw_id) if raw_id else str(uuid.uuid4())
     data["task_id"] = task_id
     if not data.get("task_name"):
         data["task_name"] = auto_task_name(data)
@@ -368,7 +383,7 @@ def save_history_payload(payload: dict, name: str | None = None) -> str:
     data["kind"] = "history"
     data["updated_at"] = _now_str()
     data.setdefault("saved_at", data["updated_at"])
-    path = HISTORY_DIR / f"{task_id}.json"
+    path = HISTORY_DIR / f"{safe_history_id(task_id)}.json"
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
     index = _load_history_index()
@@ -388,7 +403,10 @@ def save_history_payload(payload: dict, name: str | None = None) -> str:
 
 
 def load_history_payload(task_id: str) -> dict | None:
-    path = HISTORY_DIR / f"{task_id}.json"
+    try:
+        path = HISTORY_DIR / f"{safe_history_id(task_id)}.json"
+    except ValueError:
+        return None
     if not path.exists():
         return None
     try:
@@ -415,7 +433,10 @@ def save_history_task(session_state, name: str | None = None) -> str:
 
 
 def load_history_task(session_state, task_id: str) -> bool:
-    path = HISTORY_DIR / f"{task_id}.json"
+    try:
+        path = HISTORY_DIR / f"{safe_history_id(task_id)}.json"
+    except ValueError:
+        return False
     if not path.exists():
         return False
     try:
@@ -429,7 +450,10 @@ def load_history_task(session_state, task_id: str) -> bool:
 
 
 def rename_history_task(task_id: str, new_name: str) -> bool:
-    path = HISTORY_DIR / f"{task_id}.json"
+    try:
+        path = HISTORY_DIR / f"{safe_history_id(task_id)}.json"
+    except ValueError:
+        return False
     if not path.exists() or not new_name.strip():
         return False
     try:
@@ -448,7 +472,10 @@ def rename_history_task(task_id: str, new_name: str) -> bool:
 
 
 def delete_history_task(task_id: str) -> bool:
-    path = HISTORY_DIR / f"{task_id}.json"
+    try:
+        path = HISTORY_DIR / f"{safe_history_id(task_id)}.json"
+    except ValueError:
+        return False
     if path.exists():
         path.unlink()
     index = _load_history_index()
@@ -527,6 +554,10 @@ def list_routing_snapshots(task_id: str) -> List[dict]:
     return sorted(snapshots, key=lambda x: x.get("created_at", ""), reverse=True)
 
 def delete_routing_snapshot(snapshot_id: str) -> bool:
+    try:
+        safe_history_id(snapshot_id)
+    except ValueError:
+        return False
     path = ROUTING_SNAPSHOTS_DIR / f"{snapshot_id}.json"
     if path.exists():
         try:

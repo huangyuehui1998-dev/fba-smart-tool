@@ -157,6 +157,9 @@ def _mount_frontend_spa(app: FastAPI) -> None:
 
 
 def create_app() -> FastAPI:
+    from fba_tool.log_redact import install_redacting_logs
+
+    install_redacting_logs()
     ensure_app_data_layout()
     init_master_db()
     try:
