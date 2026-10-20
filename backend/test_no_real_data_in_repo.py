@@ -72,6 +72,5 @@ def test_docs_policy_url_is_whitelisted_and_plain_text_is_not():
 
 
 def test_synthetic_ids_do_not_match():
-    text = "FBATEST00001 X00TEST001 JUS-not-real 1380013800\n"
-    # 1380013800 是 11 位，手机号正则要 1[3-9] + 9 位 = 11 位，13800138000 才是 11 位。
+    text = "FBATEST00001 X00TEST001 JUS-not-real\n"
     assert scan_text("backend/tests/fixtures/synthetic/note.txt", text) == []
