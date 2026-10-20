@@ -54,6 +54,7 @@ class ValidationResult:
     pdf_bytes: Dict[str, bytes] = field(default_factory=dict)
     cross_check_ok: bool = False
     worker_packing_rows: List[Dict[str, Any]] = field(default_factory=list)
+    warehouse_warnings: List[Dict[str, Any]] = field(default_factory=list)
 
 
 ProgressFn = Callable[[str, int], None]
@@ -172,11 +173,10 @@ def validate_shipments(
     pairs: List[ShipmentPair] = []
     all_items: List[pd.DataFrame] = []
     all_specs: List[pd.DataFrame] = []
+    warehouse_warnings: List[Dict[str, Any]] = []
 
     order = list(parsed.pdf_order) if parsed.pdf_order else list(csv_map.keys())
     seen: set[str] = set()
-    
-    from fba_tool.shipment_parser import resolve_optimal_warehouse
 
     for sid in order:
         csv_ship = csv_map.get(sid)
@@ -186,11 +186,12 @@ def validate_shipments(
         pdf_name, pdf_ship = pdf_entry
         
         pdf_pages = parsed.pdf_pages_map.get(sid, [])
-        best_wh = resolve_optimal_warehouse(csv_ship.warehouse_code, pdf_name, pdf_pages)
-        if best_wh != "UNKN" and best_wh != csv_ship.warehouse_code:
-            status.append(f"🔧 智能修正：货件 **{sid}** 仓库从 [{csv_ship.warehouse_code}] 修正为 ➔ **{best_wh}**")
-            csv_ship.warehouse_code = best_wh
-            
+        conflict = warehouse_conflict(csv_ship.warehouse_code, pdf_pages)
+        if conflict:
+            conflict["shipment_id"] = sid
+            warehouse_warnings.append(conflict)
+            status.append(conflict["message"])
+
         pairs.append(ShipmentPair(sid, csv_ship.warehouse_code, csv_ship, pdf_ship, pdf_name))
         seen.add(sid)
         items = csv_ship.box_items.copy()
@@ -211,11 +212,12 @@ def validate_shipments(
         pdf_name, pdf_ship = pdf_entry
         
         pdf_pages = parsed.pdf_pages_map.get(sid, [])
-        best_wh = resolve_optimal_warehouse(csv_ship.warehouse_code, pdf_name, pdf_pages)
-        if best_wh != "UNKN" and best_wh != csv_ship.warehouse_code:
-            status.append(f"🔧 智能修正：货件 **{sid}** 仓库从 [{csv_ship.warehouse_code}] 修正为 ➔ **{best_wh}**")
-            csv_ship.warehouse_code = best_wh
-            
+        conflict = warehouse_conflict(csv_ship.warehouse_code, pdf_pages)
+        if conflict:
+            conflict["shipment_id"] = sid
+            warehouse_warnings.append(conflict)
+            status.append(conflict["message"])
+
         pairs.append(ShipmentPair(sid, csv_ship.warehouse_code, csv_ship, pdf_ship, pdf_name))
         seen.add(sid)
         items = csv_ship.box_items.copy()
@@ -259,7 +261,29 @@ def validate_shipments(
         pdf_bytes=parsed.pdf_bytes,
         cross_check_ok=cross.ok,
         worker_packing_rows=cross.worker_packing_rows,
+        warehouse_warnings=warehouse_warnings,
     )
+
+
+def warehouse_conflict(csv_code: str, pages: List[Any]) -> Dict[str, str] | None:
+    """CSV 仓码和 PDF 页面多数仓码不一致时，默认采用 CSV，并要求人工确认。"""
+    counts: Dict[str, int] = {}
+    for page in pages:
+        code = str(getattr(page, "warehouse_code", "") or "").strip().upper()
+        if not code or code == "UNKN":
+            continue
+        counts[code] = counts.get(code, 0) + 1
+    if not counts:
+        return None
+    pdf_code = sorted(counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+    csv_norm = str(csv_code or "").strip().upper()
+    if not csv_norm or csv_norm == "UNKN" or pdf_code == csv_norm:
+        return None
+    return {
+        "csv_code": csv_norm,
+        "pdf_code": pdf_code,
+        "message": f"⚠️ 仓库代码来源不一致：CSV={csv_norm}，PDF={pdf_code}，已采用 CSV，请人工确认",
+    }
 
 
 def compare_box_data(

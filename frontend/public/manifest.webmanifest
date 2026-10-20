@@ -1,0 +1,11 @@
+{
+  "name": "FBA Smart Tool",
+  "short_name": "FBA",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fcfcfc",
+  "theme_color": "#8294FF",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

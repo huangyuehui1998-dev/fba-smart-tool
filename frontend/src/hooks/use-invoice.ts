@@ -148,7 +148,7 @@ export function useInvoice() {
   );
 
   const missingLabels =
-    sheetPhase === "filled" ? missingRequiredFromCellMeta(cellMeta, getCellValue) : [];
+    sheetPhase === "filled" ? missingRequiredFromCellMeta(cellMeta, getCellValue, invoiceDraft?.cells) : [];
   const hasMissing = missingLabels.length > 0;
 
   const buildWorkflowJson = useCallback(() => {

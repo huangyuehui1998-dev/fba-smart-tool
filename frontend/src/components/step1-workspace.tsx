@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Sparkles,
   Download,
@@ -33,6 +34,7 @@ import { emptyComputed, type ComputedDisplay } from "@/lib/step1-rows";
 import { usePreventBrowserFileDrop } from "@/hooks/use-prevent-browser-file-drop";
 import { useStep1Logic } from "@/hooks/use-step1-logic";
 import { MasterDataGapBanner } from "@/components/master-data-gap-banner";
+import { step1FixHint, summarizeStep1Issues, visibleStep1Indexes } from "@/lib/step1-issues";
 
 const EDITABLE_COLS = [
   { key: "sku", label: "SKU简称", w: "min-w-[120px]" },
@@ -57,6 +59,7 @@ const COMPUTED_COLS = [
 export function Step1Workspace({ onNext }: { onNext?: () => void }) {
   usePreventBrowserFileDrop();
 
+  const [onlyIssues, setOnlyIssues] = useState(false);
   const {
     rows,
     text,
@@ -88,6 +91,9 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
     handleExcelUpload,
     handleDownloadTemplate,
   } = useStep1Logic();
+
+  const issueSummary = summarizeStep1Issues(validationErrors, weightWarnings);
+  const shownIndexes = visibleStep1Indexes(rows.length, issueSummary, onlyIssues);
 
   return (
     <div className="space-y-6 pb-32">
@@ -254,8 +260,31 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
       </div>
 
       <Card className="shadow-sm">
-        <CardHeader className="flex flex-row items-center justify-between pb-3">
-          <CardTitle className="text-base">可编辑数据网格</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle className="text-base">可编辑数据网格</CardTitle>
+            <button
+              type="button"
+              data-testid="issue-count-block"
+              className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-xs text-red-800"
+              onClick={() => setOnlyIssues(true)}
+            >
+              阻断 {issueSummary.blockCount}
+            </button>
+            <button
+              type="button"
+              data-testid="issue-count-warn"
+              className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-900"
+              onClick={() => setOnlyIssues((on) => !on)}
+            >
+              警告 {issueSummary.warnCount}
+            </button>
+            {onlyIssues && (
+              <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setOnlyIssues(false)}>
+                显示全部
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
             {previewLoading && (
               <span className="flex items-center gap-1 text-primary">
@@ -296,12 +325,27 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((r, i) => {
+                {shownIndexes.map((i) => {
+                  const r = rows[i]!;
                   const c = computed[i] ?? emptyComputed();
+                  const blocked = issueSummary.blockRows.has(i);
+                  const warned = issueSummary.warnRows.has(i);
+                  const hint = step1FixHint(i, validationErrors, weightWarnings);
                   return (
-                    <TableRow key={i} className="hover:bg-transparent">
+                    <TableRow
+                      key={i}
+                      data-testid="step1-grid-row"
+                      className={cn(
+                        "hover:bg-transparent",
+                        blocked && "bg-red-50",
+                        !blocked && warned && "bg-amber-50",
+                      )}
+                    >
                       <TableCell className="text-center text-xs text-muted-foreground">
                         {i + 1}
+                        {hint ? (
+                          <div className="mt-1 text-[10px] leading-tight text-amber-800">{hint}</div>
+                        ) : null}
                       </TableCell>
                       {EDITABLE_COLS.map((col) => (
                         <TableCell key={col.key} className="p-1">
@@ -431,7 +475,7 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
         </Alert>
       )}
 
-      <div className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <div data-bottom-bar className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <div className="flex items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <StatBadge

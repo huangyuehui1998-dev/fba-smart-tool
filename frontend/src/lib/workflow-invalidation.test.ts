@@ -125,9 +125,9 @@ describe("hasAnyStale", () => {
 describe("getStaleStageLabels", () => {
   it("returns Chinese labels for stale stages", () => {
     const labels = getStaleStageLabels(invalidateFrom("boxing"));
-    expect(labels).toContain("Step 3 导出");
-    expect(labels).toContain("Step 4 回传校验");
-    expect(labels).not.toContain("Step 2 排箱");
+    expect(labels).toContain("第 3 步 导出");
+    expect(labels).toContain("第 4 步 货件校验");
+    expect(labels).not.toContain("第 2 步 排箱");
   });
 });
 

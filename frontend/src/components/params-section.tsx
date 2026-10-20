@@ -21,6 +21,7 @@ import {
   type UserSettings,
 } from "@/lib/api/config";
 import { formatApiError } from "@/lib/format-api-error";
+import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 
 function Field({ label, children, hint }: { label: string; children: React.ReactNode; hint?: string }) {
   return (
@@ -84,6 +85,7 @@ export function ParamsSection({ onSaved }: { onSaved?: () => void }) {
   const [formulasText, setFormulasText] = useState("{}");
   const [whColumnsText, setWhColumnsText] = useState("{}");
   const [loading, setLoading] = useState(true);
+  const [confirmReset, setConfirmReset] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -150,8 +152,11 @@ export function ParamsSection({ onSaved }: { onSaved?: () => void }) {
     }
   };
 
-  const handleReset = async () => {
-    if (!window.confirm("确定恢复为出厂默认参数与公式？")) return;
+  const handleReset = () => {
+    setConfirmReset(true);
+  };
+
+  const applyReset = async () => {
     setSaving(true);
     setError(null);
     setSuccess(null);
@@ -275,6 +280,17 @@ export function ParamsSection({ onSaved }: { onSaved?: () => void }) {
           <FolderOpen className="h-3.5 w-3.5" /> config 说明
         </Button>
       </div>
+      <ConfirmDialog
+        open={confirmReset}
+        title="恢复默认参数"
+        description="确定恢复为出厂默认参数与公式？"
+        confirmLabel="恢复默认"
+        onConfirm={() => {
+          setConfirmReset(false);
+          void applyReset();
+        }}
+        onCancel={() => setConfirmReset(false)}
+      />
     </div>
   );
 }

@@ -39,6 +39,7 @@ import { LingxingPreviewPanel } from "@/components/lingxing-preview-panel";
 import { LingxingSchedulePanel } from "@/components/lingxing-schedule-panel";
 import { DIFF_LABEL, diffItemClass } from "@/lib/diff-kinds";
 import { usePreventBrowserFileDrop, fileDropZoneProps } from "@/hooks/use-prevent-browser-file-drop";
+import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 
 function masterDataApiError(err: unknown): string {
   if (err instanceof ApiError && err.status === 404) {
@@ -132,6 +133,12 @@ type UploadKind = "fee_preview" | "inventory" | "product_info";
 
 export function MasterDataWorkspace() {
   const search = useSearch({ from: "/master-data" });
+  const [confirmState, setConfirmState] = useState<{
+    message: string;
+    resolve: (ok: boolean) => void;
+  } | null>(null);
+  const askConfirm = (message: string) =>
+    new Promise<boolean>((resolve) => setConfirmState({ message, resolve }));
   const [items, setItems] = useState<MasterProduct[]>([]);
   const [skuConflicts, setSkuConflicts] = useState<string[][]>([]);
   const [onlyMissingCustoms, setOnlyMissingCustoms] = useState(false);
@@ -499,7 +506,7 @@ export function MasterDataWorkspace() {
                   try {
                     const pv = await previewTicketImport(file);
                     const s = pv.summary;
-                    const ok = window.confirm(
+                    const ok = await askConfirm(
                       `${names[pv.source]}：共 ${s.total} 票，新增 ${s.new}、变化 ${s.changed}、不变 ${s.unchanged}` +
                         (pv.issues.length ? `，提示 ${pv.issues.length} 条（${pv.issues[0].message}…）` : "") +
                         "。确认写入？",
@@ -531,7 +538,7 @@ export function MasterDataWorkspace() {
                   try {
                     const pv = await previewWarehouseImport(file);
                     const s = pv.summary;
-                    const ok = window.confirm(
+                    const ok = await askConfirm(
                       `仓库地址库：共 ${s.total} 条，新增 ${s.new}、变化 ${s.changed}、不变 ${s.unchanged}` +
                         (pv.issues.length ? `，提示 ${pv.issues.length} 条` : "") +
                         "。确认写入？",
@@ -571,7 +578,7 @@ export function MasterDataWorkspace() {
                       return;
                     }
                     const lines = pv.changes.slice(0, 15).map((c) => `${c.sku} ${c.field}: ${String(c.old ?? "")} → ${String(c.new)}`);
-                    const ok = window.confirm(
+                    const ok = await askConfirm(
                       `将修改 ${pv.changes.length} 个字段（改动记为手填并锁定，MCP 拉取不覆盖；申报价仍领星优先）：\n` +
                         lines.join("\n") + (pv.changes.length > 15 ? "\n…" : "") +
                         (pv.errors.length ? `\n另有 ${pv.errors.length} 条问题不写入` : "") + "\n确认写入？",
@@ -631,6 +638,19 @@ export function MasterDataWorkspace() {
           />
         </CardContent>
       </Card>
+      <ConfirmDialog
+        open={confirmState != null}
+        title="请确认"
+        description={confirmState?.message}
+        onConfirm={() => {
+          confirmState?.resolve(true);
+          setConfirmState(null);
+        }}
+        onCancel={() => {
+          confirmState?.resolve(false);
+          setConfirmState(null);
+        }}
+      />
     </div>
   );
 }

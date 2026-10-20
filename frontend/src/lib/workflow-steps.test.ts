@@ -67,7 +67,7 @@ describe("canEnterStep", () => {
 describe("getStepBlockReason", () => {
   it("returns reason for missing input on first visit", () => {
     expect(getStepBlockReason(2, state({ inputRows: [{ ...EMPTY_ROW }], highestReachedStep: 1 }))).toMatch(
-      /Step 1/,
+      /第 1 步/,
     );
   });
 
@@ -77,6 +77,12 @@ describe("getStepBlockReason", () => {
 
   it("returns null when first-visit allowed", () => {
     expect(getStepBlockReason(3, state({ highestReachedStep: 2 }))).toBeNull();
+  });
+
+  it("names step 4 when invoice is locked", () => {
+    expect(getStepBlockReason(4.5, state({ step4Ok: false, highestReachedStep: 4 }))).toBe(
+      "请先完成第 4 步：货件校验",
+    );
   });
 });
 

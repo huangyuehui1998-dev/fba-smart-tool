@@ -510,7 +510,7 @@ export function Step2Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
         </div>
       </div>
 
-      <div className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <div data-bottom-bar className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <div className="flex items-center justify-between gap-4">
           <Button variant="outline" size="lg" onClick={onPrev} className="gap-2">
             <ArrowLeft className="h-4 w-4" />

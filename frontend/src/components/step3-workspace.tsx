@@ -25,6 +25,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TRANSPORT_MODES, type TransportMode } from "@/lib/transport-mode";
+import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
+import { ErrorNotice } from "@/components/feedback/error-notice";
 
 function MatrixTable({ matrix }: { matrix: Record<string, unknown>[] }) {
   const boxCols = matrixBoxColumns(matrix);
@@ -100,12 +102,18 @@ export function Step3Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
     loading,
     downloading,
     error,
+    errorCopy,
+    weightGate,
+    highlights,
     step3Matrix,
     step3BoxCount,
     step3SkuCount,
     totalGross,
     downloadInternal,
     downloadAmazon,
+    downloadBundle,
+    confirmWeightAndExport,
+    dismissWeightGate,
     refreshPreview,
   } = useStep3Export();
 
@@ -204,6 +212,15 @@ export function Step3Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
               导出时将自动转换为 in / lb；下方矩阵为装箱数量分布预览。
             </p>
             <MatrixTable matrix={step3Matrix} />
+            {highlights.length > 0 && (
+              <ul className="mt-2 space-y-1 text-xs text-amber-900" data-testid="sta-precheck">
+                {highlights.map((hit, i) => (
+                  <li key={`${hit.row}-${hit.column}-${i}`} data-testid="sta-precheck-hit" className="rounded bg-amber-50 px-2 py-1">
+                    第 {hit.row} 行 {hit.column}：{hit.message}
+                  </li>
+                ))}
+              </ul>
+            )}
           </TabsContent>
         </Tabs>
       )}
@@ -218,7 +235,17 @@ export function Step3Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
                 : "内部表用于工厂/货代留档；Send to Amazon 模板可直接上传至卖家中心。"}
             </p>
           </div>
+          {errorCopy && <ErrorNotice copy={errorCopy} />}
           <div className="flex flex-wrap items-center justify-center gap-3">
+            <Button
+              size="lg"
+              className="gap-2 shadow-md"
+              disabled={!!downloading || exportBlocked}
+              onClick={() => void downloadBundle()}
+            >
+              {downloading === "bundle" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              一键导出全部
+            </Button>
             <Button
               size="lg"
               variant="outline"
@@ -252,7 +279,7 @@ export function Step3Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
         </CardContent>
       </Card>
 
-      <div className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <div data-bottom-bar className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <div className="flex items-center justify-between gap-4">
           <Button variant="outline" size="lg" onClick={onPrev} className="gap-2">
             <ArrowLeft className="h-4 w-4" />
@@ -263,11 +290,19 @@ export function Step3Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
             onClick={onNext}
             className="gap-2 px-8 text-base font-semibold shadow-md"
           >
-            进入 Step 4: 回传校验
+            进入第 4 步：货件校验
             <ArrowRight className="h-5 w-5" />
           </Button>
         </div>
       </div>
+      <ConfirmDialog
+        open={weightGate != null}
+        title="导出前需要确认"
+        description={weightGate ? `发生了什么：${weightGate.what}\n可能原因：${weightGate.why}\n怎么处理：${weightGate.action}` : ""}
+        confirmLabel="确认并导出"
+        onConfirm={() => void confirmWeightAndExport()}
+        onCancel={dismissWeightGate}
+      />
     </div>
   );
 }

@@ -86,6 +86,7 @@ export interface WorkflowPayload {
   box_editor: BoxEditorApiRow[];
   fnsku_overrides?: Record<string, string>;
   transport_mode?: string;
+  confirm_weight_warnings?: boolean;
 }
 
 export interface CalculateBoxesResponse {

@@ -108,6 +108,7 @@ def build_validate_response(
         "cross_check_ok": result.cross_check_ok,
         "worker_packing_ready": result.cross_check_ok and bool(result.worker_packing_rows),
         "declared_spec_warnings": [],
+        "warehouse_warnings": list(getattr(result, "warehouse_warnings", []) or []),
     }
 
     if not hard_fail and result.ok:

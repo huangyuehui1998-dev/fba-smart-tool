@@ -56,8 +56,14 @@ export function Step1CostDashboard({
     <TooltipProvider delayDuration={200}>
       <Card className="border-amber-200/60 bg-gradient-to-br from-amber-50/40 to-card shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-base">
+          <CardTitle className="flex items-center gap-2 text-base" data-testid="step1-content-end">
             💰 成本精算控制台
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span className="cursor-help text-xs font-normal text-muted-foreground">口径</span>
+              </TooltipTrigger>
+              <TooltipContent>按区域浮动、收货后 45 天按实收数量计费</TooltipContent>
+            </Tooltip>
             <span className="text-xs font-normal text-muted-foreground">
               配置费按 Fee Preview 单品尺寸；CBM/排箱/货代按 Step1 外箱录入
             </span>
@@ -68,7 +74,7 @@ export function Step1CostDashboard({
           {locked && (
             <Alert className="border-emerald-300 bg-emerald-50/80">
               <AlertTitle className="text-sm font-semibold text-emerald-900">
-                实际费用已锁定（Step 4 回传）
+                实际费用已锁定（第 4 步货件校验）
               </AlertTitle>
               <AlertDescription className="space-y-2 text-xs text-emerald-800">
                 <div className="flex flex-wrap items-center gap-2">
@@ -175,6 +181,28 @@ export function Step1CostDashboard({
               )}
             </p>
           )}
+
+          {placement?.line_items?.some((row) => row.ineligible_reason) ? (
+            <div data-testid="ineligible-sku-list" className="rounded-md border border-amber-200 bg-amber-50/70">
+              <p className="border-b border-amber-200 px-3 py-1.5 text-xs font-medium text-amber-950">
+                不可计费的 SKU
+              </p>
+              <ul>
+                {placement.line_items
+                  .filter((row) => row.ineligible_reason)
+                  .map((row) => (
+                    <li
+                      key={row.sku}
+                      data-testid="ineligible-sku-row"
+                      className="flex items-center justify-between gap-3 px-3 py-1.5 text-xs"
+                    >
+                      <span className="font-mono">{row.sku}</span>
+                      <span>{row.ineligible_reason}</span>
+                    </li>
+                  ))}
+              </ul>
+            </div>
+          ) : null}
 
           {expanded && placement?.line_items?.length ? (
             <PlacementDetailTable

@@ -254,7 +254,7 @@ class PlacementFeeEngine:
             reason = None
             low_confidence = False
             if not has_dims:
-                reason = "外箱尺寸缺失，无法精确判定尺寸分段，费用暂不估算（请补全长/宽/高）"
+                reason = "单品包装尺寸缺失"
                 low_confidence = True
             elif not size_class:
                 reason = "无法判定尺寸分段或超出 50 lb 上限"

@@ -25,6 +25,7 @@ function payload(body: WorkflowPayload) {
     box_editor: body.box_editor,
     fnsku_overrides: body.fnsku_overrides ?? {},
     transport_mode: body.transport_mode ?? "spd_partnered",
+    confirm_weight_warnings: Boolean(body.confirm_weight_warnings),
   };
 }
 
@@ -73,6 +74,17 @@ export function downloadInternalExport(body: WorkflowPayload) {
 
 export function downloadAmazonExport(body: WorkflowPayload) {
   return downloadPostBlob("/api/export/step3/amazon", payload(body), "Send to Amazon表格.xlsx");
+}
+
+export function downloadStep3Bundle(body: WorkflowPayload) {
+  return downloadPostBlob("/api/export/step3/bundle", payload(body), "Step3导出.zip");
+}
+
+export function fetchStaPrecheck(body: WorkflowPayload) {
+  return apiPostJson<{ highlights: { row: number; column: string; message: string }[] }>(
+    "/api/export/step3/sta_precheck",
+    payload(body),
+  );
 }
 
 export function validateShipments(
