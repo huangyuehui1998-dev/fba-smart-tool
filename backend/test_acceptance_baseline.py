@@ -44,7 +44,8 @@ def test_acceptance_baseline_eleven_reproduced_one_skipped():
         "R2 合成",
         "D-05",
         "R4 首次进入即过期（静态）",
+        "R3",
     }
     assert {code for code, tag in status.items() if tag == "NOT REPRODUCED"} == fixed, out
     assert status["R2 真实第13批CL2"] == "SKIPPED"
-    assert sum(tag == "REPRODUCED" for tag in status.values()) == 1, out
+    assert sum(tag == "REPRODUCED" for tag in status.values()) == 0, out

@@ -15,6 +15,10 @@ class SkuRow:
     unit_weight_kg: float = 0.0
     carton_tare_kg: float = 0.0
     carton_gross_kg: float | None = None
+    unit_length_cm: float = 0.0
+    unit_width_cm: float = 0.0
+    unit_height_cm: float = 0.0
+    category: str = ""
 
     @property
     def full_cartons(self) -> int:

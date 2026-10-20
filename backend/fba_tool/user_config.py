@@ -13,7 +13,6 @@ FORMULAS_FILE = user_config_dir() / "formulas.json"
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "parameters": {
-        "amazon_max_boxes": 130,
         # FBA 标准件单箱毛重红线为 50 lb ≈ 22.68 kg（见 fba_compliance.FBA_MAX_STANDARD_GROSS_KG）。
         # 排箱上限默认 22.5 kg，预留约 0.18 kg 安全余量，防止仓库磅秤误差导致拒收。
         "weight_limit_kg": 22.5,
@@ -178,10 +177,6 @@ def render_formula(template: str, **ctx) -> str:
         val = merged.get(k, "")
         return str(val)
     return re.sub(r"\{(\w+)\}", repl, template)
-
-
-def amazon_max_boxes() -> int:
-    return int(param("amazon_max_boxes", 130))
 
 
 def weight_limit_kg() -> float:

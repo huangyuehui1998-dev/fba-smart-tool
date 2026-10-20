@@ -32,7 +32,8 @@ AMAZON_IDENTITY_FIELDS = (
 CUSTOMS_SENSITIVE_FIELDS = ("english_name", "brand")
 PRICE_FIELDS = ("listing_price", "regular_price")  # v8 E1 实时售价；S9-step2-fix A1：常规价单独变化也要能写入（D-12 判断促销）
 NAME_FIELDS = ("local_name",)  # 领星本地品名
-CONFIRM_FIELDS = AMAZON_IDENTITY_FIELDS + CUSTOMS_SENSITIVE_FIELDS + PRICE_FIELDS + NAME_FIELDS
+CATEGORY_FIELDS = ("category",)  # jewelry / watch / other；映射不到不写入
+CONFIRM_FIELDS = AMAZON_IDENTITY_FIELDS + CUSTOMS_SENSITIVE_FIELDS + PRICE_FIELDS + NAME_FIELDS + CATEGORY_FIELDS
 
 FIELD_LABELS = {
     "listing_price": "实时售价(申报价)",
@@ -46,6 +47,7 @@ FIELD_LABELS = {
     "fulfillment_channel": "配送渠道",
     "english_name": "英文品名（报关）",
     "brand": "品牌（报关）",
+    "category": "品类",
 }
 
 CONFIRMABLE_STATUSES = {"preview_pending", "partial", "auto_applied", "auto_applied_partial"}  # S5：定时同步自动写入后，剩下“待人工确认”的仍可在预览里确认

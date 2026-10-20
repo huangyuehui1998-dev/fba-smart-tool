@@ -29,8 +29,11 @@ def boxing_response_payload(
     metrics_df: pd.DataFrame,
     *,
     tail_df: pd.DataFrame | None = None,
+    transport_mode: str = "spd_partnered",
 ) -> Dict[str, Any]:
-    enriched_metrics, compliance = boxing_api_compliance(editor_df, sku_rows, metrics_df)
+    enriched_metrics, compliance = boxing_api_compliance(
+        editor_df, sku_rows, metrics_df, transport_mode=transport_mode
+    )
     payload: Dict[str, Any] = {
         "box_editor": df_to_records(editor_df),
         "metrics": df_to_records(enriched_metrics),

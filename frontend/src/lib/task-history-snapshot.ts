@@ -8,6 +8,7 @@ import type {
 } from "@/lib/api/workflow";
 import type { ActualPlacementFee } from "@/lib/api/step1";
 import { DEFAULT_THROW_RATIO } from "@/constants";
+import { DEFAULT_TRANSPORT_MODE, normalizeTransportMode, type TransportMode } from "@/lib/transport-mode";
 import { cellMetaFromFills } from "@/lib/invoice-spreadsheet";
 import {
   cloneInvoiceSessions,
@@ -72,6 +73,7 @@ export interface TaskHistorySnapshot {
   react_customs_session?: CustomsSessionSnapshot | null;
   react_highest_reached_step?: number;
   react_staleness?: WorkflowStaleness;
+  react_transport_mode?: TransportMode;
 }
 
 export interface WorkflowSnapshotSource {
@@ -109,6 +111,7 @@ export interface WorkflowSnapshotSource {
   customsSession: CustomsSessionSnapshot | null;
   highestReachedStep: number;
   staleness: WorkflowStaleness;
+  transportMode: TransportMode;
 }
 
 export function newTaskId(): string {
@@ -219,6 +222,7 @@ export function buildTaskHistorySnapshot(source: WorkflowSnapshotSource): TaskHi
       : null,
     react_highest_reached_step: source.highestReachedStep,
     react_staleness: { ...source.staleness },
+    react_transport_mode: normalizeTransportMode(source.transportMode),
   };
 }
 
@@ -257,6 +261,7 @@ export interface AppliedTaskHistory {
   customsSession: CustomsSessionSnapshot | null;
   highestReachedStep: number;
   staleness: WorkflowStaleness;
+  transportMode: TransportMode;
 }
 
 export function applyTaskHistorySnapshot(snapshot: Record<string, unknown>): AppliedTaskHistory {
@@ -346,5 +351,6 @@ export function applyTaskHistorySnapshot(snapshot: Record<string, unknown>): App
     customsSession,
     highestReachedStep,
     staleness,
+    transportMode: normalizeTransportMode(snapshot.react_transport_mode ?? DEFAULT_TRANSPORT_MODE),
   };
 }

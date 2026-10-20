@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 
 import pandas as pd
 
-from fba_tool.box_weight import box_gross_kg, carrier_tare, mixed_box_would_exceed
+from fba_tool.box_weight import box_gross_kg, carrier_tare, mixed_box_would_exceed, outer_dims_cm
 from fba_tool.models import BoxItem, BoxPlan, SkuRow
 from fba_tool.user_config import param, weight_limit_kg
 
@@ -27,6 +27,10 @@ def dataframe_to_sku_rows(df: pd.DataFrame) -> List[SkuRow]:
                 unit_weight_kg=float(r.get("单个重量(kg)", 0) or 0),
                 carton_tare_kg=float(r.get("空纸箱重(kg)", 0) or 0),
                 carton_gross_kg=r.get("单箱毛重(kg)", None),
+                unit_length_cm=float(r.get("单品长(cm)", 0) or 0),
+                unit_width_cm=float(r.get("单品宽(cm)", 0) or 0),
+                unit_height_cm=float(r.get("单品高(cm)", 0) or 0),
+                category=str(r.get("品类") or r.get("category") or "").strip().lower(),
             )
         )
     return rows
@@ -153,12 +157,12 @@ def box_metrics(editor_df: pd.DataFrame, sku_rows: List[SkuRow]) -> pd.DataFrame
             if sku and int(row["数量"]) != sku.carton_qty:
                 is_mixed = True
 
+        length_cm, width_cm, height_cm = outer_dims_cm(lines, sku_map)
+        carrier_volume = length_cm * width_cm * height_cm
         if is_mixed:
-            volume = max_box_vol if max_box_vol > 0 else 60.0 * 40.0 * 40.0
+            volume = carrier_volume if carrier_volume > 0 else (max_box_vol if max_box_vol > 0 else 60.0 * 40.0 * 40.0)
         else:
-            row = group.iloc[0]
-            sku = sku_map.get(str(row["SKU简称"]))
-            volume = (sku.length_cm * sku.width_cm * sku.height_cm) if sku else 0.0
+            volume = carrier_volume
         by_box.append(
             {
                 "箱号": int(box_no),

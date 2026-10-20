@@ -11,6 +11,7 @@ import {
 import { EMPTY_ROW } from "@/lib/step1-rows";
 import { autoTaskName } from "@/lib/workflow-storage";
 import { createEmptyStaleness } from "@/lib/workflow-invalidation";
+import { DEFAULT_TRANSPORT_MODE } from "@/lib/transport-mode";
 
 /** 当前软件支持的 .fbox 格式版本（递增时请在 migrateProjectData 中补迁移链）。 */
 export const FBOX_CURRENT_VERSION = 1;
@@ -80,6 +81,7 @@ function emptyWorkflowSource(taskId: string, taskName: string): WorkflowSnapshot
     customsSession: null,
     highestReachedStep: 1,
     staleness: createEmptyStaleness(),
+    transportMode: DEFAULT_TRANSPORT_MODE,
   };
 }
 

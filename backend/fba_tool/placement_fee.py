@@ -14,37 +14,40 @@ DIM_WEIGHT_DIVISOR = 139.0
 FeeRange = Tuple[float, float]
 WeightTier = Tuple[float, float, Dict[str, FeeRange]]
 
-# 大号标准尺寸 — 无 2-3 仓选项
-LARGE_STANDARD_TIERS: List[WeightTier] = [
-    (0.0, 0.75, {"1_loc": (0.20, 0.40), "5_loc": (0.0, 0.0)}),
-    (0.75, 1.5, {"1_loc": (0.24, 0.50), "5_loc": (0.0, 0.0)}),
-    (1.5, 3.0, {"1_loc": (0.34, 0.60), "5_loc": (0.0, 0.0)}),
-    (3.0, 5.0, {"1_loc": (0.38, 0.76), "5_loc": (0.0, 0.0)}),
-    (5.0, 7.0, {"1_loc": (0.40, 0.98), "5_loc": (0.0, 0.0)}),
-    (7.0, 10.0, {"1_loc": (0.42, 1.20), "5_loc": (0.0, 0.0)}),
-    (10.0, 15.0, {"1_loc": (0.44, 1.50), "5_loc": (0.0, 0.0)}),
-    (15.0, 20.0, {"1_loc": (0.55, 1.90), "5_loc": (0.0, 0.0)}),
-]
 
-# 小号大件尺寸 — 含 2-3 仓选项
-SMALL_OVERSIZE_TIERS: List[WeightTier] = [
-    (0.0, 5.0, {"1_loc": (1.10, 1.60), "2_3_loc": (0.55, 1.10), "5_loc": (0.0, 0.0)}),
-    (5.0, 12.0, {"1_loc": (1.75, 2.40), "2_3_loc": (0.65, 1.75), "5_loc": (0.0, 0.0)}),
-    (12.0, 28.0, {"1_loc": (2.74, 3.50), "2_3_loc": (0.81, 2.19), "5_loc": (0.0, 0.0)}),
-    (28.0, 42.0, {"1_loc": (3.95, 4.95), "2_3_loc": (1.05, 2.83), "5_loc": (0.0, 0.0)}),
-    (42.0, 50.0, {"1_loc": (4.80, 5.95), "2_3_loc": (1.23, 3.32), "5_loc": (0.0, 0.0)}),
-]
+def _tiers_from_policy() -> Dict[str, List[WeightTier]]:
+    from fba_tool.policy import placement_classes
+
+    tables: Dict[str, List[WeightTier]] = {}
+    for name, rows in placement_classes().items():
+        tiers: List[WeightTier] = []
+        for row in rows:
+            high = row.get("high")
+            fees: Dict[str, FeeRange] = {}
+            for key in ("1_loc", "2_3_loc", "5_loc"):
+                if key in row and row[key] is not None:
+                    pair = row[key]
+                    fees[key] = (float(pair[0]), float(pair[1]))
+            tiers.append((float(row.get("low") or 0), float("inf") if high is None else float(high), fees))
+        tables[name] = tiers
+    return tables
+
+
+_RATE_TABLES = _tiers_from_policy()
+LARGE_STANDARD_TIERS = _RATE_TABLES["large_standard"]
+SMALL_OVERSIZE_TIERS = _RATE_TABLES["small_oversize"]
 
 SIZE_CLASS_LABELS: Dict[str, str] = {
     "small_standard": "小号标准",
     "large_standard": "大号标准",
     "small_oversize": "小号大件",
     "large_oversize": "大号大件",
+    "extra_large": "Extra-large",
 }
 
 STANDARD_SIZE_CLASSES = frozenset({"small_standard", "large_standard"})
-FEE_SUPPORTED_CLASSES = frozenset({"large_standard", "small_oversize"})
-OVERSIZE_CLASSES = frozenset({"small_oversize", "large_oversize"})
+FEE_SUPPORTED_CLASSES = frozenset(_RATE_TABLES)
+OVERSIZE_CLASSES = frozenset({"small_oversize", "large_oversize", "extra_large"})
 
 SPLIT_DISABLED_REASON_STANDARD = "标准尺寸商品不支持部分拆分入库"
 
@@ -84,10 +87,7 @@ class PlacementFeeEngine:
     """2026 入库配置服务费计算引擎。"""
 
     def __init__(self) -> None:
-        self._rate_tables: Dict[str, List[WeightTier]] = {
-            "large_standard": LARGE_STANDARD_TIERS,
-            "small_oversize": SMALL_OVERSIZE_TIERS,
-        }
+        self._rate_tables = _RATE_TABLES
 
     @staticmethod
     def kg_to_lb(weight_kg: float) -> float:
@@ -169,24 +169,50 @@ class PlacementFeeEngine:
                 return "large_standard"
             if actual_lb <= 50.0:
                 return "small_oversize"
-            return None
+            return "extra_large"
 
+        from fba_tool.policy import size_limits
+
+        limits = size_limits()
         longest, median, shortest = self.sorted_dims_in(l_cm, w_cm, h_cm)
         actual_lb = self.kg_to_lb(weight_kg)
         dim_lb = self.dimensional_weight_lb(longest, median, shortest)
 
-        if longest <= 15 and median <= 12 and shortest <= 0.75 and actual_lb <= 1.0:
+        small = limits["small_standard"]
+        if (
+            longest <= small["longest"]
+            and median <= small["median"]
+            and shortest <= small["shortest"]
+            and actual_lb <= small["weight_lb"]
+        ):
             return "small_standard"
 
         billing_lb = max(actual_lb, dim_lb)
-
-        if longest <= 18 and median <= 14 and shortest <= 8 and billing_lb <= 20:
+        large = limits["large_standard"]
+        bulky = limits["small_oversize"]
+        large_bulky = limits["large_oversize"]
+        if (
+            longest <= large["longest"]
+            and median <= large["median"]
+            and shortest <= large["shortest"]
+            and billing_lb <= large["weight_lb"]
+        ):
             return "large_standard"
-        if longest <= 37 and median <= 28 and shortest <= 20 and billing_lb <= 50:
+        if (
+            longest <= bulky["longest"]
+            and median <= bulky["median"]
+            and shortest <= bulky["shortest"]
+            and billing_lb <= bulky["weight_lb"]
+        ):
             return "small_oversize"
-        if longest <= 59 and median <= 33 and shortest <= 33 and billing_lb <= 50:
+        if (
+            longest <= large_bulky["longest"]
+            and median <= large_bulky["median"]
+            and shortest <= large_bulky["shortest"]
+            and billing_lb <= large_bulky["weight_lb"]
+        ):
             return "large_oversize"
-        return None
+        return "extra_large"
 
     @staticmethod
     def _match_weight_tier(billing_lb: float, tiers: List[WeightTier]) -> Optional[Dict[str, FeeRange]]:
@@ -230,10 +256,6 @@ class PlacementFeeEngine:
             if not has_dims:
                 reason = "外箱尺寸缺失，无法精确判定尺寸分段，费用暂不估算（请补全长/宽/高）"
                 low_confidence = True
-            elif size_class == "small_standard":
-                reason = "当前政策费率表未覆盖小号标准尺寸"
-            elif size_class == "large_oversize":
-                reason = "超出当前费率表支持的大件分段"
             elif not size_class:
                 reason = "无法判定尺寸分段或超出 50 lb 上限"
             return {
@@ -274,6 +296,8 @@ class PlacementFeeEngine:
                 "ineligible_reason": "计费重量超出该尺寸分段费率表上限",
             }
 
+        from fba_tool.policy import fee_disclaimer
+
         one_loc = fees.get("1_loc")
         split_23 = fees.get("2_3_loc")
         opt_5 = fees.get("5_loc", (0.0, 0.0))
@@ -293,6 +317,8 @@ class PlacementFeeEngine:
             "split_2_3": None if is_standard else (self._fee_dict(*split_23) if split_23 else None),
             "optimized_5": self._fee_dict(*opt_5),
             "ineligible_reason": None,
+            "fee_disclaimer": fee_disclaimer(),
+            "fee_note": "Extra-large：配置费 $0" if size_class == "extra_large" else None,
         }
 
     def compute_shipment(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -366,11 +392,14 @@ class PlacementFeeEngine:
                 else "当前货件无可用大件 SKU，无法使用 2-3 仓拆分"
             )
 
+        from fba_tool.policy import fee_disclaimer
+
         return {
             "total_units": total_units,
             "eligible_units": eligible_units,
             "oversize_units": oversize_units,
             "ineligible_units": ineligible_units,
+            "fee_disclaimer": fee_disclaimer(),
             "line_items": line_items,
             "one_location": {
                 "enabled": eligible_units > 0,

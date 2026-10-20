@@ -85,7 +85,7 @@ def test_multi_item_warning_not_blocked():
 
 
 def test_multi_item_long_side_blocks():
-    sku = SkuRow("LONG", 4, 2, 63.51, 30, 20, 2.0, 0.5)
+    sku = SkuRow("LONG", 4, 2, 92, 60, 40, 2.0, 0.5)
     comp = _run([sku], [(1, "LONG", 2)], {1: 4.5})
     assert comp["blocked"] is True
     assert comp["side_violation_count"] == 1

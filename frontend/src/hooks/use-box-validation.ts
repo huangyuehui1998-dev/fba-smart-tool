@@ -37,6 +37,7 @@ export function useBoxValidation() {
     step,
     markStale,
     clearStageStale,
+    transportMode,
   } = useWorkflow();
 
   const [detail, setDetail] = useState<BoxEditorRow[]>([]);
@@ -58,8 +59,9 @@ export function useBoxValidation() {
       rows: rowsToApi(inputRows),
       box_editor: boxEditorToApi(detail),
       fnsku_overrides: fnskuOverrides,
+      transport_mode: transportMode,
     }),
-    [inputRows, detail, fnskuOverrides],
+    [inputRows, detail, fnskuOverrides, transportMode],
   );
 
   const applyBoxResult = useCallback(
@@ -84,7 +86,7 @@ export function useBoxValidation() {
     setInitLoading(true);
     setError(null);
     try {
-      const res = await calculateBoxes(rowsToApi(inputRows), fnskuOverrides);
+      const res = await calculateBoxes(rowsToApi(inputRows), fnskuOverrides, transportMode);
       applyBoxResult(
         res.box_editor,
         res.metrics,
@@ -100,7 +102,7 @@ export function useBoxValidation() {
     } finally {
       setInitLoading(false);
     }
-  }, [inputRows, fnskuOverrides, applyBoxResult, setTailPool, setBoxLocked, clearStageStale]);
+  }, [inputRows, fnskuOverrides, transportMode, applyBoxResult, setTailPool, setBoxLocked, clearStageStale]);
 
   useEffect(() => {
     if (step !== 2) return;
@@ -122,6 +124,7 @@ export function useBoxValidation() {
           rows: rowsToApi(inputRows),
           box_editor: boxEditorToApi(nextDetail),
           fnsku_overrides: fnskuOverrides,
+          transport_mode: transportMode,
         };
         const [metricsRes, tailRes] = await Promise.all([
           fetchBoxMetrics(body),
@@ -141,7 +144,7 @@ export function useBoxValidation() {
         if (seq === syncSeq.current) setSyncLoading(false);
       }
     },
-    [inputRows, fnskuOverrides, setBoxEditorApi, setMetrics, setHasOverweight, setTailPool],
+    [inputRows, fnskuOverrides, transportMode, setBoxEditorApi, setMetrics, setHasOverweight, setTailPool],
   );
 
   useEffect(() => {
@@ -207,6 +210,7 @@ export function useBoxValidation() {
         rows: rowsToApi(inputRows),
         box_editor: res.box_editor,
         fnsku_overrides: fnskuOverrides,
+        transport_mode: transportMode,
       });
       setTailPool(tailRes.tail_pool);
     } catch (err) {
@@ -214,7 +218,7 @@ export function useBoxValidation() {
     } finally {
       setAssignLoading(false);
     }
-  }, [pickSku, pickQty, pickBox, tailPool, workflowPayload, applyBoxResult, inputRows, fnskuOverrides, setTailPool]);
+  }, [pickSku, pickQty, pickBox, tailPool, workflowPayload, applyBoxResult, inputRows, fnskuOverrides, transportMode, setTailPool]);
 
   const lockPlan = useCallback(() => {
     setBoxLocked(true);
