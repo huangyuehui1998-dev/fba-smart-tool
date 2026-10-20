@@ -248,7 +248,6 @@ export function useShipmentValidation() {
     try {
       await downloadWorkerPackingList(workerPackingPreview, warehouses);
       setWorkerPackingSuccess(true);
-      setCrossCheckOk(true);
     } catch (err) {
       const errors = err instanceof ApiError ? extractApiErrors(err) : [formatApiError(err)];
       setCrossCheckModalErrors(errors);

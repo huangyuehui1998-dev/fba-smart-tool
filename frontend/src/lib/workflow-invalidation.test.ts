@@ -5,6 +5,7 @@ import {
   clearStageStale,
   clearStaleFrom,
   createEmptyStaleness,
+  effectiveStaleness,
   getOfficialFilesForStage,
   getStaleOfficialFileLabels,
   getStaleStageLabels,
@@ -13,6 +14,7 @@ import {
   isOfficialExportBlocked,
   isStepStale,
   parseStaleness,
+  type WorkflowOutputPresence,
 } from "./workflow-invalidation";
 
 describe("createEmptyStaleness", () => {
@@ -161,5 +163,76 @@ describe("official export blocking", () => {
     expect(parsed.export).toBe(true);
     expect(parsed.validation).toBe(true);
     expect(parsed.boxing).toBe(false);
+  });
+});
+
+const emptyOutputs = (): WorkflowOutputPresence => ({
+  boxEditorCount: 0,
+  step3MatrixCount: 0,
+  routingSnapshotCount: 0,
+  step4Ok: false,
+  step4StatusLineCount: 0,
+  hasInvoiceDraft: false,
+  invoiceSessionCount: 0,
+  hasCustomsSession: false,
+});
+
+describe("effectiveStaleness", () => {
+  it("hides stale marks when downstream stages have no output", () => {
+    const raw = invalidateFrom("validation");
+    const visible = effectiveStaleness(raw, emptyOutputs());
+    expect(raw.invoice).toBe(true);
+    expect(raw.customs).toBe(true);
+    expect(visible.invoice).toBe(false);
+    expect(visible.customs).toBe(false);
+    expect(isStepStale(4.5, visible)).toBe(false);
+    expect(isStepStale(5, visible)).toBe(false);
+  });
+
+  it("keeps the invoice stale after an upstream change once a draft exists", () => {
+    const raw = invalidateFrom("input");
+    const visible = effectiveStaleness(raw, {
+      ...emptyOutputs(),
+      hasInvoiceDraft: true,
+    });
+    expect(visible.invoice).toBe(true);
+    expect(visible.customs).toBe(false);
+  });
+
+  it("uses saved routing snapshots, not the forwarder table, as routing output", () => {
+    const raw = invalidateFrom("export");
+    const withoutSnapshots = effectiveStaleness(raw, {
+      ...emptyOutputs(),
+      step3MatrixCount: 2,
+    });
+    expect(withoutSnapshots.routing).toBe(false);
+    const withSnapshots = effectiveStaleness(raw, {
+      ...emptyOutputs(),
+      routingSnapshotCount: 1,
+    });
+    expect(withSnapshots.routing).toBe(true);
+  });
+
+  it("restores raw marks from a history snapshot and masks stages that were never produced", () => {
+    const restored = parseStaleness({
+      boxing: true,
+      export: true,
+      routing: true,
+      validation: true,
+      invoice: true,
+      customs: true,
+    });
+    const visible = effectiveStaleness(restored, {
+      ...emptyOutputs(),
+      boxEditorCount: 4,
+      step4Ok: true,
+      invoiceSessionCount: 1,
+    });
+    expect(visible.boxing).toBe(true);
+    expect(visible.export).toBe(false);
+    expect(visible.routing).toBe(false);
+    expect(visible.validation).toBe(true);
+    expect(visible.invoice).toBe(true);
+    expect(visible.customs).toBe(false);
   });
 });

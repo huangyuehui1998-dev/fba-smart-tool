@@ -1,4 +1,4 @@
-"""PR-0：验收脚本在干净仓库上应复现 11 项、跳过 1 项（真实 PDF）。
+"""PR-2a：交叉校验与过期屏蔽已修复；其余项仍复现。真实 PDF 为 SKIPPED。
 
 默认不进门禁。运行：pytest -m acceptance
 """
@@ -43,7 +43,8 @@ def test_acceptance_baseline_eleven_reproduced_one_skipped():
         "D-04 重复箱唛",
         "R2 合成",
         "D-05",
+        "R4 首次进入即过期（静态）",
     }
     assert {code for code, tag in status.items() if tag == "NOT REPRODUCED"} == fixed, out
     assert status["R2 真实第13批CL2"] == "SKIPPED"
-    assert sum(tag == "REPRODUCED" for tag in status.values()) == 2, out
+    assert sum(tag == "REPRODUCED" for tag in status.values()) == 1, out

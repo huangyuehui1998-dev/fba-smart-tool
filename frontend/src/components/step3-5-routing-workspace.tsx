@@ -24,7 +24,7 @@ import { StaleDataBanner } from "@/components/stale-data-banner";
 import { Input } from "@/components/ui/input";
 
 export function Step35RoutingWorkspace() {
-  const { taskId, staleness, clearStageStale } = useWorkflow();
+  const { taskId, staleness, clearStageStale, setRoutingSnapshotCount } = useWorkflow();
   const [files, setFiles] = useState<File[]>([]);
   const [previewData, setPreviewData] = useState<any[] | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -49,6 +49,10 @@ export function Step35RoutingWorkspace() {
   useEffect(() => {
     loadSnapshots();
   }, [loadSnapshots]);
+
+  useEffect(() => {
+    setRoutingSnapshotCount(snapshots.length);
+  }, [snapshots.length, setRoutingSnapshotCount]);
 
   const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();

@@ -476,11 +476,16 @@ def delete_history_task(task_id: str) -> bool:
         path = HISTORY_DIR / f"{safe_history_id(task_id)}.json"
     except ValueError:
         return False
+    index = _load_history_index()
+    tasks = list(index.get("tasks") or [])
+    in_index = any(t.get("id") == task_id for t in tasks)
+    if not path.exists() and not in_index:
+        return False
     if path.exists():
         path.unlink()
-    index = _load_history_index()
-    index["tasks"] = [t for t in index.get("tasks", []) if t.get("id") != task_id]
-    _save_history_index(index)
+    if in_index:
+        index["tasks"] = [t for t in tasks if t.get("id") != task_id]
+        _save_history_index(index)
     return True
 
 
