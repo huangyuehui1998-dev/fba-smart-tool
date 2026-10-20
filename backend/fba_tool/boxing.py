@@ -5,6 +5,7 @@ from typing import Dict, List, Tuple
 
 import pandas as pd
 
+from fba_tool.box_weight import box_gross_kg, carrier_tare, mixed_box_would_exceed
 from fba_tool.models import BoxItem, BoxPlan, SkuRow
 from fba_tool.user_config import param, weight_limit_kg
 
@@ -75,6 +76,7 @@ def generate_box_plan(
     # 单件体积 = 外箱体积 / 单箱装量，不是真实单品长宽高。
     # 因此默认不引入 py3dbp：用假立方体做 3D 会比贪心更像正确、实际更错。
     # 仅当 product_master 具备完整 unit_length/width/height 且 A/B 更优时再考虑 engine=3d。
+    sku_map = {s.sku: s for s in sku_rows}
     tail_pool.sort(key=lambda x: x["单个重量(kg)"], reverse=True)
     current_items: List[BoxItem] = []
     current_weight = 0.0
@@ -84,11 +86,14 @@ def generate_box_plan(
         qty_left = int(tail["剩余数量"])
         unit_weight = float(tail["单个重量(kg)"] or 0)
         unit_vol = float(tail["单件体积(cm3)"] or 0)
+        sku_name = str(tail["SKU简称"])
         while qty_left > 0:
-            if (current_count >= max_mixed_items or 
-                current_weight + unit_weight > max_weight_kg or 
+            tare = carrier_tare([it.sku for it in current_items] + [sku_name], sku_map)
+            over_weight = mixed_box_would_exceed(current_weight, unit_weight, tare, max_weight_kg)
+            if (current_count >= max_mixed_items or
+                over_weight or
                 current_volume + unit_vol > usable_volume):
-                
+
                 if current_items:
                     plans.append(BoxPlan(box_no=box_no, items=current_items, source="混装"))
                     box_no += 1
@@ -127,24 +132,19 @@ def box_metrics(editor_df: pd.DataFrame, sku_rows: List[SkuRow]) -> pd.DataFrame
         total_qty = int(group["数量"].sum())
         net_weight = 0.0
         max_box_vol = 0.0
-        carrier_tare = 0.0  # 承载纸箱（体积最大者）的空箱重，与 A1 混装承载箱口径一致
-        full_carton_override = None
+        lines = []
         for _, row in group.iterrows():
             sku = sku_map.get(str(row["SKU简称"]))
             if not sku:
                 continue
             qty = int(row["数量"])
             net_weight += sku.unit_weight_kg * qty
-
+            lines.append((sku.sku, qty))
             vol = sku.length_cm * sku.width_cm * sku.height_cm
             if vol > max_box_vol:
                 max_box_vol = vol
-                carrier_tare = sku.carton_tare_kg
 
-            if len(group) == 1 and qty == sku.carton_qty and sku.carton_gross_kg is not None:
-                full_carton_override = float(sku.carton_gross_kg)
-
-        gross_weight = full_carton_override if full_carton_override is not None else (net_weight + carrier_tare)
+        gross_weight = box_gross_kg(lines, sku_map)
 
         is_mixed = len(group) > 1
         if not is_mixed and len(group) == 1:

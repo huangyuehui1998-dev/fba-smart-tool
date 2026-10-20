@@ -29,11 +29,15 @@ class SkuRow:
         return self.total_qty % self.carton_qty
 
     def gross_weight_for_qty(self, qty: int) -> float:
-        if qty <= 0:
-            return 0.0
-        if self.carton_gross_kg is not None and qty == self.carton_qty:
-            return float(self.carton_gross_kg)
-        return round(self.unit_weight_kg * qty + self.carton_tare_kg, 3)
+        from fba_tool.box_weight import carton_gross_kg
+
+        return carton_gross_kg(
+            qty,
+            self.unit_weight_kg,
+            self.carton_tare_kg,
+            self.carton_gross_kg,
+            self.carton_qty,
+        )
 
     def unit_volume_cm3(self) -> float:
         if self.carton_qty <= 0:

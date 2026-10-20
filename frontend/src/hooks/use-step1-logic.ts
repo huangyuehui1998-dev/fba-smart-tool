@@ -27,6 +27,7 @@ import {
   type ComputedDisplay,
   type Row,
 } from "@/lib/step1-rows";
+import { shouldPromptWeightConfirm, weightRowsHash } from "@/lib/weight-confirm";
 import {
   stageInvalidatedByInputField,
   shouldUnlockBoxingOnInputField,
@@ -58,6 +59,7 @@ export function useStep1Logic() {
   const [costDashboard, setCostDashboard] = useState<CostDashboard | null>(null);
   const [validationErrors, setValidationErrors] = useState<ValidationErrorItem[]>([]);
   const [weightWarnings, setWeightWarnings] = useState<GrossWeightWarning[]>([]);
+  const [acknowledgedWeightHash, setAcknowledgedWeightHash] = useState<string | null>(null);
   const [parseAction, setParseAction] = useState<ParseAction>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -301,6 +303,27 @@ export function useStep1Logic() {
   }, []);
 
   const totals = aggregateTotals(computed);
+  const weightHash = weightRowsHash(rows);
+  const weightConfirmOpen = shouldPromptWeightConfirm(
+    rows,
+    acknowledgedWeightHash,
+    weightWarnings.some((w) => w.requires_confirm),
+  );
+
+  const keepDeclaredWeights = useCallback(() => {
+    setAcknowledgedWeightHash(weightRowsHash(rows));
+  }, [rows]);
+
+  const useCalculatedWeights = useCallback(() => {
+    setRows((current) =>
+      current.map((row, index) => {
+        const warning = weightWarnings.find((item) => item.row_index === index && item.suggested_gross_kg != null);
+        if (!warning || warning.suggested_gross_kg == null) return row;
+        return { ...row, grossKg: String(warning.suggested_gross_kg) };
+      }),
+    );
+    setAcknowledgedWeightHash(null);
+  }, [setRows, weightWarnings]);
 
   return {
     rows,
@@ -314,6 +337,10 @@ export function useStep1Logic() {
     actualPlacementFee,
     validationErrors,
     weightWarnings,
+    weightConfirmOpen,
+    weightHash,
+    keepDeclaredWeights,
+    useCalculatedWeights,
     parseAction,
     previewLoading,
     error,

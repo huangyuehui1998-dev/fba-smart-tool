@@ -65,6 +65,9 @@ def api_customs_preview(body: CustomsPreviewRequest):
 
 @router.post("/api/customs/export")
 def api_customs_export(body: CustomsExportRequest):
+    from fba_tool.weight_gate import raise_if_weight_unconfirmed
+
+    raise_if_weight_unconfirmed(body.weight_rows, body.confirm_weight_warnings)
     if body.data:
         from fba_tool.customs_package import CustomsLineItem, apply_overrides
 

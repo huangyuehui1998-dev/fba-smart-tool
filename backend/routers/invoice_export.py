@@ -159,9 +159,12 @@ async def api_export_preview(forwarder_id: str = Form(...), csv_file: UploadFile
 async def api_export_file(forwarder_id: str = Form(...), csv_file: UploadFile = File(...), reference_id: str = Form(""),
                           order_no: str = Form(""), channel: str = Form(""), invoice_date: str = Form(""), warehouse: str = Form(""),
                           measured_file: Optional[UploadFile] = File(None), box_id_fix: str = Form(""),
-                             weight_basis: str = Form(""), weight_ref_file: Optional[UploadFile] = File(None)):
+                             weight_basis: str = Form(""), weight_ref_file: Optional[UploadFile] = File(None),
+                             confirm_weight_warnings: bool = Form(False), weight_rows: str = Form("")):
     from fba_tool.invoice_rules import InvoiceBlocked
+    from fba_tool.weight_gate import parse_weight_rows, raise_if_weight_unconfirmed
 
+    raise_if_weight_unconfirmed(parse_weight_rows(weight_rows), confirm_weight_warnings)
     try:
         res = await _run(forwarder_id, csv_file, reference_id, order_no, channel, invoice_date, warehouse, measured_file, box_id_fix,
                          weight_basis, weight_ref_file)
