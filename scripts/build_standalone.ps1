@@ -25,7 +25,9 @@ if ($LASTEXITCODE -ne 0) { throw "verify_release_dist failed" }
 & $VenvPy (Join-Path $Root "scripts\verify_bundled_resources.py")
 if ($LASTEXITCODE -ne 0) { throw "verify_bundled_resources failed" }
 
-Write-Host "==> 4/5 PyInstaller onedir" -ForegroundColor Cyan
+Write-Host "==> 4/5 refuse to pack over app_data, then PyInstaller onedir" -ForegroundColor Cyan
+& $VenvPy (Join-Path $Root "scripts\release_guard.py") (Join-Path $Root "dist")
+if ($LASTEXITCODE -ne 0) { throw "dist 里已有用户数据，已停止打包" }
 & $VenvPy -m pip install pyinstaller --quiet
 & $VenvPy -m PyInstaller (Join-Path $Root "packaging\FBA_Smart_Tool.spec") --noconfirm --distpath (Join-Path $Root "dist") --workpath (Join-Path $Root "build\pyinstaller")
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }

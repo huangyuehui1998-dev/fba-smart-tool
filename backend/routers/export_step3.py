@@ -67,6 +67,13 @@ def api_export_amazon(body: ExportStep3Request):
     sku_rows = dataframe_to_sku_rows(df)
     _check_not_oversold(editor_df, sku_rows)
     _, _, amazon_bytes = step3_export_bundle(editor_df, sku_rows, body.fnsku_overrides)
+    if getattr(body, "fba_id", ""):
+        try:
+            from fba_tool.carton_store import snapshot_from_editor
+
+            snapshot_from_editor(body.fba_id, body.box_editor, body.rows)
+        except Exception:
+            pass
     return xlsx_response(amazon_bytes, "Send to Amazon表格.xlsx")
 
 

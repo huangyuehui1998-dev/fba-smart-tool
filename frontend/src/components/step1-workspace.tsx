@@ -84,6 +84,9 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
     excelInputId,
     totals: { totalFullBoxes, totalNet, totalGross },
     update,
+    applySpec,
+    cartonSpecsBySku,
+    cartonSpecNotices,
     addRow,
     removeRow,
     handleParseLocal,
@@ -259,6 +262,14 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
         </Card>
       </div>
 
+      {cartonSpecNotices.length > 0 && (
+        <div className="space-y-1 text-xs text-amber-800">
+          {cartonSpecNotices.map((notice) => (
+            <p key={notice}>{notice}</p>
+          ))}
+        </div>
+      )}
+
       <Card className="shadow-sm">
         <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
           <div className="flex flex-wrap items-center gap-2">
@@ -331,6 +342,7 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
                   const blocked = issueSummary.blockRows.has(i);
                   const warned = issueSummary.warnRows.has(i);
                   const hint = step1FixHint(i, validationErrors, weightWarnings);
+                  const specOptions = cartonSpecsBySku[r.sku] ?? [];
                   return (
                     <TableRow
                       key={i}
@@ -349,24 +361,43 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
                       </TableCell>
                       {EDITABLE_COLS.map((col) => (
                         <TableCell key={col.key} className="p-1">
-                          {col.key === "sku" && r.dataSource ? (
+                          {col.key === "sku" && (r.dataSource || specOptions.length > 1) ? (
                             <div className="flex min-w-[120px] flex-col gap-1">
                               <Input
                                 value={r[col.key]}
                                 onChange={(e) => update(i, col.key, e.target.value)}
                                 className="h-8 border-transparent bg-transparent px-2 text-xs shadow-none focus-visible:border-input focus-visible:bg-background"
                               />
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "w-fit px-1.5 py-0 text-[10px] font-normal",
-                                  r.dataSource === "official"
-                                    ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-                                    : "border-amber-300 bg-amber-50 text-amber-800",
-                                )}
-                              >
-                                {r.dataSource === "official" ? "🟢 外箱主数据" : "🟡 手填外箱"}
-                              </Badge>
+                              {specOptions.length > 1 ? (
+                                <select
+                                  data-testid="carton-spec-select"
+                                  className="h-7 rounded border border-input bg-background px-1 text-[10px]"
+                                  value={String(specOptions.find((spec) => String(spec.qty_per_carton) === r.perBox)?.id ?? specOptions[0].id)}
+                                  onChange={(event) => {
+                                    const chosen = specOptions.find((spec) => String(spec.id) === event.target.value);
+                                    if (chosen) applySpec(i, chosen);
+                                  }}
+                                >
+                                  {specOptions.map((spec) => (
+                                    <option key={spec.id} value={spec.id}>
+                                      {spec.spec_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : null}
+                              {r.dataSource ? (
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "w-fit px-1.5 py-0 text-[10px] font-normal",
+                                    r.dataSource === "official"
+                                      ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                                      : "border-amber-300 bg-amber-50 text-amber-800",
+                                  )}
+                                >
+                                  {r.dataSource === "official" ? "🟢 外箱主数据" : "🟡 手填外箱"}
+                                </Badge>
+                              ) : null}
                             </div>
                           ) : (
                             <Input

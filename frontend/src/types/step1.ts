@@ -43,6 +43,19 @@ export interface ComputePreviewResponse {
   weight_warnings?: GrossWeightWarning[];
   cost_dashboard?: CostDashboard;
   master_gaps?: { sku: string; missing: string[] }[];
+  carton_spec_notices?: string[];
+  carton_specs_by_sku?: Record<string, CartonSpecChoice[]>;
+}
+
+export interface CartonSpecChoice {
+  id: number;
+  spec_name: string;
+  qty_per_carton: number;
+  length_cm: number;
+  width_cm: number;
+  height_cm: number;
+  gross_kg: number;
+  is_default: boolean;
 }
 
 /** 录入单箱毛重与「装量×单件重+空箱重」不符，可能引发重量差异费。 */

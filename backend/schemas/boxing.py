@@ -27,3 +27,4 @@ class TailAssignRequest(BoxEditorRequest):
 
 class ExportStep3Request(BoxEditorRequest):
     confirm_weight_warnings: bool = False
+    fba_id: str = ""

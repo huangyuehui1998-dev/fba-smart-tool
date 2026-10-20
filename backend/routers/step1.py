@@ -110,6 +110,24 @@ def api_validate_input(body: InputRowsRequest):
     }
 
 
+def _carton_notices(rows):
+    try:
+        from fba_tool.carton_store import mixed_spec_notices
+
+        return mixed_spec_notices(rows)
+    except Exception:
+        return []
+
+
+def _specs_by_sku(rows):
+    try:
+        from fba_tool.carton_store import specs_by_sku
+
+        return specs_by_sku(rows)
+    except Exception:
+        return {}
+
+
 @router.post("/api/compute_preview")
 def api_compute_preview(body: ComputePreviewRequest):
     """计算预计整箱数、尾数、总净重/毛重，及总方数、总体积重。"""
@@ -174,6 +192,8 @@ def api_compute_preview(body: ComputePreviewRequest):
         "total_gross_kg": totals["total_gross_kg"],
         "box_metrics": df_to_records(metrics),
         "weight_warnings": warnings,
+        "carton_spec_notices": _carton_notices(merged_rows),
+        "carton_specs_by_sku": _specs_by_sku(merged_rows),
         "cost_dashboard": {
             "placement": placement,
         },
