@@ -60,11 +60,13 @@ import {
 import {
   clearStaleFrom,
   createEmptyStaleness,
+  effectiveStaleness,
   invalidateFrom,
   clearStageStale,
   type WorkflowStage,
   type WorkflowStaleness,
 } from "@/lib/workflow-invalidation";
+import { saveTaskFileAfterHistory } from "@/lib/task-save-feedback";
 import { inferHighestReached } from "@/lib/workflow-steps";
 
 interface WorkflowContextValue {
@@ -184,8 +186,10 @@ interface WorkflowContextValue {
   /** Step 4.5 等在存档前将表格最新值刷入快照 */
   registerSnapshotFlush: (fn: () => void) => () => void;
 
-  /** 各阶段下游产物是否因上游变更而过期 */
+  /** 各阶段下游产物是否因上游变更而过期（已按是否有产物屏蔽） */
   staleness: WorkflowStaleness;
+  /** Step 3.5 已保存的刷仓快照数。过期判断只用这个数，不用货代表行数。 */
+  setRoutingSnapshotCount: (count: number) => void;
   /** 上游数据变更时标记下游过期（T1 失效链） */
   markStale: (stage: WorkflowStage) => void;
   /** 阶段重算/校验通过后清除该阶段及下游过期标记 */
@@ -257,7 +261,11 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [invoiceSyncLinkedEdits, setInvoiceSyncLinkedEdits] = useState(true);
   const [customsSession, setCustomsSession] = useState<WorkflowContextValue["customsSession"]>(null);
   const [staleness, setStaleness] = useState<WorkflowStaleness>(() => createEmptyStaleness());
+  const [routingSnapshotCount, setRoutingSnapshotCountState] = useState(0);
   const [highestReachedStep, setHighestReachedStep] = useState(1);
+  const setRoutingSnapshotCount = useCallback((count: number) => {
+    setRoutingSnapshotCountState(count);
+  }, []);
 
   const markStale = useCallback((stage: WorkflowStage) => {
     setStaleness((prev) => invalidateFrom(stage, prev));
@@ -304,6 +312,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setInvoicePoByShipment({});
     setCustomsSession(null);
     setStaleness(createEmptyStaleness());
+    setRoutingSnapshotCountState(0);
     setHighestReachedStep(1);
   }, []);
 
@@ -477,6 +486,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setInvoiceSyncLinkedEdits(true);
     setCustomsSession(null);
     setStaleness(createEmptyStaleness());
+    setRoutingSnapshotCountState(0);
     setHighestReachedStep(1);
     },
     [],
@@ -626,34 +636,37 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     }
 
     const project = buildFboxFromSource(source);
+    setFboxSaveStatus("saving");
+    fboxSaveRef.current?.cancel();
 
     try {
-      setFboxSaveStatus("saving");
-      fboxSaveRef.current?.cancel();
-
-      const handle = projectFileHandleRef.current;
-      if (handle && fboxWritable) {
-        await writeFboxToHandle(handle, project);
-        setFboxSaveStatus("saved");
-        return projectFileName ?? handle.name;
-      }
-
-      const { handle: newHandle, name } = await pickSaveNewFbox(source.taskName || autoTaskName());
-      await writeFboxToHandle(newHandle, project);
-      await bindProjectHandle(newHandle, name);
-      const displayName = name.replace(/\.fbox$/i, "") || source.taskName;
-      setTaskName(displayName);
+      const savedName = await saveTaskFileAfterHistory({
+        saveHistory: () => saveCurrentTaskToHistory(source.taskName),
+        writeFile: async () => {
+          const handle = projectFileHandleRef.current;
+          if (handle && fboxWritable) {
+            await writeFboxToHandle(handle, project);
+            return projectFileName ?? handle.name;
+          }
+          const { handle: newHandle, name } = await pickSaveNewFbox(source.taskName || autoTaskName());
+          await writeFboxToHandle(newHandle, project);
+          await bindProjectHandle(newHandle, name);
+          const displayName = name.replace(/\.fbox$/i, "") || source.taskName;
+          setTaskName(displayName);
+          return name;
+        },
+      });
       setFboxSaveStatus("saved");
-      return name;
+      return savedName;
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
+      if (err instanceof Error && err.message === "已取消保存") {
         setFboxSaveStatus(projectFileHandleRef.current ? "saved" : "idle");
-        throw new Error("已取消保存");
+        throw err;
       }
       setFboxSaveStatus("error");
       throw err;
     }
-  }, [flushSnapshotPending, bindProjectHandle, fboxWritable, projectFileName]);
+  }, [flushSnapshotPending, bindProjectHandle, fboxWritable, projectFileName, saveCurrentTaskToHistory]);
 
   const resetWorkflow = useCallback(async () => {
     const source = snapshotSourceRef.current;
@@ -846,6 +859,31 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       staleness,
   ]);
 
+  const visibleStaleness = useMemo(
+    () =>
+      effectiveStaleness(staleness, {
+        boxEditorCount: boxEditorApi.length,
+        step3MatrixCount: step3Matrix.length,
+        routingSnapshotCount,
+        step4Ok,
+        step4StatusLineCount: step4StatusLines.length,
+        hasInvoiceDraft: invoiceDraft != null,
+        invoiceSessionCount: Object.keys(invoiceSessionsByShipment).length,
+        hasCustomsSession: customsSession != null,
+      }),
+    [
+      staleness,
+      boxEditorApi.length,
+      step3Matrix.length,
+      routingSnapshotCount,
+      step4Ok,
+      step4StatusLines.length,
+      invoiceDraft,
+      invoiceSessionsByShipment,
+      customsSession,
+    ],
+  );
+
   const value = useMemo(
     () => ({
       step,
@@ -931,7 +969,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       fboxWritable,
       loadFboxFromDrop,
       registerSnapshotFlush,
-      staleness,
+      staleness: visibleStaleness,
+      setRoutingSnapshotCount,
       markStale,
       clearStaleFrom: clearStaleFromStage,
       clearStageStale: clearStageStaleFn,
@@ -943,7 +982,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       step,
       taskName,
       taskId,
-      staleness,
+      visibleStaleness,
+      setRoutingSnapshotCount,
       markStale,
       clearStaleFromStage,
       clearStageStaleFn,

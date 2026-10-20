@@ -1,4 +1,10 @@
 import { toast } from "sonner";
+
+import {
+  isAbortError,
+  notifyDownloadCancelled,
+  notifyDownloadStarted,
+} from "@/lib/task-save-feedback";
 const API_BASE =
   (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/$/, "") ?? "";
 
@@ -169,9 +175,10 @@ export async function triggerBrowserDownload(blob: Blob, filename: string): Prom
       await writable.write(blob);
       await writable.close();
       savedLocally = true;
-    } catch (err: any) {
-      if (err.name === 'AbortError') {
-        return; // User cancelled
+    } catch (err: unknown) {
+      if (isAbortError(err)) {
+        notifyDownloadCancelled(filename);
+        return;
       }
       console.warn("showSaveFilePicker failed, falling back to standard download:", err);
     }
@@ -196,7 +203,7 @@ export async function triggerBrowserDownload(blob: Blob, filename: string): Prom
     return;
   }
 
-  // Fallback
+  notifyDownloadStarted(filename);
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;

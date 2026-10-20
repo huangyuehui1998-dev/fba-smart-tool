@@ -91,6 +91,52 @@ export function clearStaleFrom(stage: WorkflowStage, current: WorkflowStaleness)
   return next;
 }
 
+/** 判断某阶段是否已经有可展示的产物。没有产物时，过期标记不对外显示。 */
+export type WorkflowOutputPresence = {
+  boxEditorCount: number;
+  step3MatrixCount: number;
+  routingSnapshotCount: number;
+  step4Ok: boolean;
+  step4StatusLineCount: number;
+  hasInvoiceDraft: boolean;
+  invoiceSessionCount: number;
+  hasCustomsSession: boolean;
+};
+
+export function stageHasOutput(stage: WorkflowStage, outputs: WorkflowOutputPresence): boolean {
+  switch (stage) {
+    case "boxing":
+      return outputs.boxEditorCount > 0;
+    case "export":
+      return outputs.step3MatrixCount > 0;
+    case "routing":
+      return outputs.routingSnapshotCount > 0;
+    case "validation":
+      return outputs.step4Ok || outputs.step4StatusLineCount > 0;
+    case "invoice":
+      return outputs.hasInvoiceDraft || outputs.invoiceSessionCount > 0;
+    case "customs":
+      return outputs.hasCustomsSession;
+    default:
+      return false;
+  }
+}
+
+/**
+ * 对外暴露的过期 = 原始标记且该阶段已有产物。
+ * 快照里仍保存原始标记；首次进入尚无发票/报关结果时不应显示「已过期」。
+ */
+export function effectiveStaleness(
+  staleness: WorkflowStaleness,
+  outputs: WorkflowOutputPresence,
+): WorkflowStaleness {
+  const next = { ...staleness };
+  for (const stage of STAGE_ORDER) {
+    next[stage] = Boolean(staleness[stage]) && stageHasOutput(stage, outputs);
+  }
+  return next;
+}
+
 /** 是否存在任一过期阶段。 */
 export function hasAnyStale(staleness: WorkflowStaleness, stages?: readonly WorkflowStage[]): boolean {
   const check = stages ?? STAGE_ORDER;

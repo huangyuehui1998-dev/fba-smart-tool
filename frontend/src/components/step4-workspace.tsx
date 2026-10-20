@@ -527,7 +527,7 @@ export function Step4Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
                 </>
               )}
             </Button>
-            {workerPackingSuccess && (
+            {workerPackingSuccess && step4Ok && (
               <p className="text-center text-xs font-medium text-emerald-700">
                 ✅ 交叉校验通过，装箱单已生成！
               </p>
