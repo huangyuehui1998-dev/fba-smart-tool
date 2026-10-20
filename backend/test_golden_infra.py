@@ -4,11 +4,13 @@ import json
 
 import pytest
 
+from tests._realdata import requires_realdata
 from tests.golden import compare_golden as cg
 
 G = cg.GOLDEN_DIR
 
 
+@requires_realdata(G / "customs_manifest.csv", G / "invoice_manifest.csv")
 def test_manifest_columns_and_counts():
     customs = cg.load_manifest(G / "customs_manifest.csv")
     invoice = cg.load_manifest(G / "invoice_manifest.csv")
@@ -22,11 +24,13 @@ def test_manifest_columns_and_counts():
         assert (G / r["expected_path"]).exists(), r["expected_path"]
 
 
+@requires_realdata(G / "invoice_manifest.csv")
 def test_no_qiluo_or_legacy_in_golden():
     invoice = cg.load_manifest(G / "invoice_manifest.csv")
     assert all("琪珞" not in r["expected_path"] for r in invoice)
 
 
+@requires_realdata(G / "product_master_golden.json")
 def test_product_snapshot_declared_value_empty():
     snap = json.loads((G / "product_master_golden.json").read_text(encoding="utf-8"))
     products = snap["products"]
@@ -37,6 +41,7 @@ def test_product_snapshot_declared_value_empty():
         assert p["currency"] == "USD"
 
 
+@requires_realdata(G / "customs_manifest.csv")
 def test_expected_diff_contains_b1_q7_and_not_box_text():
     customs = {r["case_id"]: r for r in cg.load_manifest(G / "customs_manifest.csv")}
     d = cg.parse_expected_diff(customs["JUS14DD12"]["expected_diff"])
@@ -49,6 +54,7 @@ def test_expected_diff_contains_b1_q7_and_not_box_text():
     assert "报关单!F12" not in cg.parse_expected_diff(customs["JUS13DD21"]["expected_diff"])
 
 
+@requires_realdata(G / "customs_manifest.csv")
 @pytest.mark.parametrize(
     "cid,expected",
     [("JUS15DD5", 5), ("JUS15DD5SBD", 5), ("JUS15DD6", 6), ("JUS15DD6TEB", 6), ("JUS15DD8", 8)],
@@ -61,6 +67,7 @@ def test_batch15_box_text_cleaned_and_passes(cid, expected):
     assert cg.compare_value(raw, expected, kind="count") == cg.VERDICT_PASS_CLEANED
 
 
+@requires_realdata(G / "customs_manifest.csv")
 def test_freight_cell_k12_blank_in_all_samples():
     customs = cg.load_manifest(G / "customs_manifest.csv")
     for r in customs:
@@ -81,6 +88,7 @@ def test_compare_rules():
     assert cg.compare_value(None, "", kind="money") == cg.VERDICT_PASS
 
 
+@requires_realdata(G / "invoice_manifest.csv")
 def test_sheet_name_normalized():
     assert cg.find_sheet_name(["Invoice\xa0Template"], "Invoice Template") == "Invoice\xa0Template"
     sends = [r for r in cg.load_manifest(G / "invoice_manifest.csv") if r["kind"] == "invoice_send"]
@@ -88,6 +96,7 @@ def test_sheet_name_normalized():
     assert cells["Invoice Template!A14"] is not None
 
 
+@requires_realdata(G / "customs_manifest.csv")
 def test_known_diff_and_report(tmp_path):
     customs = {r["case_id"]: r for r in cg.load_manifest(G / "customs_manifest.csv")}
     r = customs["JUS13DD21"]
@@ -117,6 +126,7 @@ def test_warnings_compare():
     assert cg.compare_warnings("x", ["A"], [])[0].verdict == cg.VERDICT_FAIL
 
 
+@requires_realdata(G / "customs_manifest.csv")
 def test_q3_invoice_sum_vs_customs_total_known_diff():
     """发票合计 3679.16 与报关总价 3679.20 的差额识别为已知差异（方案 v7 §5-7）。"""
     customs = {r["case_id"]: r for r in cg.load_manifest(G / "customs_manifest.csv")}
@@ -127,6 +137,7 @@ def test_q3_invoice_sum_vs_customs_total_known_diff():
     assert Decimal(str(total)) == Decimal("84") * Decimal("43.80")
 
 
+@requires_realdata(G / "invoice_manifest.csv")
 def test_invoice_manifest_warnings_follow_new_price_rule():
     """s2-fix2：快照有 listing_price、declared_value 为空 → 来源 lingxing，不再期望回落警告。"""
     import csv

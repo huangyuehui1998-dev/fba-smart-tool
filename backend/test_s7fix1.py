@@ -18,8 +18,11 @@ B7 = INP / "第7批-FBA19GVFX5SC.csv"
 def wh_db():
     from fba_tool.master_db import init_master_db
     from fba_tool.warehouse_db import apply_warehouse_import
+    wh = HERE / "tests/fixtures/warehouse/fba_warehouse_qiluo.xlsx"
+    if not wh.is_file():
+        pytest.skip(f"需要 box realdata: {wh}")
     init_master_db()
-    apply_warehouse_import((HERE / "tests/fixtures/warehouse/fba_warehouse_qiluo.xlsx").read_bytes(), "q.xlsx")
+    apply_warehouse_import(wh.read_bytes(), "q.xlsx")
 
 
 def _client():

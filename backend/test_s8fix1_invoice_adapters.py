@@ -12,8 +12,11 @@ import pytest
 from fba_tool.invoice_export import decide_weight_basis, export_invoice
 from fba_tool.shipment_parser import parse_csv_shipment
 
+from tests._realdata import skip_module_if_missing
+
 HERE = Path(__file__).resolve().parent
 S = HERE / "tests" / "golden" / "samples"
+skip_module_if_missing(HERE / "tests/golden/product_master_golden.json")
 SNAP = {p["fnsku"]: p for p in json.loads((HERE / "tests/golden/product_master_golden.json").read_text(encoding="utf-8"))["products"]}
 
 

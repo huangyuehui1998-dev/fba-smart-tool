@@ -52,6 +52,19 @@ CONFIG_WHITELIST: Dict[str, str] = {
 
 RELEASE_SUBDIR = "release_templates"
 
+# Marco 2026-10-20 决定：这 3 份真实数据模板原样留在仓库，不打进安装包。
+# 文本扫描不解包它们；新增的其它真实二进制由 test_manifest_excludes_real_data_files 拦截。
+ALLOWED_REAL_TEMPLATES_DECISION_DATE = "2026-10-20"
+ALLOWED_REAL_TEMPLATES = (
+    "发货录入样表.xlsx",
+    "工厂表.xlsx",
+    "货代表.xlsx",
+)
+# 空白官方 STA 表，不是上述 3 份已填写的真实数据模板，也不进安装包白名单。
+KNOWN_BLANK_TEMPLATES = (
+    "Send to Amazon表格.xlsx",
+)
+
 
 def _root(root: Path = None) -> Path:
     return Path(root).resolve() if root is not None else Path(__file__).resolve().parent.parent

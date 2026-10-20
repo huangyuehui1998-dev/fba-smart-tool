@@ -281,6 +281,8 @@ def init_master_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_product_master_fnsku ON product_master(fnsku)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_product_master_sid ON product_master(sid)")
         conn.commit()
+        # WAL 下改动只进 -wal，主文件字节不变。折进主文件后，复制品被 init 改写才能从大小/哈希上看出来。
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 
 
 def _ensure_lingxing_tables(conn: sqlite3.Connection) -> None:

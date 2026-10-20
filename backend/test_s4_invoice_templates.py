@@ -6,8 +6,10 @@ from pathlib import Path
 import pytest
 
 from fba_tool import invoice_templates as it
+from tests._realdata import skip_module_if_missing
 
 G = Path(__file__).parent / "tests" / "golden" / "samples"
+skip_module_if_missing(G)
 T = G / "invoice_templates"
 LEG = G / "invoice_legacy"
 INV = G / "invoice"

@@ -9,9 +9,11 @@ import pytest
 from fba_tool import customs_package as cp
 from fba_tool.customs_export import export_customs_package
 from fba_tool.customs_package import build_customs_from_tickets
+from tests._realdata import skip_module_if_missing
 from tests.golden import compare_golden as cg
 
 G = cg.GOLDEN_DIR
+skip_module_if_missing(G / "customs_inputs.json", G / "customs_manifest.csv")
 TEMPLATE = Path(__file__).resolve().parent / "templates" / "customs" / "报关资料模板.xlsx"
 INPUTS = json.loads((G / "customs_inputs.json").read_text(encoding="utf-8"))
 MANIFEST = {r["case_id"]: r for r in cg.load_manifest(G / "customs_manifest.csv")}

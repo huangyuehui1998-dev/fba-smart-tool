@@ -22,7 +22,7 @@ def test_known_codes_accepted(name, wh):
     assert _warehouse_from_filename(name) == wh
 
 
-@pytest.mark.skipif(not TEST1.is_dir(), reason="缺 test1")
+@pytest.mark.skipif(not TEST1.is_dir(), reason="需要 box realdata: 缺 test1")
 def test_source_marked_and_serialized():
     raw = (TEST1 / "第一票ONT8.csv").read_bytes()
     ship = parse_csv_shipment(raw, allow_unassigned_fba=True, file_name="第一票ONT8.csv")
@@ -46,7 +46,7 @@ def _spy(monkeypatch, module):
     return seen
 
 
-@pytest.mark.skipif(not TEST1.is_dir(), reason="缺 test1")
+@pytest.mark.skipif(not TEST1.is_dir(), reason="需要 box realdata: 缺 test1")
 def test_callers_pass_file_name(monkeypatch):
     raw = (TEST1 / "第二票AVP1.csv").read_bytes()
     from fba_tool import fba_parser, product_catalog, shipment_serialize

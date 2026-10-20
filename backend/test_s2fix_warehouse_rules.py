@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from tests._realdata import requires_realdata
 from fba_tool import warehouse_codes as wc
 from fba_tool.master_db import init_master_db, list_products
 from fba_tool.warehouse_db import (
@@ -33,6 +34,7 @@ def isolated(monkeypatch, tmp_path):
     return ad
 
 
+@requires_realdata(WH_FILE)
 def test_parse_qiluo_sheet_about_476_rows():
     rows, errors = parse_warehouse_sheet(WH_FILE.read_bytes(), WH_FILE.name)
     assert 470 <= len(rows) <= 476
@@ -47,6 +49,7 @@ def test_parse_qiluo_sheet_about_476_rows():
     assert any(i["value"] == "HLI2" for i in errors)  # 重复代码给提示
 
 
+@requires_realdata(WH_FILE)
 def test_preview_then_apply_then_zero_diff():
     data = WH_FILE.read_bytes()
     pv = preview_warehouse_import(data, WH_FILE.name)
@@ -58,6 +61,7 @@ def test_preview_then_apply_then_zero_diff():
     assert pv2["summary"]["new"] == 0 and pv2["summary"]["changed"] == 0
 
 
+@requires_realdata(WH_FILE)
 def test_whitelist_removes_unverified_and_uses_table():
     assert "TOL2" not in wc.BUILTIN_WAREHOUSE_CODES and "DAY1" not in wc.BUILTIN_WAREHOUSE_CODES
     assert "CVG3" in wc.BUILTIN_WAREHOUSE_CODES
@@ -97,7 +101,7 @@ def test_customs_defaults_follow_rule_profile():
     assert d.loading_port == "上海"
 
 
-@pytest.mark.skipif(not PRODUCT_INFO.is_file(), reason="无产品信息表样本")
+@pytest.mark.skipif(not PRODUCT_INFO.is_file(), reason="需要 box realdata: 无产品信息表样本")
 def test_initial_import_product_info_into_temp_db():
     from main import app
 
@@ -108,6 +112,7 @@ def test_initial_import_product_info_into_temp_db():
     assert len(list_products()) == r.json()["total_in_db"]
 
 
+@requires_realdata(WH_FILE)
 def test_api_warehouse_import_and_list():
     from main import app
 
