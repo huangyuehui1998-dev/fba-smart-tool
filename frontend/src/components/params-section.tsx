@@ -33,7 +33,6 @@ function Field({ label, children, hint }: { label: string; children: React.React
 }
 
 const DEFAULT_PARAMS: UserParameters = {
-  amazon_max_boxes: 130,
   weight_limit_kg: 22.5,
   max_mixed_items_per_box: 40,
   throw_ratio: 6000,
@@ -52,7 +51,6 @@ const DEFAULT_PARAMS: UserParameters = {
 type ParamKey = keyof typeof DEFAULT_PARAMS;
 
 const PARAM_FIELDS: { key: ParamKey; label: string; step?: string; span?: 2 }[] = [
-  { key: "amazon_max_boxes", label: "亚马逊单票最大箱数" },
   { key: "weight_limit_kg", label: "单箱重量上限 (kg)", step: "0.1" },
   { key: "max_mixed_items_per_box", label: "混装单箱最大件数" },
   { key: "throw_ratio", label: "抛重系数" },

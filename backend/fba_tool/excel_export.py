@@ -42,7 +42,6 @@ from fba_tool.template_layout import (
 )
 from fba_tool.template_loader import find_template, template_path
 from fba_tool.user_config import (
-    amazon_max_boxes,
     factory_warehouse_columns,
     formula,
     forwarder_column_map,
@@ -50,10 +49,6 @@ from fba_tool.user_config import (
     param,
     render_formula,
 )
-
-# 兼容旧引用；实际值来自 config/user_settings.json
-AMAZON_MAX_BOXES = amazon_max_boxes()
-
 
 def _box_col_name(box_no: int) -> str:
     return render_formula(label("internal_box_header", "第{box_no}箱"), box_no=box_no)
@@ -398,19 +393,15 @@ def _per_box_metrics(editor_df: pd.DataFrame, sku_map: Dict[str, SkuRow], imperi
         return result
     for box_no, group in editor_df.groupby("箱号"):
         box_no = int(box_no)
-        from fba_tool.box_weight import box_gross_kg
+        from fba_tool.box_weight import box_gross_kg, outer_dims_cm
 
-        max_l = max_w = max_h = 0.0
         lines = []
         for _, row in group.iterrows():
             sku = sku_map.get(str(row["SKU简称"]))
             if not sku:
                 continue
-            qty = int(row["数量"])
-            lines.append((sku.sku, qty))
-            max_l = max(max_l, sku.length_cm)
-            max_w = max(max_w, sku.width_cm)
-            max_h = max(max_h, sku.height_cm)
+            lines.append((sku.sku, int(row["数量"])))
+        max_l, max_w, max_h = outer_dims_cm(lines, sku_map)
         gross_kg = round(box_gross_kg(lines, sku_map), 2)
         entry = {"长(cm)": max_l, "宽(cm)": max_w, "高(cm)": max_h, "实重(kg)": gross_kg}
         if imperial:

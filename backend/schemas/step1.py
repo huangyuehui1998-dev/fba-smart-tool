@@ -16,6 +16,7 @@ class TextParseRequest(BaseModel):
 class InputRowsRequest(BaseModel):
     rows: List[Dict[str, Any]] = Field(..., description="Step1 录入行，列名见 INPUT_COLUMNS")
     fnsku_overrides: Dict[str, str] = Field(default_factory=dict, description="SKU -> FNSKU 覆盖映射")
+    transport_mode: str = Field("spd_partnered", description="SPD-合作 / SPD-自选 / LTL-FTL")
 
 
 class ComputePreviewRequest(InputRowsRequest):

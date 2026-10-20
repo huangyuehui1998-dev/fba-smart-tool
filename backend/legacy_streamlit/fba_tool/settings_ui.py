@@ -26,7 +26,6 @@ def render_user_config_panel():
 
     with st.expander("业务参数", expanded=False):
         p = params.copy()
-        p["amazon_max_boxes"] = st.number_input("亚马逊单票最大箱数", 1, 500, int(p.get("amazon_max_boxes", 130)))
         p["weight_limit_kg"] = st.number_input("单箱重量上限(kg)", 1.0, 100.0, float(p.get("weight_limit_kg", 22.5)))
         p["max_mixed_items_per_box"] = st.number_input("混装单箱最大件数", 1, 500, int(p.get("max_mixed_items_per_box", 40)))
         p["throw_ratio"] = st.number_input("抛重系数", 1000.0, 10000.0, float(p.get("throw_ratio", 6000)))

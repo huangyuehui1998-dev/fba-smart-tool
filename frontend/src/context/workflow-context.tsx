@@ -24,6 +24,7 @@ import { DEFAULT_THROW_RATIO, DEFAULT_WEIGHT_LIMIT_KG } from "@/constants";
 import { fetchConfigLimits } from "@/lib/api/workflow";
 import { saveTaskHistory } from "@/lib/api/task-history";
 import { EMPTY_ROW, type Row } from "@/lib/step1-rows";
+import { DEFAULT_TRANSPORT_MODE, type TransportMode } from "@/lib/transport-mode";
 import {
   applyTaskHistorySnapshot,
   buildTaskHistorySnapshot,
@@ -106,6 +107,8 @@ interface WorkflowContextValue {
   setStep3BoxCount: (n: number) => void;
   step3SkuCount: number;
   setStep3SkuCount: (n: number) => void;
+  transportMode: TransportMode;
+  setTransportMode: (mode: TransportMode) => void;
 
   csvFiles: File[];
   setCsvFiles: Dispatch<SetStateAction<File[]>>;
@@ -232,6 +235,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [step3Matrix, setStep3Matrix] = useState<Record<string, unknown>[]>([]);
   const [step3BoxCount, setStep3BoxCount] = useState(0);
   const [step3SkuCount, setStep3SkuCount] = useState(0);
+  const [transportMode, setTransportMode] = useState<TransportMode>(DEFAULT_TRANSPORT_MODE);
 
   const [csvFiles, setCsvFiles] = useState<File[]>([]);
   const [pdfFiles, setPdfFiles] = useState<File[]>([]);
@@ -341,6 +345,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setStep3Matrix(snapshot.step3Matrix ?? []);
     setStep3BoxCount(snapshot.step3BoxCount ?? 0);
     setStep3SkuCount(snapshot.step3SkuCount ?? 0);
+    setTransportMode(snapshot.transportMode ?? DEFAULT_TRANSPORT_MODE);
     const reached = inferHighestReached({
       step: resolvedStep,
       highestReachedStep: snapshot.highestReachedStep,
@@ -376,6 +381,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     step3Matrix,
     step3BoxCount,
     step3SkuCount,
+    transportMode,
     metrics,
     tailPool,
     hasOverweight,
@@ -413,6 +419,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     step3Matrix,
     step3BoxCount,
     step3SkuCount,
+    transportMode,
     metrics,
     tailPool,
     hasOverweight,
@@ -456,6 +463,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setStep3Matrix([]);
     setStep3BoxCount(0);
     setStep3SkuCount(0);
+    setTransportMode(DEFAULT_TRANSPORT_MODE);
     setCsvFiles([]);
     setPdfFiles([]);
     setStep4Ok(false);
@@ -494,6 +502,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setStep3Matrix(applied.step3Matrix);
     setStep3BoxCount(applied.step3BoxCount);
     setStep3SkuCount(applied.step3SkuCount);
+    setTransportMode(applied.transportMode);
     setMetrics(applied.metrics);
     setTailPool(applied.tailPool);
     setHasOverweight(applied.hasOverweight);
@@ -774,6 +783,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
         step3Matrix,
         step3BoxCount,
         step3SkuCount,
+        transportMode,
       };
       if (snapshotHasData(snapshot)) {
         saveWorkflowSnapshot(snapshot);
@@ -798,6 +808,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     step3Matrix,
     step3BoxCount,
     step3SkuCount,
+    transportMode,
   ]);
 
   useEffect(() => {
@@ -821,6 +832,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     step3Matrix,
     step3BoxCount,
     step3SkuCount,
+    transportMode,
     metrics,
     tailPool,
     hasOverweight,
@@ -882,6 +894,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       setStep3BoxCount,
       step3SkuCount,
       setStep3SkuCount,
+      transportMode,
+      setTransportMode,
       csvFiles,
       setCsvFiles,
       pdfFiles,
@@ -968,6 +982,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       step3Matrix,
       step3BoxCount,
       step3SkuCount,
+      transportMode,
       csvFiles,
       pdfFiles,
       step4Ok,

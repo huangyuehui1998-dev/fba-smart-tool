@@ -1,6 +1,5 @@
 {
   "parameters": {
-    "amazon_max_boxes": 130,
     "weight_limit_kg": 22.5,
     "max_mixed_items_per_box": 40,
     "throw_ratio": 6000,

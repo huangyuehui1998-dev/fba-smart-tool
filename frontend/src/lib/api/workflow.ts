@@ -24,13 +24,19 @@ function payload(body: WorkflowPayload) {
     rows: body.rows,
     box_editor: body.box_editor,
     fnsku_overrides: body.fnsku_overrides ?? {},
+    transport_mode: body.transport_mode ?? "spd_partnered",
   };
 }
 
-export function calculateBoxes(rows: ApiSkuRow[], fnskuOverrides?: Record<string, string>) {
+export function calculateBoxes(
+  rows: ApiSkuRow[],
+  fnskuOverrides?: Record<string, string>,
+  transportMode?: string,
+) {
   return apiPostJson<CalculateBoxesResponse>("/api/calculate_boxes", {
     rows,
     fnsku_overrides: fnskuOverrides ?? {},
+    transport_mode: transportMode ?? "spd_partnered",
   });
 }
 

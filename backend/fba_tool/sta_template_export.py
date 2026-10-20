@@ -107,22 +107,16 @@ def _per_box_metrics_imperial(
         box_no = int(box_no)
         if box_no < 1 or box_no > max_box:
             continue
-        from fba_tool.box_weight import box_gross_kg
+        from fba_tool.box_weight import box_gross_kg, outer_dims_cm
 
-        max_l = max_w = max_h = 0.0
-        has_dim = False
         lines = []
         for _, row in group.iterrows():
             sku = sku_map.get(str(row["SKU简称"]))
             if not sku:
                 continue
-            qty = int(row["数量"])
-            lines.append((sku.sku, qty))
-            if sku.length_cm or sku.width_cm or sku.height_cm:
-                has_dim = True
-            max_l = max(max_l, sku.length_cm)
-            max_w = max(max_w, sku.width_cm)
-            max_h = max(max_h, sku.height_cm)
+            lines.append((sku.sku, int(row["数量"])))
+        max_l, max_w, max_h = outer_dims_cm(lines, sku_map)
+        has_dim = any(v > 0 for v in (max_l, max_w, max_h))
         gross_kg = round(box_gross_kg(lines, sku_map), 2)
         result[box_no] = {
             "weight_lb": _kg_to_lb(gross_kg) if gross_kg else "",

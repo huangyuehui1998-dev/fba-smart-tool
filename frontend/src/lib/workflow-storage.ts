@@ -6,6 +6,7 @@ import {
   type WorkflowStaleness,
 } from "@/lib/workflow-invalidation";
 import { inferHighestReached } from "@/lib/workflow-steps";
+import { DEFAULT_TRANSPORT_MODE, normalizeTransportMode, type TransportMode } from "@/lib/transport-mode";
 
 const STORAGE_KEY = "fba_workflow_autosave";
 /** v1 旧草稿仍可读；新写入为 v2。 */
@@ -27,6 +28,7 @@ export interface WorkflowSnapshot {
   step3Matrix?: Record<string, unknown>[];
   step3BoxCount?: number;
   step3SkuCount?: number;
+  transportMode?: TransportMode;
 }
 
 export function autoTaskName(): string {
@@ -55,6 +57,7 @@ export function loadWorkflowSnapshot(): WorkflowSnapshot | null {
       step3Matrix: Array.isArray(data.step3Matrix) ? data.step3Matrix : [],
       step3BoxCount: Number(data.step3BoxCount ?? 0),
       step3SkuCount: Number(data.step3SkuCount ?? 0),
+      transportMode: normalizeTransportMode(data.transportMode ?? DEFAULT_TRANSPORT_MODE),
     };
   } catch {
     return null;
@@ -94,6 +97,7 @@ export function createEmptySnapshot(): WorkflowSnapshot {
     step3Matrix: [],
     step3BoxCount: 0,
     step3SkuCount: 0,
+    transportMode: DEFAULT_TRANSPORT_MODE,
   };
 }
 

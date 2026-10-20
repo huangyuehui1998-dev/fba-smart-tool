@@ -46,6 +46,42 @@ def collect_weight_confirms(
     return pending
 
 
+def collect_low_box_weights(
+    rows: Optional[List[Dict[str, Any]]],
+    box_editor: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    """多件箱毛重低于 2lb。内部规则，确认后可以放行。"""
+    if not rows or not box_editor:
+        return []
+    from fba_tool.policy import low_multi_box_kg, rule
+
+    computed = with_computed_columns(rows_to_df(rows))
+    editor_df = editor_to_df(box_editor)
+    if editor_df.empty:
+        return []
+    metrics = box_metrics(editor_df, dataframe_to_sku_rows(computed))
+    limit = low_multi_box_kg()
+    entry = rule("low_multi_box_lb")
+    found: List[Dict[str, Any]] = []
+    for _, row in metrics.iterrows():
+        qty = int(row.get("件数") or 0)
+        gross = float(row.get("毛重(kg)") or 0)
+        if qty > 1 and gross < float(limit):
+            found.append(
+                {
+                    "row_index": int(row["箱号"]),
+                    "sku": f"箱{int(row['箱号'])}",
+                    "kind": "box_weight_too_low",
+                    "source": "internal",
+                    "source_type": entry.get("source_type"),
+                    "requires_confirm": True,
+                    "declared_kg": round(gross, 3),
+                    "message": f"箱 {int(row['箱号'])} 为多件箱，毛重 {gross:g} kg 低于 2lb",
+                }
+            )
+    return found
+
+
 def raise_if_weight_unconfirmed(
     rows: Optional[List[Dict[str, Any]]],
     confirmed: bool,
@@ -53,6 +89,17 @@ def raise_if_weight_unconfirmed(
 ) -> None:
     if confirmed:
         return
+    low = collect_low_box_weights(rows, box_editor)
+    if low:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "BOX_WEIGHT_TOO_LOW",
+                "source_type": low[0].get("source_type") or "internal",
+                "message": "多件箱重量低于 2lb，确认后才能导出",
+                "items": low,
+            },
+        )
     items = collect_weight_confirms(rows, box_editor)
     if not items:
         return
