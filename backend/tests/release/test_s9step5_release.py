@@ -470,6 +470,20 @@ def test_upgrade_keeps_user_data_and_ignores_examples(tmp_path, monkeypatch):
     assert exporter_profiles.get_active_profile()["id"] == "u1"
     rows_after = _master_rows(ad)
     assert len(rows_after) == len(before_rows)
+    con = sqlite3.connect(ad / "fba_master.db")
+    try:
+        tables = {row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    finally:
+        con.close()
+    for name in (
+        "carton_spec",
+        "carton_spec_history",
+        "shipment_box_snapshot",
+        "carton_measurement",
+        "item_measurement",
+        "forwarder_bill",
+    ):
+        assert name in tables, name
 
 
 def test_new_user_starts_empty(tmp_path, monkeypatch):

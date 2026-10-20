@@ -20,6 +20,11 @@ def _should_skip(path: Path) -> bool:
 
 
 def main() -> None:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from release_guard import refuse_user_data
+
+    refuse_user_data(ROOT / "dist")
+    refuse_user_data(OUT)
     if not (OUT / "FBA_Smart_Tool.exe").is_file():
         raise SystemExit(f"未找到 {OUT / 'FBA_Smart_Tool.exe'}，请先运行 build_standalone.ps1")
 

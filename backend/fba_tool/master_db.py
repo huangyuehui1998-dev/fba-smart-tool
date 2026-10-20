@@ -243,6 +243,11 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
 
 
 def init_master_db() -> None:
+    from fba_tool.db_migrations import MigrationFailed, is_readonly, run_migrations
+
+    path = master_db_path()
+    if path.is_file() and is_readonly(path):
+        return
     with _connect() as conn:
         conn.execute(
             """
@@ -283,6 +288,12 @@ def init_master_db() -> None:
         conn.commit()
         # WAL 下改动只进 -wal，主文件字节不变。折进主文件后，复制品被 init 改写才能从大小/哈希上看出来。
         conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    try:
+        with _connect() as conn:
+            run_migrations(conn, str(path))
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except MigrationFailed:
+        return
 
 
 def _ensure_lingxing_tables(conn: sqlite3.Connection) -> None:

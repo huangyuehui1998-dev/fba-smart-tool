@@ -26,21 +26,38 @@ def apply_master_to_input_rows(rows: List[Dict[str, Any]]) -> Tuple[List[Dict[st
         sku = str(row.get("SKU简称") or "").strip()
         master = master_map.get(sku) or (get_product_by_sku(sku) if sku else None)
         new_row = dict(row)
-        if master:
-            if master.get("fnsku"):
+        spec = _carton_spec_for(sku, row.get("单箱装量")) if sku else None
+        if master or spec:
+            if master and master.get("fnsku"):
                 new_row["FNSKU"] = master["fnsku"]
             user_had_carton = not all(_is_empty_num(row.get(col)) for col in ("箱长(cm)", "箱宽(cm)", "箱高(cm)"))
-            if _has_carton_dims(master):
+            if spec is not None:
+                if _is_empty_num(new_row.get("箱长(cm)")):
+                    new_row["箱长(cm)"] = spec["length_cm"]
+                if _is_empty_num(new_row.get("箱宽(cm)")):
+                    new_row["箱宽(cm)"] = spec["width_cm"]
+                if _is_empty_num(new_row.get("箱高(cm)")):
+                    new_row["箱高(cm)"] = spec["height_cm"]
+                if _is_empty_num(new_row.get("单箱装量")) and spec.get("qty_per_carton"):
+                    new_row["单箱装量"] = spec["qty_per_carton"]
+                if (
+                    _is_empty_num(new_row.get("单箱毛重(kg)"))
+                    and spec.get("gross_kg")
+                    and not _is_empty_num(new_row.get("单箱装量"))
+                    and float(new_row["单箱装量"]) == float(spec["qty_per_carton"] or 0)
+                ):
+                    new_row["单箱毛重(kg)"] = spec["gross_kg"]
+            elif _has_carton_dims(master):
                 if _is_empty_num(new_row.get("箱长(cm)")):
                     new_row["箱长(cm)"] = master["carton_length"]
                 if _is_empty_num(new_row.get("箱宽(cm)")):
                     new_row["箱宽(cm)"] = master["carton_width"]
                 if _is_empty_num(new_row.get("箱高(cm)")):
                     new_row["箱高(cm)"] = master["carton_height"]
-            if _is_empty_num(new_row.get("单箱装量")) and float(master.get("qty_per_box") or 0) > 0:
+            if spec is None and master and _is_empty_num(new_row.get("单箱装量")) and float(master.get("qty_per_box") or 0) > 0:
                 new_row["单箱装量"] = master["qty_per_box"]
             # 单箱重（含箱）只在本票装量与产品库箱规一致时补，避免尾箱/改装量时套错重量
-            if (
+            if master and (
                 _is_empty_num(new_row.get("单箱毛重(kg)"))
                 and float(master.get("carton_gross_weight") or 0) > 0
                 and float(master.get("qty_per_box") or 0) > 0
@@ -49,7 +66,7 @@ def apply_master_to_input_rows(rows: List[Dict[str, Any]]) -> Tuple[List[Dict[st
             ):
                 new_row["单箱毛重(kg)"] = master["carton_gross_weight"]
             filled_carton = not all(_is_empty_num(new_row.get(col)) for col in ("箱长(cm)", "箱宽(cm)", "箱高(cm)"))
-            if filled_carton and not user_had_carton and _has_carton_dims(master):
+            if filled_carton and not user_had_carton and (spec is not None or (master and _has_carton_dims(master))):
                 sources.append("official")
             else:
                 sources.append("manual")
@@ -122,6 +139,15 @@ def resolve_sku_master_flags(skus: List[str]) -> Dict[str, str]:
         master = master_map.get(key)
         flags[key] = "official" if master and _has_carton_dims(master) else "manual"
     return flags
+
+
+def _carton_spec_for(sku: str, qty: Any) -> Dict[str, Any] | None:
+    try:
+        from fba_tool.carton_store import choose_spec
+
+        return choose_spec(sku, qty)
+    except Exception:
+        return None
 
 
 def _has_carton_dims(master: Dict[str, Any]) -> bool:

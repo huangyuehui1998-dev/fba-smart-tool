@@ -28,6 +28,7 @@ import {
   type Row,
 } from "@/lib/step1-rows";
 import { shouldPromptWeightConfirm, weightRowsHash } from "@/lib/weight-confirm";
+import { applyCartonSpec, type CartonSpecOption } from "@/lib/step1-carton";
 import {
   stageInvalidatedByInputField,
   shouldUnlockBoxingOnInputField,
@@ -59,6 +60,8 @@ export function useStep1Logic() {
   const [costDashboard, setCostDashboard] = useState<CostDashboard | null>(null);
   const [validationErrors, setValidationErrors] = useState<ValidationErrorItem[]>([]);
   const [weightWarnings, setWeightWarnings] = useState<GrossWeightWarning[]>([]);
+  const [cartonSpecsBySku, setCartonSpecsBySku] = useState<Record<string, CartonSpecOption[]>>({});
+  const [cartonSpecNotices, setCartonSpecNotices] = useState<string[]>([]);
   const [acknowledgedWeightHash, setAcknowledgedWeightHash] = useState<string | null>(null);
   const [parseAction, setParseAction] = useState<ParseAction>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
@@ -79,6 +82,8 @@ export function useStep1Logic() {
         setTotalVolWeight(0);
         setCargoDensity(0);
         setCostDashboard(null);
+        setCartonSpecsBySku({});
+        setCartonSpecNotices([]);
         return;
       }
 
@@ -130,6 +135,8 @@ export function useStep1Logic() {
         setCargoDensity(previewRes.cargo_density ?? 0);
         setCostDashboard(previewRes.cost_dashboard ?? null);
         setWeightWarnings(previewRes.weight_warnings ?? []);
+        setCartonSpecsBySku(previewRes.carton_specs_by_sku ?? {});
+        setCartonSpecNotices(previewRes.carton_spec_notices ?? []);
         setValidationErrors(validateRes.errors);
       } catch (err) {
         if (seq !== previewSeq.current) return;
@@ -147,6 +154,13 @@ export function useStep1Logic() {
     }, PREVIEW_DEBOUNCE_MS);
     return () => window.clearTimeout(timer);
   }, [rows, refreshPreview]);
+
+  const applySpec = useCallback(
+    (i: number, spec: CartonSpecOption) => {
+      setRows((rs) => rs.map((row, idx) => (idx === i ? applyCartonSpec(row, spec) : row)));
+    },
+    [setRows],
+  );
 
   const update = useCallback(
     (i: number, key: keyof Row, value: string) => {
@@ -349,6 +363,9 @@ export function useStep1Logic() {
     excelInputId,
     totals,
     update,
+    applySpec,
+    cartonSpecsBySku,
+    cartonSpecNotices,
     addRow,
     removeRow,
     clearAll,

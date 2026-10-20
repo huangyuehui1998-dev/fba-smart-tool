@@ -1,0 +1,26 @@
+{
+  "jiufang": {
+    "measured_by": "forwarder_jiufang",
+    "dim_divisor": 6000,
+    "round_rule": "cm_kg_6000",
+    "source_label": "forwarder"
+  },
+  "send": {
+    "measured_by": "forwarder_send",
+    "dim_divisor": 6000,
+    "round_rule": "cm_kg_6000",
+    "source_label": "forwarder"
+  },
+  "manual": {
+    "measured_by": "manual",
+    "dim_divisor": 6000,
+    "round_rule": "cm_kg_6000",
+    "source_label": "internal"
+  },
+  "amazon_in_lb": {
+    "measured_by": "amazon_in_lb",
+    "dim_divisor": 139,
+    "round_rule": "in_lb_139",
+    "source_label": "amazon"
+  }
+}

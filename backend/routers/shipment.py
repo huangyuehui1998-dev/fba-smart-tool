@@ -120,6 +120,14 @@ async def api_shipments_validate(
 
     ratio = float(throw_ratio_val if throw_ratio_val is not None else throw_ratio())
 
+    if not ctx.get("hard_fail"):
+        try:
+            from fba_tool.carton_store import snapshot_from_validation
+
+            snapshot_from_validation(ctx)
+        except Exception:
+            pass
+
     return build_validate_response(ctx, ratio)
 
 

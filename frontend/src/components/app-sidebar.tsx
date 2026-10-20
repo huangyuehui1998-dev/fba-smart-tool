@@ -612,6 +612,20 @@ export function AppSidebar({
               >
                 🧰 PDF 标签处理
               </Link>
+              <Link
+                to="/carton-compare"
+                className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/60"
+                activeProps={{ className: "border-primary/30 bg-primary/10 text-primary" }}
+              >
+                箱规对比
+              </Link>
+              <Link
+                to="/about"
+                className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/60"
+                activeProps={{ className: "border-primary/30 bg-primary/10 text-primary" }}
+              >
+                关于
+              </Link>
               <ExportersSection />
             </AccordionContent>
           </AccordionItem>

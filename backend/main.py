@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from fba_tool.app_paths import ensure_app_data_layout
 from fba_tool.master_db import init_master_db
@@ -40,6 +40,7 @@ from routers.lingxing import router as lingxing_router
 from routers.tickets import router as tickets_router
 from routers.invoice_templates import router as invoice_templates_router
 from routers.invoice_export import router as invoice_export_router
+from routers.carton import router as carton_router
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,7 @@ _ROUTERS = (
     tickets_router,
     invoice_templates_router,
     invoice_export_router,
+    carton_router,
 )
 
 
@@ -182,6 +184,18 @@ def create_app() -> FastAPI:
     )
 
     install_access_control(app)
+
+    @app.middleware("http")
+    async def reject_writes_when_db_is_newer(request, call_next):
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith("/api/"):
+            from fba_tool.db_migrations import is_readonly
+
+            if is_readonly():
+                return JSONResponse(
+                    status_code=409,
+                    content={"code": "DB_NEWER_THAN_APP", "message": "数据库版本高于当前程序，已只读打开"},
+                )
+        return await call_next(request)
 
     for router in _ROUTERS:
         app.include_router(router)

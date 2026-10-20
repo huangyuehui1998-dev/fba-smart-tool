@@ -74,8 +74,22 @@ def check_client_entry() -> None:
         fail(f"{entry_name} 仍对 document 调用 hydrateRoot，水合不匹配会导致白屏")
 
 
+def check_no_user_data() -> None:
+    sys.path.insert(0, str(ROOT / "scripts"))
+    from release_guard import find_carton_data, find_user_data
+
+    for hit in find_user_data(DIST):
+        fail(f"发布物包含用户数据：{hit}")
+    internal_config = DIST.parent / "dist" / "FBA_Smart_Tool" / "_internal" / "config"
+    if not internal_config.is_dir():
+        internal_config = ROOT / "dist" / "FBA_Smart_Tool" / "_internal" / "config"
+    for hit in find_carton_data(internal_config):
+        fail(f"_internal/config 含箱规数据：{hit}")
+
+
 def main() -> int:
     check_index_html()
+    check_no_user_data()
     check_mapdeps()
     check_favicon()
     check_client_entry()

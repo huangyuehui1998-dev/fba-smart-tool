@@ -72,9 +72,10 @@ _INSTANCE_MUTEX_HANDLE = None
 
 
 def _data_dir() -> Path:
-    """S8 D9：和后端 app_paths.app_data_dir() 同一规则——FBA_APP_DATA_DIR 优先，否则 <程序目录>/app_data。"""
-    override = os.environ.get("FBA_APP_DATA_DIR", "").strip()
-    return Path(override) if override else PROJECT_ROOT / "app_data"
+    """和 app_paths.app_data_dir() 同一规则。"""
+    from fba_tool.app_paths import app_data_dir
+
+    return app_data_dir()
 
 
 def _no_browser() -> bool:
