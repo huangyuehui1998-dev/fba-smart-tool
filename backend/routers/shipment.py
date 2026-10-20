@@ -188,6 +188,12 @@ async def api_export_worker_packing_preview(body: Dict[str, Any]):
 
     """从已校验预览快速导出工人装箱实操单（无需重传 CSV/PDF）。"""
 
+    from fba_tool.weight_gate import parse_weight_rows, raise_if_weight_unconfirmed
+
+    raise_if_weight_unconfirmed(
+        parse_weight_rows(body.get("weight_rows")),
+        bool(body.get("confirm_weight_warnings")),
+    )
     preview = body.get("worker_packing_preview") or body.get("rows") or []
 
     if not preview:
@@ -218,9 +224,17 @@ async def api_export_worker_packing_list(
 
     workflow_json: Optional[str] = Form(None),
 
+    confirm_weight_warnings: bool = Form(False),
+
+    weight_rows: Optional[str] = Form(None),
+
 ):
 
     """三维交叉校验通过后，导出工人装箱贴标实操单（重传文件，较慢）。"""
+
+    from fba_tool.weight_gate import parse_weight_rows, raise_if_weight_unconfirmed
+
+    raise_if_weight_unconfirmed(parse_weight_rows(weight_rows), confirm_weight_warnings)
 
     csv_payload = read_uploads(csv_files)
 
@@ -282,6 +296,12 @@ def api_export_shipping_sheet(body: Dict[str, Any]):
 
     """根据发货表行数据导出 (.xlsx)。"""
 
+    from fba_tool.weight_gate import parse_weight_rows, raise_if_weight_unconfirmed
+
+    raise_if_weight_unconfirmed(
+        parse_weight_rows(body.get("weight_rows") or body.get("step1_rows")),
+        bool(body.get("confirm_weight_warnings")),
+    )
     try:
 
         rows = body.get("shipping_sheet") or body.get("rows") or []
@@ -318,6 +338,12 @@ def api_export_forwarder(body: Dict[str, Any]):
 
     """根据货代表行数据导出货代表 (.xlsx)。"""
 
+    from fba_tool.weight_gate import parse_weight_rows, raise_if_weight_unconfirmed
+
+    raise_if_weight_unconfirmed(
+        parse_weight_rows(body.get("weight_rows") or body.get("step1_rows")),
+        bool(body.get("confirm_weight_warnings")),
+    )
     try:
 
         rows = body.get("forwarder") or body.get("rows") or []

@@ -116,9 +116,31 @@ def api_compute_preview(body: ComputePreviewRequest):
     merged_rows, data_sources = apply_master_to_input_rows(body.rows)
     df = rows_to_df(merged_rows)
     computed = with_computed_columns(df)
+    from fba_tool.boxing import box_metrics, dataframe_to_sku_rows, generate_box_plan, plans_to_editor_df
+    from fba_tool.user_config import weight_limit_kg
+
+    sku_rows = dataframe_to_sku_rows(computed)
+    plans, _tail = generate_box_plan(sku_rows)
+    metrics = box_metrics(plans_to_editor_df(plans), sku_rows)
     ratio = float(body.throw_ratio if body.throw_ratio is not None else throw_ratio())
     totals = compute_step1_logistics_totals(df, throw_ratio_val=ratio)
     placement = compute_shipment_placement_fees(build_placement_unit_rows(body.rows))
+    warnings = check_gross_weight_consistency(computed)
+    limit = float(weight_limit_kg())
+    for row in df_to_records(metrics):
+        if int(row.get("SKU种类") or 0) > 1 and float(row.get("毛重(kg)") or 0) > limit:
+            warnings.append(
+                {
+                    "row_index": int(row["箱号"]),
+                    "sku": f"箱{int(row['箱号'])}",
+                    "kind": "mixed_over_limit",
+                    "requires_confirm": True,
+                    "suggested_gross_kg": None,
+                    "declared_kg": row.get("毛重(kg)"),
+                    "expected_kg": limit,
+                    "message": f"混装箱 {int(row['箱号'])} 毛重 {row.get('毛重(kg)')} kg 超过上限 {limit:g} kg",
+                }
+            )
     return {
         "rows": df_to_records(computed),
         "merged_rows": merged_rows,
@@ -132,7 +154,8 @@ def api_compute_preview(body: ComputePreviewRequest):
         "revenue_ton": totals["revenue_ton"],
         "total_net_kg": totals["total_net_kg"],
         "total_gross_kg": totals["total_gross_kg"],
-        "weight_warnings": check_gross_weight_consistency(computed),
+        "box_metrics": df_to_records(metrics),
+        "weight_warnings": warnings,
         "cost_dashboard": {
             "placement": placement,
         },

@@ -28,15 +28,24 @@ def test_matching_gross_weight_is_silent():
     assert _check(_row(gross=20.5)) == []
 
 
-def test_missing_gross_weight_is_silent():
-    """单箱毛重是可选列，没填不该报警。"""
-    assert _check(_row(gross=None)) == []
-    assert _check(_row(gross=0)) == []
+def test_missing_gross_weight_warns_without_confirm():
+    """单重有值、毛重空着：只警告，不要求确认。"""
+    for gross in (None, 0):
+        warnings = _check(_row(gross=gross))
+        assert len(warnings) == 1
+        assert warnings[0]["kind"] == "gross_missing"
+        assert warnings[0]["requires_confirm"] is False
+        assert warnings[0]["suggested_gross_kg"] == 20.5
 
 
-def test_small_deviation_within_tolerance():
-    # 21.5 vs 20.5 → 4.9% < 8%
-    assert _check(_row(gross=21.5)) == []
+def test_small_deviation_still_requires_confirm():
+    # 不一致就要确认，不再按 8% 静默。20.5 与 20.5 仍安静。
+    warnings = _check(_row(gross=21.5))
+    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "gross_mismatch"
+    assert warnings[0]["requires_confirm"] is True
+    assert warnings[0]["suggested_gross_kg"] == 20.5
+    assert _check(_row(gross=20.5)) == []
 
 
 def test_typo_low_gross_weight_is_flagged():
@@ -49,7 +58,7 @@ def test_typo_low_gross_weight_is_flagged():
     assert w["declared_kg"] == 2.05
     assert w["diff_kg"] < 0
     assert w["deviation_pct"] == 90.0
-    assert "重量差异费" in w["message"]
+    assert "请确认" in w["message"]
 
 
 def test_typo_high_gross_weight_is_flagged():
@@ -60,8 +69,9 @@ def test_typo_high_gross_weight_is_flagged():
 
 def test_blank_sku_and_zero_theoretical_are_skipped():
     assert _check({**_row(sku=""), "单箱毛重(kg)": 999}) == []
-    # 装量与单件重都为 0 → 理论值 0，无从比较
-    assert _check(_row(per_box=0, unit_kg=0, tare=0, gross=15)) == []
+    # 单重为 0 且录了毛重：按 1a 要求确认，不再因为理论值为 0 而静默
+    missing = _check(_row(per_box=0, unit_kg=0, tare=0, gross=15))
+    assert missing and missing[0]["kind"] == "unit_weight_missing"
 
 
 def test_only_offending_rows_reported():
@@ -74,8 +84,8 @@ def test_only_offending_rows_reported():
 
 if __name__ == "__main__":
     test_matching_gross_weight_is_silent()
-    test_missing_gross_weight_is_silent()
-    test_small_deviation_within_tolerance()
+    test_missing_gross_weight_warns_without_confirm()
+    test_small_deviation_still_requires_confirm()
     test_typo_low_gross_weight_is_flagged()
     test_typo_high_gross_weight_is_flagged()
     test_blank_sku_and_zero_theoretical_are_skipped()

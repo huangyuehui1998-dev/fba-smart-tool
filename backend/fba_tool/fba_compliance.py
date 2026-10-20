@@ -1,6 +1,7 @@
 """亚马逊 FBA 入库纸箱物理红线校验（拒收 / Inbound Defect Fee 风险）。"""
 from __future__ import annotations
 
+import math
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -32,8 +33,12 @@ Number = Union[int, float, str, Decimal]
 def to_decimal(v: Number) -> Decimal:
     if isinstance(v, Decimal):
         return v
+    if isinstance(v, bool):
+        return Decimal(int(v))
     if isinstance(v, float):
-        return Decimal(repr(v))
+        if not math.isfinite(v):
+            raise ValueError(f"无法把 {v!r} 转成 Decimal")
+        return Decimal(str(v))
     return Decimal(str(v))
 
 

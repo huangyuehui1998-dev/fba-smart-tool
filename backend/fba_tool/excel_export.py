@@ -398,23 +398,20 @@ def _per_box_metrics(editor_df: pd.DataFrame, sku_map: Dict[str, SkuRow], imperi
         return result
     for box_no, group in editor_df.groupby("箱号"):
         box_no = int(box_no)
-        net = 0.0
+        from fba_tool.box_weight import box_gross_kg
+
         max_l = max_w = max_h = 0.0
-        tare = 0.0
-        full_gross = None
+        lines = []
         for _, row in group.iterrows():
             sku = sku_map.get(str(row["SKU简称"]))
             if not sku:
                 continue
             qty = int(row["数量"])
-            net += sku.unit_weight_kg * qty
+            lines.append((sku.sku, qty))
             max_l = max(max_l, sku.length_cm)
             max_w = max(max_w, sku.width_cm)
             max_h = max(max_h, sku.height_cm)
-            tare = max(tare, sku.carton_tare_kg)
-            if len(group) == 1 and qty == sku.carton_qty and sku.carton_gross_kg is not None:
-                full_gross = float(sku.carton_gross_kg)
-        gross_kg = full_gross if full_gross is not None else round(net + tare, 2)
+        gross_kg = round(box_gross_kg(lines, sku_map), 2)
         entry = {"长(cm)": max_l, "宽(cm)": max_w, "高(cm)": max_h, "实重(kg)": gross_kg}
         if imperial:
             entry.update(

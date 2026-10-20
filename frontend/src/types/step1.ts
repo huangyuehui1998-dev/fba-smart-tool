@@ -48,11 +48,14 @@ export interface ComputePreviewResponse {
 export interface GrossWeightWarning {
   row_index: number;
   sku: string;
-  declared_kg: number;
+  declared_kg: number | null;
   expected_kg: number;
-  diff_kg: number;
-  deviation_pct: number;
+  diff_kg: number | null;
+  deviation_pct: number | null;
   message: string;
+  kind?: "unit_weight_missing" | "gross_missing" | "gross_mismatch" | "mixed_over_limit";
+  requires_confirm?: boolean;
+  suggested_gross_kg?: number | null;
 }
 
 export interface ValidationErrorItem {

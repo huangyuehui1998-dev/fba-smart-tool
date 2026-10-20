@@ -68,6 +68,9 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
     actualPlacementFee,
     validationErrors,
     weightWarnings,
+    weightConfirmOpen,
+    keepDeclaredWeights,
+    useCalculatedWeights,
     parseAction,
     previewLoading,
     error,
@@ -375,13 +378,33 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
           <AlertTriangle className="h-4 w-4 !text-amber-600" />
           <AlertTitle className="text-sm font-semibold">单箱毛重与理论值不符</AlertTitle>
           <AlertDescription className="mt-1 text-xs">
-            <ul className="list-inside list-disc space-y-0.5">
+            <ul className="list-inside list-disc space-y-1">
               {weightWarnings.map((w) => (
-                <li key={`${w.row_index}-${w.sku}`}>{w.message}</li>
+                <li key={`${w.row_index}-${w.sku}`}>
+                  {w.message}
+                  {w.requires_confirm && (
+                    <span className="ml-2 inline-flex gap-1">
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={useCalculatedWeights}
+                        disabled={w.suggested_gross_kg == null}
+                      >
+                        使用计算值
+                      </button>
+                      <button type="button" className="underline" onClick={keepDeclaredWeights}>
+                        保留录入值
+                      </button>
+                    </span>
+                  )}
+                </li>
               ))}
             </ul>
+            {weightConfirmOpen && (
+              <p className="mt-2 text-[11px] font-medium">这批录入的毛重还没确认。改动后会再要求确认一次。</p>
+            )}
             <p className="mt-2 text-[11px] text-amber-800/90">
-              不阻断流程。但录入毛重会直接用于申报与货代计费，建议复磅后再继续。
+              单重缺失时不会把空箱重当成建议值。导出前仍要确认 requires_confirm 的项。
             </p>
           </AlertDescription>
         </Alert>

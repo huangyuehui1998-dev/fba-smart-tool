@@ -13,6 +13,12 @@ from utils.serialization import df_to_records, editor_to_df, rows_to_df_with_mas
 router = APIRouter()
 
 
+def _check_weight(body) -> None:
+    from fba_tool.weight_gate import raise_if_weight_unconfirmed
+
+    raise_if_weight_unconfirmed(body.rows, body.confirm_weight_warnings, body.box_editor)
+
+
 def _check_not_oversold(editor_df, sku_rows) -> None:
     """S8 D1：导出前再核一次——箱单里任何 SKU 的件数都不能超过发货总数。"""
     if editor_df.empty:
@@ -42,6 +48,7 @@ def api_export_step3_preview(body: ExportStep3Request):
 @router.post("/api/export/step3/internal")
 def api_export_internal(body: ExportStep3Request):
     """导出内部留档表 (.xlsx)。"""
+    _check_weight(body)
     df = rows_to_df_with_master(body.rows)
     editor_df = editor_to_df(body.box_editor)
     sku_rows = dataframe_to_sku_rows(df)
@@ -53,6 +60,7 @@ def api_export_internal(body: ExportStep3Request):
 @router.post("/api/export/step3/amazon")
 def api_export_amazon(body: ExportStep3Request):
     """导出 Send to Amazon 模板 (.xlsx)。"""
+    _check_weight(body)
     df = rows_to_df_with_master(body.rows)
     editor_df = editor_to_df(body.box_editor)
     sku_rows = dataframe_to_sku_rows(df)

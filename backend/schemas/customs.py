@@ -32,6 +32,8 @@ class CustomsExportRequest(BaseModel):
     )
     data: Optional[Dict[str, Any]] = Field(None, description="前端编辑后的完整预览数据，优先于重算")
     export_format: str = Field("xlsx", description="xlsx | xls（v5 Q15 两种都支持）")
+    confirm_weight_warnings: bool = False
+    weight_rows: Optional[List[Dict[str, Any]]] = None
 
 
 class ExporterProfileBody(BaseModel):
