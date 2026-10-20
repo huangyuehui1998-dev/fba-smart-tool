@@ -8,13 +8,13 @@ import type { BoxEditorApiRow } from "@/lib/api/workflow";
 import type { Row } from "@/lib/step1-rows";
 
 export const WORKFLOW_STEPS = [
-  { id: 1, label: "Step 1 录入" },
-  { id: 2, label: "Step 2 排箱" },
-  { id: 3, label: "Step 3 导出" },
-  { id: 3.5, label: "Step 3.5 刷仓" },
-  { id: 4, label: "Step 4 回传校验" },
-  { id: 4.5, label: "Step 4.5 发票" },
-  { id: 5, label: "Step 5 报关" },
+  { id: 1, label: "1 录入" },
+  { id: 2, label: "2 排箱" },
+  { id: 3, label: "3 导出" },
+  { id: 4, label: "4 货件校验" },
+  { id: 4.5, label: "5 发票" },
+  { id: 5, label: "6 报关" },
+  { id: 3.5, label: "7 刷仓" },
 ] as const;
 
 export type WorkflowStepId = (typeof WORKFLOW_STEPS)[number]["id"];
@@ -80,20 +80,40 @@ export function canEnterStep(
   return true;
 }
 
-/** 不可进入时的原因说明（供 tooltip / toast）。 */
-export function getStepBlockReason(targetStep: number, state: StepGuardState): string | null {
+export interface StepBlockDetail {
+  message: string;
+  missing: string[];
+  jumpTo: number;
+}
+
+/** 不可进入时的原因说明（供 tooltip / 对话框）。 */
+export function getStepBlockDetail(targetStep: number, state: StepGuardState): StepBlockDetail | null {
   if (isRevisit(targetStep, state.highestReachedStep)) return null;
 
   if (targetStep >= 2 && !hasValidInputRows(state.inputRows)) {
-    return "请先在 Step 1 录入至少一条有效 SKU（含发货数量）";
+    return {
+      message: "请先完成第 1 步：录入至少一条有效 SKU（含发货数量）",
+      missing: ["至少一条 SKU 和发货数量"],
+      jumpTo: 1,
+    };
   }
   if (targetStep >= 3 && targetStep < 4.5 && !hasLockedBoxPlan(state)) {
-    if (targetStep === 3.5) return "刷仓预览需先锁定装箱方案";
-    if (targetStep === 4) return "回传校验需先锁定装箱方案";
-    return "请先在 Step 2 完成排箱并锁定方案";
+    return {
+      message: "请先完成第 2 步：排箱并锁定方案",
+      missing: ["装箱方案尚未锁定"],
+      jumpTo: 2,
+    };
   }
   if ((targetStep === 4.5 || targetStep === 5) && !state.step4Ok) {
-    return "请先完成 Step 4 货件校验并通过";
+    return {
+      message: "请先完成第 4 步：货件校验",
+      missing: ["货件校验尚未通过"],
+      jumpTo: 4,
+    };
   }
   return null;
+}
+
+export function getStepBlockReason(targetStep: number, state: StepGuardState): string | null {
+  return getStepBlockDetail(targetStep, state)?.message ?? null;
 }

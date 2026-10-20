@@ -1,0 +1,14 @@
+{
+  "scenario": "合成的第13批等价数据，从录入到报关导出",
+  "measured_on": "main 上的点击路径（PR-3 第一个提交按改前界面逐步点出来）",
+  "viewport": "1366x768",
+  "baseline": {
+    "clicks": 18,
+    "manual_cell_edits": 8
+  },
+  "current": {
+    "clicks": 9,
+    "manual_cell_edits": 2
+  },
+  "notes": "基线是改前要逐个下载 4 个文件、并逐格手改的路径。当前路径用粘贴录入和「一键导出全部」。数字由 scripts/e2e/click_count.py 的步骤表算出，live 模式会在服务已启动时用 Playwright 再数一遍。"
+}

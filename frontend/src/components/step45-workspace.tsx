@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Link } from "@tanstack/react-router";
 import { ForwarderInvoiceExportPanel } from "@/components/forwarder-invoice-export-panel";
 import { InvoiceTemplateRecognizePanel } from "@/components/invoice-template-recognize-panel";
 import {
@@ -110,9 +111,9 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
       <Alert variant="destructive">
         <AlertTriangle className="h-4 w-4" />
         <AlertTitle>无法生成发票</AlertTitle>
-        <AlertDescription>请先在 Step 4 完成 CSV/PDF 校验。</AlertDescription>
+        <AlertDescription>请先完成第 4 步：货件校验。</AlertDescription>
         <Button variant="outline" size="sm" className="mt-3" onClick={onPrev}>
-          返回 Step 4
+          返回第 4 步
         </Button>
       </Alert>
       </div>
@@ -349,7 +350,10 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
           <AlertTriangle className="h-4 w-4 !text-amber-600" />
           <AlertTitle className="text-sm font-semibold text-amber-900">部分字段未填</AlertTitle>
           <AlertDescription className="text-xs text-amber-800">
-            以下仍为空：{missingLabels.join("、")}。可导出后在 Excel 中补全。
+            以下仍为空：{missingLabels.join("、")}。
+            <Link to="/master-data" className="ml-2 font-medium underline">
+              去产品库补齐
+            </Link>
           </AlertDescription>
         </Alert>
       )}
@@ -401,16 +405,16 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
         </DialogContent>
       </Dialog>
 
-      <div className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur transition-[left] duration-300 ease-in-out supports-[backdrop-filter]:bg-card/80">
+      <div data-bottom-bar className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur transition-[left] duration-300 ease-in-out supports-[backdrop-filter]:bg-card/80">
         <div className="flex items-center justify-between gap-4">
           <Button variant="outline" size="lg" onClick={onPrev} className="gap-2">
             <ArrowLeft className="h-4 w-4" />
-            返回 Step 4
+            返回第 4 步
           </Button>
           <div className="flex items-center gap-2">
             {onNext && (
               <Button variant="secondary" size="lg" className="gap-2" onClick={onNext}>
-                Step 5 报关资料
+                第 6 步：报关资料
                 <ArrowRight className="h-4 w-4" />
               </Button>
             )}

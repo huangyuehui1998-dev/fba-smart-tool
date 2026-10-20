@@ -41,16 +41,20 @@ export function resolveApiUrl(path: string): string {
   return resolveUrl(path);
 }
 
-async function parseErrorResponse(res: Response): Promise<string> {
+async function parseErrorResponse(res: Response): Promise<{ message: string; detail: unknown }> {
+  const fallback = res.statusText || `HTTP ${res.status}`;
   try {
     const body = await res.json();
-    if (typeof body?.detail === "string") return body.detail;
-    if (body?.detail?.message) return String(body.detail.message);
-    if (Array.isArray(body?.detail)) return body.detail.map(String).join("; ");
-    if (body?.message) return String(body.message);
-    return res.statusText || `HTTP ${res.status}`;
+    const detail = body?.detail ?? body;
+    let message = fallback;
+    if (typeof detail === "string") message = detail;
+    else if (detail && typeof detail === "object" && "message" in detail && (detail as { message?: unknown }).message) {
+      message = String((detail as { message: unknown }).message);
+    } else if (Array.isArray(detail)) message = detail.map(String).join("; ");
+    else if (body?.message) message = String(body.message);
+    return { message, detail };
   } catch {
-    return res.statusText || `HTTP ${res.status}`;
+    return { message: fallback, detail: undefined };
   }
 }
 
@@ -65,6 +69,7 @@ function isFileContentType(contentType: string): boolean {
     lower.includes("application/vnd.ms-excel") ||
     lower.includes("application/octet-stream") ||
     lower.includes("application/pdf") ||
+    lower.includes("application/zip") ||
     lower.includes("text/csv")
   );
 }
@@ -92,8 +97,8 @@ export async function apiFetchJson<T>(path: string, init?: RequestInit): Promise
     throw err;
   }
   if (!res.ok) {
-    const message = await parseErrorResponse(res);
-    throw new ApiError(res.status, message);
+    const parsed = await parseErrorResponse(res);
+    throw new ApiError(res.status, parsed.message, parsed.detail);
   }
   const contentType = res.headers.get("content-type") ?? "";
   if (!isJsonContentType(contentType)) {
@@ -218,8 +223,8 @@ export async function triggerBrowserDownload(blob: Blob, filename: string): Prom
 async function readDownloadBlob(res: Response): Promise<Blob> {
   const contentType = res.headers.get("content-type") ?? "";
   if (isJsonContentType(contentType)) {
-    const message = await parseErrorResponse(res);
-    throw new ApiError(res.status, message);
+    const parsed = await parseErrorResponse(res);
+    throw new ApiError(res.status, parsed.message, parsed.detail);
   }
   if (contentType && !isFileContentType(contentType)) {
     throw new ApiError(res.status, `意外的响应类型：${contentType}`);
@@ -268,8 +273,8 @@ export async function downloadPostBlob(
     body: JSON.stringify(body),
   });
   if (!res.ok) {
-    const message = await parseErrorResponse(res);
-    throw new ApiError(res.status, message);
+    const parsed = await parseErrorResponse(res);
+    throw new ApiError(res.status, parsed.message, parsed.detail);
   }
   const blob = await readDownloadBlob(res);
   await triggerBrowserDownload(blob, filename);
@@ -281,8 +286,8 @@ export async function downloadBlob(path: string, filename: string): Promise<void
     headers: { Accept: "*/*" },
   });
   if (!res.ok) {
-    const message = await parseErrorResponse(res);
-    throw new ApiError(res.status, message);
+    const parsed = await parseErrorResponse(res);
+    throw new ApiError(res.status, parsed.message, parsed.detail);
   }
   const blob = await readDownloadBlob(res);
   await triggerBrowserDownload(blob, filename);

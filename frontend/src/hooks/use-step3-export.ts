@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useWorkflow } from "@/context/workflow-context";
+import { ApiError } from "@/lib/api/client";
 import { formatApiError } from "@/lib/format-api-error";
+import { errorCode, explainApiError, type ErrorCopy } from "@/lib/error-messages";
 import { rowsToApi } from "@/lib/step1-rows";
 import {
   downloadAmazonExport,
   downloadInternalExport,
+  downloadStep3Bundle,
+  fetchStaPrecheck,
   fetchStep3Preview,
 } from "@/lib/api/workflow";
 import { isOfficialExportBlocked, STALE_DOWNLOAD_HINT } from "@/lib/workflow-invalidation";
@@ -29,8 +33,11 @@ export function useStep3Export() {
   } = useWorkflow();
 
   const [loading, setLoading] = useState(false);
-  const [downloading, setDownloading] = useState<"internal" | "amazon" | null>(null);
+  const [downloading, setDownloading] = useState<"internal" | "amazon" | "bundle" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorCopy, setErrorCopy] = useState<ErrorCopy | null>(null);
+  const [weightGate, setWeightGate] = useState<ErrorCopy | null>(null);
+  const [highlights, setHighlights] = useState<{ row: number; column: string; message: string }[]>([]);
 
   const payload = useMemo(
     () => ({
@@ -50,6 +57,12 @@ export function useStep3Export() {
       setStep3BoxCount(res.box_count);
       setStep3SkuCount(res.sku_count);
       clearStageStale("export");
+      try {
+        const pre = await fetchStaPrecheck(payload);
+        setHighlights(pre.highlights);
+      } catch {
+        setHighlights([]);
+      }
     } catch (err) {
       setError(formatApiError(err));
     } finally {
@@ -79,6 +92,19 @@ export function useStep3Export() {
     }
   }, [payload, staleness, boxLocked]);
 
+  const noteError = (err: unknown) => {
+    const copy = explainApiError(err);
+    const code = err instanceof ApiError ? errorCode(err.detail) : "";
+    if (code === "WEIGHT_CONFIRM_REQUIRED" || code === "BOX_WEIGHT_TOO_LOW") {
+      setWeightGate(copy);
+      setError(null);
+      setErrorCopy(null);
+      return;
+    }
+    setErrorCopy(copy);
+    setError(formatApiError(err));
+  };
+
   const downloadAmazon = useCallback(async () => {
     if (isOfficialExportBlocked("export", staleness) || !boxLocked) {
       setError(STALE_DOWNLOAD_HINT);
@@ -89,7 +115,25 @@ export function useStep3Export() {
     try {
       await downloadAmazonExport(payload);
     } catch (err) {
-      setError(formatApiError(err));
+      noteError(err);
+    } finally {
+      setDownloading(null);
+    }
+  }, [payload, staleness, boxLocked]);
+
+  const downloadBundle = useCallback(async (confirm = false) => {
+    if (isOfficialExportBlocked("export", staleness) || !boxLocked) {
+      setError(STALE_DOWNLOAD_HINT);
+      return;
+    }
+    setDownloading("bundle");
+    setError(null);
+    setErrorCopy(null);
+    try {
+      await downloadStep3Bundle({ ...payload, confirm_weight_warnings: confirm });
+      setWeightGate(null);
+    } catch (err) {
+      noteError(err);
     } finally {
       setDownloading(null);
     }
@@ -102,12 +146,18 @@ export function useStep3Export() {
     loading,
     downloading,
     error,
+    errorCopy,
+    weightGate,
+    highlights,
     step3Matrix,
     step3BoxCount,
     step3SkuCount,
     totalGross,
     downloadInternal,
     downloadAmazon,
+    downloadBundle,
+    confirmWeightAndExport: () => downloadBundle(true),
+    dismissWeightGate: () => setWeightGate(null),
     refreshPreview: loadPreview,
   };
 }

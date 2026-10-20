@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
 import { toast } from "sonner";
 
 import { AppHeader } from "@/components/app-header";
@@ -85,6 +85,30 @@ export function AppShell({ children }: { children: ReactNode }) {
     },
     [step, stepGuard, setStep],
   );
+
+  useEffect(() => {
+    const root = document.documentElement;
+    let ro: ResizeObserver | null = null;
+    const bind = () => {
+      ro?.disconnect();
+      const bars = [...document.querySelectorAll("[data-bottom-bar]")];
+      const el = bars.find((bar) => bar.getClientRects().length > 0);
+      if (!el) {
+        root.style.setProperty("--bottom-bar-h", "0px");
+        return;
+      }
+      const write = () => {
+        root.style.setProperty("--bottom-bar-h", `${Math.ceil(el.getBoundingClientRect().height)}px`);
+      };
+      write();
+      ro = new ResizeObserver(write);
+      ro.observe(el);
+    };
+    bind();
+    return () => {
+      ro?.disconnect();
+    };
+  }, [step]);
 
   const isSidebarOpenState = useSyncExternalStore(
 
@@ -186,7 +210,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <AppSidebar isOpen={isSidebarOpenState} onToggle={toggleSidebar} />
 
-        <main className="relative z-0 min-w-0 flex-1 overflow-auto p-6 transition-[width] duration-300 ease-in-out">
+        <main className="relative z-0 min-w-0 flex-1 overflow-auto p-6 pb-[calc(var(--bottom-bar-h,0px)+2rem)] transition-[width] duration-300 ease-in-out">
 
           {children}
 

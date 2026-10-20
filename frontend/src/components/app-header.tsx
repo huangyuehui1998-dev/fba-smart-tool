@@ -1,4 +1,5 @@
 ﻿import { useEffect, useState } from "react";
+import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import { Package, RefreshCw, Check, X, FileBox, Loader2, CloudOff, Moon, Sun, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -9,6 +10,7 @@ import type { WorkflowStaleness } from "@/lib/workflow-invalidation";
 import {
   WORKFLOW_STEPS,
   canEnterStep,
+  getStepBlockDetail,
   getStepBlockReason,
   type StepGuardState,
 } from "@/lib/workflow-steps";
@@ -55,6 +57,7 @@ export function AppHeader({
   stepGuard,
 }: AppHeaderProps) {
   const [theme, setTheme] = useState<ThemePreference>(() => loadThemePreference());
+  const [blockedStep, setBlockedStep] = useState<number | null>(null);
   const darkActive = theme === "dark" || (theme === "system" && typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches);
 
   const toggleTheme = () => {
@@ -136,9 +139,13 @@ export function AppHeader({
                   <button
                     type="button"
                     onClick={() => {
-                      if (!blocked) onStepChange?.(s.id);
+                      if (blocked) {
+                        setBlockedStep(s.id);
+                        return;
+                      }
+                      onStepChange?.(s.id);
                     }}
-                    disabled={blocked}
+                    aria-disabled={blocked || undefined}
                     title={
                       blockReason
                         ?? (stale ? "可查看上一版（已过期，不能当正式稿）" : undefined)
@@ -204,6 +211,24 @@ export function AppHeader({
           </Button>
         </div>
       </div>
+
+      {blockedStep != null && stepGuard && getStepBlockDetail(blockedStep, stepGuard) && (
+        <ConfirmDialog
+          open
+          title="还不能进入这一步"
+          description={[
+            getStepBlockDetail(blockedStep, stepGuard)!.message,
+            ...getStepBlockDetail(blockedStep, stepGuard)!.missing.map((item) => `缺失：${item}`),
+          ].join("\n")}
+          confirmLabel="前往补齐"
+          onConfirm={() => {
+            const detail = getStepBlockDetail(blockedStep, stepGuard);
+            setBlockedStep(null);
+            if (detail) onStepChange?.(detail.jumpTo);
+          }}
+          onCancel={() => setBlockedStep(null)}
+        />
+      )}
 
       {showArchivedToast && (
         <div className="pointer-events-none absolute right-6 top-full z-20 mt-2 flex justify-end">

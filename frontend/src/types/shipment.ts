@@ -58,4 +58,10 @@ export interface ShipmentValidateResponse {
   total_gross_kg?: number;
   total_cbm?: number;
   total_volumetric_weight_kg?: number;
+  warehouse_warnings?: {
+    shipment_id: string;
+    csv_code: string;
+    pdf_code: string;
+    message?: string;
+  }[];
 }

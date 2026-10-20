@@ -30,13 +30,13 @@ export const STAGE_ORDER: readonly WorkflowStage[] = [
 
 /** 阶段 → 用户可见中文标签（供 UI 提示）。 */
 export const STAGE_LABELS: Record<WorkflowStage, string> = {
-  input: "Step 1 录入",
-  boxing: "Step 2 排箱",
-  export: "Step 3 导出",
-  routing: "Step 3.5 刷仓",
-  validation: "Step 4 回传校验",
-  invoice: "Step 4.5 发票",
-  customs: "Step 5 报关",
+  input: "第 1 步 录入",
+  boxing: "第 2 步 排箱",
+  export: "第 3 步 导出",
+  routing: "第 7 步 刷仓",
+  validation: "第 4 步 货件校验",
+  invoice: "第 5 步 发票",
+  customs: "第 6 步 报关",
 };
 
 export function createEmptyStaleness(): WorkflowStaleness {

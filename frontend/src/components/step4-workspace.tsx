@@ -35,6 +35,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { DEFAULT_THROW_RATIO } from "@/constants";
 import { useWorkflow } from "@/context/workflow-context";
+import { WarehouseConflictCards } from "@/components/warehouse-conflict-card";
 import { formatFileSize } from "@/lib/box-editor";
 import { useHistoryFilePicker } from "@/hooks/use-history-file-picker";
 import { usePreventBrowserFileDrop, fileDropZoneProps } from "@/hooks/use-prevent-browser-file-drop";
@@ -221,7 +222,7 @@ function Dropzone({
 }
 
 export function Step4Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext?: () => void }) {
-  const { csvFiles, setCsvFiles, pdfFiles, setPdfFiles, throwRatio, setThrowRatio, boxEditorApi, staleness } =
+  const { csvFiles, setCsvFiles, pdfFiles, setPdfFiles, throwRatio, setThrowRatio, boxEditorApi, staleness, setForwarder } =
     useWorkflow();
 
   const {
@@ -250,6 +251,8 @@ export function Step4Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
     warehouses,
     displayStatusLines,
     displayErrors,
+    warehouseWarnings,
+    forwarder,
     forwarderDisplay,
     displayLogisticsProfile,
     handleValidate,
@@ -586,12 +589,15 @@ export function Step4Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
         </div>
       )}
 
+      <WarehouseConflictCards warnings={warehouseWarnings} rows={forwarder} onRows={setForwarder} />
+
       {displayStatusLines.length > 0 && (
-        <Card className="shadow-sm">
+        <Card className="shadow-sm" data-testid="step4-status-log">
           <CardContent className="space-y-1 p-4 text-xs text-muted-foreground">
             {displayStatusLines.map((line, i) => (
               <p
                 key={i}
+                data-testid={i === displayStatusLines.length - 1 ? "step4-status-end" : undefined}
                 className={cn(
                   line.startsWith("✅") && "font-medium text-emerald-700",
                   line.startsWith("❌") && isStrictMapping && "font-medium text-destructive",
@@ -632,7 +638,7 @@ export function Step4Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
             {mappingOk && boxLabelMapping.length
               ? `，${boxLabelMapping.length} 箱贴标映射已就绪`
               : ""}
-            ，可下载工人装箱实操单/货代表或进入 Step 4.5 发票。
+            ，可下载工人装箱实操单/货代表或进入第 5 步：发票。
           </AlertDescription>
         </Alert>
       )}
@@ -1079,11 +1085,11 @@ export function Step4Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
         </DialogContent>
       </Dialog>
 
-      <div className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <div data-bottom-bar className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <div className="flex items-center justify-between gap-4">
           <Button variant="outline" size="lg" onClick={onPrev} className="gap-2">
             <ArrowLeft className="h-4 w-4" />
-            返回 Step 3
+            返回第 3 步
           </Button>
           <div className="flex items-center gap-2">
             {step4Ok && (
@@ -1158,7 +1164,7 @@ export function Step4Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
             className="gap-2 bg-gradient-to-r from-primary to-primary/80 px-6 text-base font-semibold shadow-md"
           >
             <Sparkles className="h-4 w-4" />
-            进入 Step 4.5 发票
+            进入第 5 步：发票
             <ArrowRight className="h-5 w-5" />
           </Button>
         </div>
