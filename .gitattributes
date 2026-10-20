@@ -1,0 +1,19 @@
+# 换行符：仓库内统一存 LF，Windows 检出时按本机习惯（CRLF），避免 CRLF/LF 来回变导致整文件 diff
+* text=auto
+
+# 样例数据与模板保持原始字节，不做换行转换
+*.csv -text
+*.xlsx binary
+*.xls binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.ico binary
+*.zip binary
+backend/tests/golden/samples/** -text
+test1/** -text
+
+# Windows 脚本固定 CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
