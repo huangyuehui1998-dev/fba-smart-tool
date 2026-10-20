@@ -1,6 +1,16 @@
 """全局测试隔离：把 app_data 指到临时目录，跑测试不读写真实 app_data（数据库、配置、会话）。"""
 import os
+import sys
 import tempfile
+from pathlib import Path
+
+# TD-5：用例按模块放在 tests/<模块>/。互相 import test_* 时仍按文件名找得到。
+_BACKEND = Path(__file__).resolve().parent
+for _dir in (_BACKEND / "tests").rglob("*"):
+    if _dir.is_dir() and any(_dir.glob("test_*.py")):
+        _entry = str(_dir)
+        if _entry not in sys.path:
+            sys.path.insert(0, _entry)
 
 _TMP_APP_DATA = tempfile.mkdtemp(prefix="fba_test_app_data_")
 os.environ["FBA_APP_DATA_DIR"] = _TMP_APP_DATA

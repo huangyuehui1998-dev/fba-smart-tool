@@ -34,7 +34,11 @@ $outDir = Join-Path $Root "dist\FBA_Smart_Tool"
 & $VenvPy (Join-Path $Root "scripts\finish_portable_dist.py")
 if ($LASTEXITCODE -ne 0) { throw "finish_portable_dist failed" }
 
+$versionFile = Join-Path $Root "backend\fba_tool\app_version.py"
+$versionText = Get-Content -Raw -Encoding UTF8 $versionFile
+if ($versionText -notmatch 'APP_VERSION = "([^"]+)"') { throw "APP_VERSION missing in app_version.py" }
+$AppVersion = $Matches[1]
 Write-Host ""
-Write-Host "Done. Distribute folder:" (Join-Path $Root "dist\FBA_Smart_Tool_V3.2_便携版") -ForegroundColor Green
-Write-Host "Zip:" (Join-Path $Root "dist\FBA_Smart_Tool_V3.2_便携版.zip") -ForegroundColor Green
-Write-Host "Launcher:" (Join-Path $Root "dist\FBA_Smart_Tool_V3.2_便携版\FBA_Smart_Tool\启动FBA工具.bat") -ForegroundColor Green
+Write-Host "Done. Distribute folder:" (Join-Path $Root "dist\FBA_Smart_Tool_${AppVersion}_便携版") -ForegroundColor Green
+Write-Host "Zip:" (Join-Path $Root "dist\FBA_Smart_Tool_${AppVersion}_便携版.zip") -ForegroundColor Green
+Write-Host "Launcher:" (Join-Path $Root "dist\FBA_Smart_Tool_${AppVersion}_便携版\FBA_Smart_Tool\启动FBA工具.bat") -ForegroundColor Green

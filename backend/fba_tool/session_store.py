@@ -4,6 +4,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import os
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -345,14 +346,22 @@ def _load_history_index() -> dict:
 
 
 def _save_history_index(index: dict) -> None:
+    """先写临时文件再替换，写入中断时原索引仍是可解析 JSON。"""
     _ensure_dirs()
-    HISTORY_INDEX_PATH.write_text(json.dumps(index, ensure_ascii=False, indent=2), encoding="utf-8")
+    payload = json.dumps(index, ensure_ascii=False, indent=2)
+    tmp = HISTORY_INDEX_PATH.with_suffix(".json.tmp")
+    tmp.write_text(payload, encoding="utf-8")
+    os.replace(tmp, HISTORY_INDEX_PATH)
 
 
-def list_history_tasks() -> List[dict]:
+def list_history_tasks(offset: int = 0, limit: int | None = None) -> List[dict]:
     index = _load_history_index()
     tasks = index.get("tasks", [])
-    return sorted(tasks, key=lambda x: x.get("updated_at", ""), reverse=True)
+    ordered = sorted(tasks, key=lambda x: x.get("updated_at", ""), reverse=True)
+    start = max(int(offset or 0), 0)
+    if limit is None:
+        return ordered[start:]
+    return ordered[start:start + max(int(limit), 0)]
 
 
 def save_history_payload(payload: dict, name: str | None = None) -> str:
@@ -382,7 +391,7 @@ def save_history_payload(payload: dict, name: str | None = None) -> str:
             "saved_at": data.get("saved_at", data["updated_at"]),
         }
     )
-    index["tasks"] = sorted(tasks, key=lambda x: x.get("updated_at", ""), reverse=True)[:1000]
+    index["tasks"] = sorted(tasks, key=lambda x: x.get("updated_at", ""), reverse=True)
     _save_history_index(index)
     return task_id
 

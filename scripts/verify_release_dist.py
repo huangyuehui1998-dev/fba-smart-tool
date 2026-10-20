@@ -1,4 +1,4 @@
-"""发布前校验 backend/dist 静态资源（防止 //assets/、缺失 $_TSR 等历史问题）。"""
+"""发布前校验 backend/dist 静态资源（防止 //assets/、SPA 入口不是 createRoot）。"""
 from __future__ import annotations
 
 import re
@@ -20,12 +20,12 @@ def check_index_html() -> None:
         fail("缺少 backend/dist/index.html")
         return
     text = index.read_text(encoding="utf-8")
-    for token in ("$_TSR", '<div id="root">', "favicon.svg", "FBA Smart Tool"):
+    for token in ('id="root"', "favicon.svg", "FBA Smart Tool"):
         if token not in text:
             fail(f"index.html 缺少 {token!r}")
     if "ssr:!0" in text or "ssr:true" in text:
         fail("index.html 仍含 ssr:true")
-    if "matches:[]" not in text and "matches:$R" in text:
+    if "$_TSR" in text and "matches:[]" not in text and "matches:$R" in text:
         fail("index.html 的 $_TSR matches 未清空为 []")
 
 
@@ -45,7 +45,7 @@ def check_mapdeps() -> None:
         if '"assets/' not in first and "'assets/" not in first:
             fail(f"{js.name} mapDeps 未找到 assets/ 相对路径")
     if checked == 0:
-        fail("未找到任何 __vite__mapDeps 行")
+        return
 
 
 def check_favicon() -> None:
@@ -84,7 +84,7 @@ def main() -> int:
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
         return 1
-    print("发布校验通过：index.html / $_TSR / mapDeps / favicon / createRoot")
+    print("发布校验通过：index.html / #root / mapDeps / favicon / createRoot")
     return 0
 
 

@@ -17,8 +17,14 @@ router = APIRouter()
 
 
 @router.get("/api/tasks/history")
-def api_list_task_history():
-    return {"tasks": list_history_tasks()}
+def api_list_task_history(offset: int = 0, limit: int | None = None):
+    tasks = list_history_tasks()
+    return {
+        "tasks": list_history_tasks(offset, limit),
+        "total": len(tasks),
+        "offset": offset,
+        "limit": limit,
+    }
 
 
 @router.post("/api/tasks/history")

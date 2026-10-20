@@ -76,35 +76,80 @@ def generate_box_plan(
     # 因此默认不引入 py3dbp：用假立方体做 3D 会比贪心更像正确、实际更错。
     # 仅当 product_master 具备完整 unit_length/width/height 且 A/B 更优时再考虑 engine=3d。
     tail_pool.sort(key=lambda x: x["单个重量(kg)"], reverse=True)
+    max_sku_kinds = int(param("max_sku_kinds_per_box", max_mixed_items))
     current_items: List[BoxItem] = []
     current_weight = 0.0
     current_volume = 0.0
     current_count = 0
+
+    def _flush() -> None:
+        nonlocal box_no, current_items, current_weight, current_volume, current_count
+        if not current_items:
+            return
+        plans.append(BoxPlan(box_no=box_no, items=current_items, source="混装"))
+        box_no += 1
+        current_items = []
+        current_weight = 0.0
+        current_volume = 0.0
+        current_count = 0
+
     for tail in tail_pool:
         qty_left = int(tail["剩余数量"])
         unit_weight = float(tail["单个重量(kg)"] or 0)
         unit_vol = float(tail["单件体积(cm3)"] or 0)
+        sku_name = tail["SKU简称"]
         while qty_left > 0:
-            if (current_count >= max_mixed_items or 
-                current_weight + unit_weight > max_weight_kg or 
-                current_volume + unit_vol > usable_volume):
-                
+            kinds = {item.sku for item in current_items}
+            kind_full = sku_name not in kinds and len(kinds) >= max_sku_kinds
+            room_count = max_mixed_items - current_count
+            room_weight = qty_left
+            if unit_weight > 0:
+                room_weight = int((max_weight_kg - current_weight) / unit_weight)
+            room_volume = qty_left
+            if unit_vol > 0:
+                room_volume = int((usable_volume - current_volume) / unit_vol)
+            fit = min(qty_left, room_count, room_weight, room_volume)
+            if kind_full or fit <= 0:
                 if current_items:
-                    plans.append(BoxPlan(box_no=box_no, items=current_items, source="混装"))
-                    box_no += 1
-                current_items = []
-                current_weight = 0.0
-                current_volume = 0.0
-                current_count = 0
-            current_items.append(BoxItem(sku=tail["SKU简称"], qty=1))
-            current_weight += unit_weight
-            current_volume += unit_vol
-            current_count += 1
-            qty_left -= 1
-    if current_items:
-        plans.append(BoxPlan(box_no=box_no, items=current_items, source="混装"))
+                    _flush()
+                    continue
+                fit = 1
+            current_items.append(BoxItem(sku=sku_name, qty=fit))
+            current_weight += unit_weight * fit
+            current_volume += unit_vol * fit
+            current_count += fit
+            qty_left -= fit
+    _flush()
 
     return plans, pd.DataFrame(tail_pool)
+
+
+def remainder_split_count(plans: List[BoxPlan]) -> int:
+    """同一 SKU 的尾数被拆进几只混装箱。0 表示每个尾数 SKU 都只在一只混装箱里。"""
+    seen: Dict[str, int] = defaultdict(int)
+    for plan in plans:
+        if plan.source != "混装":
+            continue
+        for sku in {item.sku for item in plan.items}:
+            seen[sku] += 1
+    return sum(count - 1 for count in seen.values() if count > 1)
+
+
+def unit_over_limit_warnings(sku_rows: List[SkuRow], max_weight_kg: float | None = None) -> List[str]:
+    limit = float(max_weight_kg if max_weight_kg is not None else weight_limit_kg())
+    warnings: List[str] = []
+    for sku in sku_rows:
+        unit = float(sku.unit_weight_kg or 0)
+        if unit > limit:
+            warnings.append(f"{sku.sku} 单件重量 {unit:g} kg 超过上限 {limit:g} kg，排箱前请先拆件或改上限")
+    return warnings
+
+
+def calculate_boxes(sku_rows: List[SkuRow], max_mixed_items: int | None = None, max_weight_kg: float | None = None):
+    """排箱并带上单件超重提示。返回 (plans, tail_df, warnings)。"""
+    warnings = unit_over_limit_warnings(sku_rows, max_weight_kg)
+    plans, tail_df = generate_box_plan(sku_rows, max_mixed_items=max_mixed_items, max_weight_kg=max_weight_kg)
+    return plans, tail_df, warnings
 
 
 def plans_to_editor_df(plans: List[BoxPlan]) -> pd.DataFrame:
