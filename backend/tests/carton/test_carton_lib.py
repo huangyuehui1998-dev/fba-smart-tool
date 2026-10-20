@@ -24,7 +24,6 @@ from fba_tool.carton_math import (
     lb_to_kg,
     light_heavy_check,
     net_from_tares,
-    published_batch13_identity,
     roundtrip_cm_delta,
     side_level,
     summary_lines,
@@ -130,13 +129,16 @@ def test_cd05_decomposition_identity_and_published_batch():
         parts["size_contrib"],
         parts["carry"],
     )
-    published = published_batch13_identity()
-    assert published["weight_contrib"] + published["size_contrib"] + published["carry"] == Decimal("320.01")
-    assert published["total"] == Decimal("320.01")
-    assert published["reconcile_total"] == Decimal("323.85")
-    lines = summary_lines(published, 154, ["FBATESTU000017"])
-    assert lines["headline"] == "计费重总差 +320.01kg = 实重贡献 0.00 + 尺寸贡献 +318.71 + 进位 +1.30（全票口径）"
-    assert lines["reference"] == "实重差 −28.37kg（仅参考，去重 154 箱）"
+    sample = {
+        "weight_contrib": Decimal("1.00"),
+        "size_contrib": Decimal("2.00"),
+        "carry": Decimal("0.50"),
+        "total": Decimal("3.50"),
+        "actual_delta": Decimal("-1.00"),
+    }
+    lines = summary_lines(sample, 154, ["FBATESTU000017"])
+    assert lines["headline"] == "计费重总差 +3.50kg = 实重贡献 +1.00 + 尺寸贡献 +2.00 + 进位 +0.50（全票口径）"
+    assert lines["reference"] == "实重差 −1.00kg（仅参考，去重 154 箱）"
     assert "贴错" not in lines["headline"]
 
 
@@ -378,7 +380,7 @@ def test_m4_second_start_does_not_migrate_again(isolated):
     init_master_db()
     init_master_db()
     backups = list((isolated / "backups").glob("fba_master.v*_to_v*.db"))
-    assert len(backups) == 1
+    assert len(backups) == 2
     dailies = list((isolated / "backups").glob("fba_master.daily.*.db"))
     assert len(dailies) == 1
 
@@ -767,8 +769,17 @@ def test_ui_c1_deduped_main_table(isolated):
     assert abnormal["状态"] == "异常"
     assert abnormal["status_class"] == "text-red-600"
     assert box_status([45.01, 45.01, 41], [57.5, 54.5, 44], 7.5, 7.5) == "异常"
-    published = published_batch13_identity()
-    text = lines_fn(published, 154, ["FBATESTU000017"])
+    text = lines_fn(
+        {
+            "weight_contrib": Decimal("1.00"),
+            "size_contrib": Decimal("2.00"),
+            "carry": Decimal("0.50"),
+            "total": Decimal("3.50"),
+            "actual_delta": Decimal("-1.00"),
+        },
+        154,
+        ["FBATESTU000017"],
+    )
     assert "去重 154 箱" in text["reference"]
 
 

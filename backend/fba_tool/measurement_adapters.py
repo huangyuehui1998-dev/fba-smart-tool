@@ -66,6 +66,67 @@ def _fnum(value: Any) -> float | None:
     return float(q(value, 3))
 
 
+_WEIGHT_ALIASES = ["单箱实重", "实重", "实重(kg)", "重量"]
+_VOL_ALIASES = ["单箱材重", "材重", "体积重"]
+_CHARGE_ALIASES = ["计费重", "单箱计费重"]
+_BOX_ALIASES = ["外箱号", "FBA箱号", "箱号"]
+_WAYBILL_ALIASES = ["运单号"]
+_BILL_LABELS = ("入库计费重", "入库体积", "渠道最小计费重")
+
+
+def _grid(data: bytes) -> List[List[Any]]:
+    from openpyxl import load_workbook
+
+    wb = load_workbook(io.BytesIO(data), data_only=True)
+    try:
+        ws = wb.worksheets[0]
+        return [list(row) for row in ws.iter_rows(values_only=True)]
+    finally:
+        wb.close()
+
+
+def _header_index(headers: List[str], names: List[str]) -> int | None:
+    for name in names:
+        if name in headers:
+            return headers.index(name)
+    return None
+
+
+def _cell(row: List[Any], index: int | None) -> Any:
+    if index is None or index >= len(row):
+        return None
+    return row[index]
+
+
+def _normalize_box_id(value: Any) -> str:
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    text = str(value or "").strip()
+    if text.endswith(".0") and text[:-2].isdigit():
+        return text[:-2]
+    return text
+
+
+def _is_pure_number(text: str) -> bool:
+    return bool(text) and text.isdigit()
+
+
+def _as_decimal(value: Any):
+    if value in (None, ""):
+        return None
+    try:
+        return q(value, 6)
+    except Exception:
+        return None
+
+
+def _label_value(row: List[Any], label: str) -> Any:
+    for index, cell in enumerate(row):
+        if label in str(cell or ""):
+            return row[index + 1] if index + 1 < len(row) else None
+    return None
+
+
 class JiufangBoxAdapter:
     name = "jiufang_box_xlsx"
 
@@ -74,22 +135,97 @@ class JiufangBoxAdapter:
         return "九方" in filename or "jiufang" in name or ("外箱号" in head and "实重" in head and "入库计费重" not in head)
 
     def parse(self, data: bytes) -> List[Dict[str, Any]]:
-        rows = []
-        for raw in _xlsx_rows(data):
-            box_id = str(_pick(raw, ["外箱号", "FBA箱号", "箱号"]) or "").strip()
+        from fba_tool.carton_math import chargeable_kg_rounded, volumetric_kg
+
+        grid = _grid(data)
+        header_at = None
+        headers: List[str] = []
+        for index, row in enumerate(grid):
+            headers = [str(cell or "").strip() for cell in row]
+            if "外箱号" in headers or "FBA箱号" in headers:
+                header_at = index
+                break
+        if header_at is None:
+            return []
+        weight_at = _header_index(headers, _WEIGHT_ALIASES)
+        box_at = _header_index(headers, _BOX_ALIASES)
+        if weight_at is None and box_at is not None and _header_index(headers, ["长", "长(cm)", "长度"]) is not None:
+            raise ParseError("缺少列：单箱实重")
+        length_at = _header_index(headers, ["长", "长(cm)", "长度"])
+        width_at = _header_index(headers, ["宽", "宽(cm)", "宽度"])
+        height_at = _header_index(headers, ["高", "高(cm)", "高度"])
+        vol_at = _header_index(headers, _VOL_ALIASES)
+        charge_at = _header_index(headers, _CHARGE_ALIASES)
+        waybill_at = _header_index(headers, _WAYBILL_ALIASES)
+        fba_at = _header_index(headers, ["货件编号", "FBA号", "FBA货件号"])
+        sku_at = _header_index(headers, ["SKU", "SKU简称"])
+        rows: List[Dict[str, Any]] = []
+        bill = {"bill_chargeable_kg": None, "channel_min_kg": None, "inbound_cbm": None}
+        waybill = ""
+        for offset, raw in enumerate(grid[header_at + 1 :], start=header_at + 2):
+            if not any(cell not in (None, "") for cell in raw):
+                continue
+            label_hit = any(label in "".join(str(cell or "") for cell in raw) for label in _BILL_LABELS)
+            if label_hit:
+                charge = _as_decimal(_label_value(raw, "入库计费重"))
+                volume = _as_decimal(_label_value(raw, "入库体积"))
+                minimum = _as_decimal(_label_value(raw, "渠道最小计费重"))
+                if charge is not None:
+                    bill["bill_chargeable_kg"] = float(charge)
+                if volume is not None:
+                    bill["inbound_cbm"] = float(volume)
+                if minimum is not None:
+                    bill["channel_min_kg"] = float(minimum)
+                if charge is None and volume is None and minimum is None:
+                    rows.append({"kind": "issue", "source_row": offset, "message": "表尾数字无法读取"})
+                continue
+            box_id = _normalize_box_id(_cell(raw, box_at))
+            weight = _as_decimal(_cell(raw, weight_at)) if weight_at is not None else None
+            if box_id and weight is not None:
+                length = _as_decimal(_cell(raw, length_at))
+                width = _as_decimal(_cell(raw, width_at))
+                height = _as_decimal(_cell(raw, height_at))
+                current_waybill = str(_cell(raw, waybill_at) or "").strip()
+                if current_waybill:
+                    waybill = current_waybill
+                volumetric = None
+                if length is not None and width is not None and height is not None:
+                    volumetric = volumetric_kg(length, width, height)
+                column_vol = _as_decimal(_cell(raw, vol_at)) if vol_at is not None else None
+                chargeable = chargeable_kg_rounded(weight, volumetric if volumetric is not None else weight)
+                if column_vol is not None:
+                    volumetric = column_vol
+                rows.append({
+                    "kind": "box",
+                    "fba_id": str(_cell(raw, fba_at) or ""),
+                    "fba_box_id": box_id,
+                    "sku": str(_cell(raw, sku_at) or ""),
+                    "length_cm": None if length is None else float(length),
+                    "width_cm": None if width is None else float(width),
+                    "height_cm": None if height is None else float(height),
+                    "weight_kg": float(weight),
+                    "volumetric_kg": None if volumetric is None else float(volumetric),
+                    "chargeable_kg": float(chargeable),
+                    "waybill": waybill,
+                    "match_status": "invalid_id" if _is_pure_number(box_id) else "",
+                    "source_row": offset,
+                    "raw": {"waybill": waybill},
+                    "raw_unit": "cm_kg",
+                })
+                continue
+            if box_id and weight is None and weight_at is not None and _cell(raw, weight_at) not in (None, ""):
+                rows.append({"kind": "issue", "source_row": offset, "message": "单箱实重不是数字"})
+                continue
+            rows.append({"kind": "issue", "source_row": offset, "message": "未识别的行"})
+        if any(value is not None for value in bill.values()):
             rows.append({
-                "kind": "box",
-                "fba_id": str(_pick(raw, ["货件编号", "FBA号"]) or ""),
-                "fba_box_id": box_id,
-                "sku": str(_pick(raw, ["SKU", "SKU简称"]) or ""),
-                "length_cm": _fnum(_pick(raw, ["长", "长(cm)", "长度"])),
-                "width_cm": _fnum(_pick(raw, ["宽", "宽(cm)", "宽度"])),
-                "height_cm": _fnum(_pick(raw, ["高", "高(cm)", "高度"])),
-                "weight_kg": _fnum(_pick(raw, ["实重", "实重(kg)", "重量"])),
-                "chargeable_kg": _fnum(_pick(raw, ["计费重", "单箱计费重", "材重"])),
-                "source_row": raw["_row"],
-                "raw": {k: raw[k] for k in raw if k != "_row"},
-                "raw_unit": "cm_kg",
+                "kind": "forwarder_bill",
+                "fba_id": waybill,
+                "waybill": waybill,
+                "bill_chargeable_kg": bill["bill_chargeable_kg"],
+                "channel_min_kg": bill["channel_min_kg"],
+                "inbound_cbm": bill["inbound_cbm"],
+                "forwarder": "jiufang",
             })
         return rows
 
@@ -136,7 +272,7 @@ class ForwarderBillAdapter:
                     "length_cm": _fnum(_pick(raw, ["长", "长(cm)"])),
                     "width_cm": _fnum(_pick(raw, ["宽", "宽(cm)"])),
                     "height_cm": _fnum(_pick(raw, ["高", "高(cm)"])),
-                    "weight_kg": _fnum(_pick(raw, ["实重", "实重(kg)", "重量"])),
+                    "weight_kg": _fnum(_pick(raw, ["单箱实重", "实重", "实重(kg)", "重量"])),
                     "chargeable_kg": _fnum(_pick(raw, ["单箱计费重", "计费重"])),
                     "source_row": raw["_row"],
                     "raw": {},

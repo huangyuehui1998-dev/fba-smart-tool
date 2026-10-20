@@ -100,6 +100,30 @@ def chargeable_kg(weight: Any, dims: Sequence[Any], divisor: Any = DEFAULT_DIM_D
     return max(q(weight, 3), volumetric_kg(dims[0], dims[1], dims[2], divisor))
 
 
+def inches_to_cm_exact(inches: Any) -> Decimal:
+    """存储用的全精度换算。显示仍走 to_cm() 的 1 位。"""
+    return D(inches) * CM_PER_IN
+
+
+def lb_to_kg_exact(lb: Any) -> Decimal:
+    return D(lb) * LB_IN_KG
+
+
+def chargeable_kg_rounded(actual_kg: Any, volumetric_kg_value: Any) -> Decimal:
+    """口径 B：体积重先到 2 位，再和实重取 max，结果再 ROUND_HALF_UP 到 2 位。"""
+    return q(max(D(actual_kg), q(volumetric_kg_value, 2)), 2)
+
+
+def round_up_half_kg(total: Any) -> Decimal:
+    """向上取到下一个 0.5kg。取整前不先做成显示用的 2 位。"""
+    value = D(total)
+    if value <= 0:
+        return Decimal("0.0")
+    step = Decimal("0.5")
+    units = (value / step).to_integral_value(rounding="ROUND_CEILING")
+    return q(units * step, 1)
+
+
 def _pct(delta: Decimal, base: Decimal) -> Decimal:
     if base == 0:
         return Decimal("0")
@@ -389,17 +413,3 @@ def net_from_tares(gross: Any, tares: Sequence[Any]) -> Decimal:
         net = Decimal("0")
     return money_half_up(net)
 
-
-def published_batch13_identity() -> Dict[str, Decimal]:
-    """方案 9.9 公布的可加分解，不读取任何真实批次文件。"""
-    weight = Decimal("0.00")
-    size = Decimal("318.71")
-    carry = Decimal("1.30")
-    return {
-        "weight_contrib": weight,
-        "size_contrib": size,
-        "carry": carry,
-        "total": weight + size + carry,
-        "actual_delta": Decimal("-28.37"),
-        "reconcile_total": Decimal("0.00") + Decimal("322.55") + Decimal("1.30"),
-    }

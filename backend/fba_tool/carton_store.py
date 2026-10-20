@@ -629,10 +629,21 @@ def import_measurements(rows: List[Dict[str, Any]], *, measured_by: str, source_
     backup_reason("measure_import")
     inserted = 0
     skipped = 0
+    issues = [row for row in rows if row.get("kind") == "issue"]
     with _conn(write=True) as conn:
         _ensure_tables(conn)
         now = utc_now()
+        waybills = {str(row.get("waybill") or "") for row in rows if row.get("waybill")}
+        waybills.discard("")
+        for item in waybills:
+            conn.execute(
+                "DELETE FROM carton_measurement WHERE json_extract(raw_json, '$.waybill') = ?",
+                (item,),
+            )
+            conn.execute("DELETE FROM forwarder_bill WHERE fba_id = ?", (item,))
         for row in rows:
+            if row.get("kind") == "issue":
+                continue
             if row.get("kind") == "forwarder_bill":
                 conn.execute(
                     """INSERT INTO forwarder_bill (fba_id, forwarder, bill_chargeable_kg, channel_min_kg, source_file, imported_at, import_batch_id)
@@ -695,7 +706,7 @@ def import_measurements(rows: List[Dict[str, Any]], *, measured_by: str, source_
             )
             inserted += 1
         conn.commit()
-    return {"import_batch_id": batch, "inserted": inserted, "skipped": skipped}
+    return {"import_batch_id": batch, "inserted": inserted, "skipped": skipped, "issues": issues}
 
 
 def delete_import_batch(batch_id: str) -> Dict[str, int]:
