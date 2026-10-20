@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException
 
 from fba_tool.boxing import (
     box_metrics,
+    calculate_boxes,
     dataframe_to_sku_rows,
-    generate_box_plan,
     plans_to_editor_df,
 )
 from fba_tool.data_processing import validate_step1
@@ -36,12 +36,14 @@ def api_calculate_boxes(body: InputRowsRequest):
             detail={"message": "录入数据未通过校验", "errors": validation_errors_payload(errors)},
         )
     sku_rows = dataframe_to_sku_rows(df)
-    plans, tail_df = generate_box_plan(sku_rows)
+    plans, tail_df, warnings = calculate_boxes(sku_rows)
     editor_df = plans_to_editor_df(plans)
     metrics = box_metrics(editor_df, sku_rows)
-    return boxing_response_payload(
+    payload = boxing_response_payload(
         editor_df, sku_rows, metrics, tail_df=tail_df, transport_mode=body.transport_mode
     )
+    payload["warnings"] = warnings
+    return payload
 
 
 @router.post("/api/box_metrics")

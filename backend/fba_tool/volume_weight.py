@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
+from fba_tool.units import INCH_TO_CM, LB_TO_KG
 from fba_tool.user_config import param, throw_ratio as config_throw_ratio
 
 DimUnit = Literal["in", "cm"]
@@ -28,7 +29,7 @@ def to_cm(value: float, unit: DimUnit | str) -> float:
     if value <= 0:
         return 0.0
     if str(unit).lower() in {"in", "inch", "inches", "英寸"}:
-        value = float(value) * float(param("inch_to_cm_factor", 2.54))
+        value = float(value) * float(param("inch_to_cm_factor", INCH_TO_CM))
     return round(float(value), 1)
 
 
@@ -37,7 +38,7 @@ def to_kg(value: float, unit: WeightUnit | str) -> float:
     if value <= 0:
         return 0.0
     if str(unit).lower() in {"lb", "lbs", "pound", "pounds", "磅"}:
-        value = float(value) * float(param("lb_to_kg_factor", 0.453592))
+        value = float(value) * float(param("lb_to_kg_factor", LB_TO_KG))
     return round(float(value), 2)
 
 

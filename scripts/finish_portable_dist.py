@@ -2,11 +2,13 @@
 from __future__ import annotations
 
 import shutil
+import sys
 import zipfile
 from pathlib import Path
 
-RELEASE_VERSION = "V3.2"
 ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "backend"))
+from fba_tool.app_version import APP_VERSION as RELEASE_VERSION  # noqa: E402
 OUT = ROOT / "dist" / "FBA_Smart_Tool"
 PORTABLE_NAME = f"FBA_Smart_Tool_{RELEASE_VERSION}_便携版"
 SKIP_DIR_NAMES = {"app_data", "__pycache__"}
@@ -32,7 +34,7 @@ def main() -> None:
 
     readme_src = ROOT / "packaging" / "使用说明.txt"
     if not readme_src.is_file():
-        readme_src = ROOT / "使用说明.txt"
+        readme_src = ROOT / "docs" / "使用说明.md"
     shutil.copy2(readme_src, OUT / "使用说明.txt")
 
     workflow_doc = ROOT / "FBA_Smart_Tool_工作流与运行逻辑.txt"

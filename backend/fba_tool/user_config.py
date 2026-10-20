@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from fba_tool.app_paths import resolve_config_read, resolve_config_write, user_config_dir
+from fba_tool.units import CM_TO_INCH, INCH_TO_CM, KG_TO_LB, LB_TO_KG
 
 SETTINGS_FILE = user_config_dir() / "user_settings.json"
 FORMULAS_FILE = user_config_dir() / "formulas.json"
@@ -23,10 +24,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         #   与此货代系数是两套独立体系，勿混用。
         "throw_ratio": 6000,
         "volume_divisor": 6000,
-        "kg_to_lb_factor": 2.20462,
-        "lb_to_kg_factor": 0.453592,
-        "cm_to_inch_factor": 0.393701,
-        "inch_to_cm_factor": 2.54,
+        "kg_to_lb_factor": KG_TO_LB,
+        "lb_to_kg_factor": LB_TO_KG,
+        "cm_to_inch_factor": CM_TO_INCH,
+        "inch_to_cm_factor": INCH_TO_CM,
         "internal_gross_lb_factor": 2.2,
         "sta_box_prefix": "P1 - B",
         "sta_condition_default": "NewItem",

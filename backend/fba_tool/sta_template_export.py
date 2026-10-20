@@ -15,6 +15,7 @@ from openpyxl import Workbook
 
 from fba_tool.models import SkuRow
 from fba_tool.product_catalog import lookup_sta_product_name
+from fba_tool.units import CM_PER_IN, kg_to_lb
 from fba_tool.user_config import label, render_formula
 
 # 0-based 列索引
@@ -22,8 +23,7 @@ IDX_DEATH_COL = 10  # K 列
 IDX_FIRST_BOX = 11  # L 列
 BASE_COL_COUNT = 11  # A~K
 
-STA_LB_PER_KG = 2.2046
-STA_CM_PER_INCH = 2.54
+STA_CM_PER_INCH = float(CM_PER_IN)
 
 INSTRUCTION_TEXT = "请在下方提供此装箱组的包装箱详情。如果您有任何疑问，请参阅说明表。"
 PACK_GROUP_TEXT = "装箱组：1"
@@ -64,7 +64,7 @@ def _matrix_max_box(box_matrix: pd.DataFrame) -> int:
 
 
 def _kg_to_lb(kg: float) -> float:
-    return round(float(kg) * STA_LB_PER_KG, 2)
+    return kg_to_lb(kg, 2)
 
 
 def _cm_to_in(cm: float) -> float:
