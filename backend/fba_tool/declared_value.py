@@ -27,6 +27,20 @@ class FxRateRequired(Exception):
         self.message = message
 
 
+class MissingPrice(Exception):
+    def __init__(self, missing: List[Dict[str, Any]]) -> None:
+        skus = "、".join(str(item.get("sku") or "") for item in missing)
+        message = f"以下 SKU 缺申报价：{skus}，请在产品库补齐"
+        super().__init__(message)
+        self.code = "DECLARED_VALUE_MISSING"
+        self.message = message
+        self.missing = missing
+
+
+class InvalidFx(ValueError):
+    """汇率参数不是数字，也不是带数字 fx_rate 的对象。"""
+
+
 def _num(value: Any) -> Optional[Decimal]:
     if value in (None, ""):
         return None
@@ -109,79 +123,208 @@ def _line_amounts(cny_lines: Sequence[Decimal], fx: Decimal) -> tuple[Decimal, L
     return total_cny, amounts
 
 
+def _strict_num(value: Any) -> Optional[Decimal]:
+    """金额路径：None 不是 0。非数字字符串交给调用方当成汇率非法。"""
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return None
+        try:
+            Decimal(text)
+        except Exception as exc:
+            raise InvalidFx("汇率不合法") from exc
+    return _num(value)
+
+
+def normalize_fx(fx_snapshot: Any, month: str = "") -> Dict[str, Any]:
+    """fx 可以是数字，也可以是带 fx_rate 的对象。不合法时抛 InvalidFx，不抛 500。"""
+    if isinstance(fx_snapshot, (int, float, Decimal)):
+        return {"fx_rate": fx_snapshot, "fx_applicable_month": month}
+    if isinstance(fx_snapshot, str):
+        rate = _strict_num(fx_snapshot)
+        if rate is None:
+            raise InvalidFx("汇率不合法")
+        return {"fx_rate": rate, "fx_applicable_month": month}
+    if fx_snapshot is None:
+        return {}
+    if not isinstance(fx_snapshot, dict):
+        raise InvalidFx("汇率不合法")
+    snap = dict(fx_snapshot)
+    if "fx_rate" in snap and snap.get("fx_rate") not in (None, ""):
+        _strict_num(snap.get("fx_rate"))
+    return snap
+
+
+def _positive(value: Any) -> Optional[Decimal]:
+    number = _num(value)
+    if number is None or number <= 0:
+        return None
+    return number
+
+
+def _qty_of(line: Dict[str, Any]) -> int:
+    qty = _num(line.get("qty"))
+    if qty is None or qty <= 0:
+        raise MissingPrice([{
+            "sku": line.get("sku") or "",
+            "basis": "",
+            "tried": ["qty"],
+        }])
+    return int(qty)
+
+
+def _purchase_cny(line: Dict[str, Any]) -> Optional[Decimal]:
+    if line.get("purchase_price_cny") not in (None, ""):
+        return _positive(line.get("purchase_price_cny"))
+    if line.get("purchase_cny") not in (None, ""):
+        return _positive(line.get("purchase_cny"))
+    return None
+
+
+def _resolve_line(
+    line: Dict[str, Any],
+    mode: str,
+    fx: Optional[Decimal],
+    domestic_rate: Decimal,
+) -> Dict[str, Any]:
+    """逐行回退。返回 unit、currency（USD 或 CNY）、price_source、notices。"""
+    sku = str(line.get("sku") or "")
+    tried: List[str] = []
+    if mode == "retail":
+        tried.append("lingxing")
+        retail = _positive(line.get("retail_usd"))
+        if retail is not None:
+            return {"unit": retail, "currency": "USD", "price_source": "lingxing", "notices": []}
+        tried.append("legacy")
+        legacy = _positive(line.get("legacy_usd"))
+        if legacy is not None:
+            return {"unit": legacy, "currency": "USD", "price_source": "legacy", "notices": []}
+        tried.append("product_cost")
+        cost = _positive(line.get("product_cost_cny"))
+        if cost is not None:
+            if fx is None or fx <= 0:
+                raise FxRateRequired("汇率缺失或小于等于 0")
+            return {
+                "unit": money_half_up(cost / fx),
+                "currency": "USD",
+                "price_source": "product_cost",
+                "notices": [],
+            }
+    elif mode == "cost":
+        tried.append("purchase")
+        purchase = _purchase_cny(line)
+        if purchase is not None:
+            return {"unit": purchase, "currency": "CNY", "price_source": "purchase", "notices": []}
+    else:
+        tried.append("manual_fob")
+        if line.get("fob_value") not in (None, ""):
+            unit = convert_fob(line.get("fob_value"), str(line.get("fob_currency") or "USD"), "USD", fx)
+            return {"unit": unit, "currency": "USD", "price_source": "manual_fob", "notices": []}
+        tried.append("legacy")
+        legacy = _positive(line.get("legacy_usd"))
+        if legacy is not None:
+            return {"unit": legacy, "currency": "USD", "price_source": "legacy", "notices": [FOB_NOTICE]}
+        tried.append("purchase")
+        purchase = _purchase_cny(line)
+        if purchase is not None:
+            if fx is None or fx <= 0:
+                raise FxRateRequired("汇率缺失或小于等于 0")
+            factor = Decimal("1") + domestic_rate
+            return {
+                "unit": money_half_up(purchase * factor / fx),
+                "currency": "USD",
+                "price_source": "purchase",
+                "notices": [],
+            }
+    raise MissingPrice([{"sku": sku, "basis": mode, "tried": tried}])
+
+
 def quote_declared_value(
     lines: Sequence[Dict[str, Any]],
     basis: str,
-    fx_snapshot: Optional[Dict[str, Any]],
+    fx_snapshot: Any = None,
     *,
     month: str,
     min_retail_ratio: Any = Decimal("0.30"),
+    fob_domestic_cost_rate: Any = 0,
 ) -> Dict[str, Any]:
-    """lines: sku, qty, retail_usd, purchase_cny, fob_value, fob_currency, legacy_usd。"""
+    """逐行决定单价来源。算不出则整次报价失败，不允许把缺价当成 0.00。"""
     mode = str(basis or "retail").strip().lower()
     if mode not in {"retail", "fob", "cost"}:
         raise ValueError(f"申报价口径只能是 retail / fob / cost：{basis}")
-    needs_fx = mode in {"cost", "fob"} or any(
-        str(line.get("fob_currency") or "USD").upper() not in {"", "USD"} for line in lines
-    )
-    if mode == "retail":
-        needs_fx = any(str(line.get("retail_currency") or "USD").upper() not in {"", "USD"} for line in lines)
-    snap = dict(fx_snapshot or {})
-    if needs_fx or mode != "retail":
-        if mode == "retail" and not needs_fx:
-            pass
-        else:
-            snap = require_fx(snap, month)
-    fx = _num(snap.get("fx_rate")) or Decimal("0")
+    snap = normalize_fx(fx_snapshot, month)
+    domestic = _num(fob_domestic_cost_rate)
+    if domestic is None:
+        domestic = Decimal("0")
+    fx = _num(snap.get("fx_rate"))
+    resolved: List[Dict[str, Any]] = []
+    missing: List[Dict[str, Any]] = []
+    for line in lines:
+        try:
+            resolved.append(_resolve_line(line, mode, fx, domestic))
+        except MissingPrice as exc:
+            missing.extend(exc.missing)
+    if missing:
+        raise MissingPrice(missing)
+    needs_fx = mode == "cost" or any(item["currency"] == "CNY" or item["price_source"] == "purchase" for item in resolved)
+    if mode == "fob" and any(str(line.get("fob_currency") or "USD").upper() not in {"", "USD"} for line in lines):
+        needs_fx = True
+    if needs_fx:
+        snap = require_fx(snap, month)
+        fx = _num(snap.get("fx_rate"))
     ratio = to_dec(min_retail_ratio or "0.30")
-    out_lines: List[Dict[str, Any]] = []
     notices: List[str] = []
     warnings: List[str] = []
     total_qty = 0
+    total_cny: Optional[Decimal] = None
     if mode == "cost":
-        cny_lines = [to_dec(line.get("qty")) * to_dec(line.get("purchase_cny")) for line in lines]
-        total_cny, amounts = _line_amounts(cny_lines, fx)
-    elif mode == "fob":
-        manual = []
-        missing_manual = False
-        for line in lines:
-            if line.get("fob_value") in (None, ""):
-                missing_manual = True
-                break
-            manual.append(convert_fob(line.get("fob_value"), str(line.get("fob_currency") or "USD"), "USD", fx) * to_dec(line.get("qty")))
-        if missing_manual:
-            amounts = [money_half_up(to_dec(line.get("legacy_usd")) * to_dec(line.get("qty"))) for line in lines]
-            total_cny = None
-            notices.append(FOB_NOTICE)
-        else:
-            total = money_half_up(sum(manual, Decimal("0")))
-            amounts = []
-            running = Decimal("0")
-            for index, amt in enumerate(manual):
-                if index < len(manual) - 1:
-                    rounded = money_half_up(amt)
-                    running += rounded
-                    amounts.append(rounded)
-                else:
-                    amounts.append(money_half_up(total - running))
-            total_cny = None
+        cny_lines = []
+        for line, item in zip(lines, resolved):
+            cny_lines.append(_qty_of(line) * item["unit"])
+        total_cny, amounts = _line_amounts(cny_lines, fx or Decimal("1"))
     else:
-        amounts = [money_half_up(to_dec(line.get("retail_usd")) * to_dec(line.get("qty"))) for line in lines]
-        total_cny = None
+        raw_amounts = []
+        for line, item in zip(lines, resolved):
+            raw_amounts.append(item["unit"] * _qty_of(line))
+            notices.extend(item["notices"])
+        total = money_half_up(sum(raw_amounts, Decimal("0")))
+        amounts = []
+        running = Decimal("0")
+        for index, amt in enumerate(raw_amounts):
+            if index < len(raw_amounts) - 1:
+                rounded = money_half_up(amt)
+                running += rounded
+                amounts.append(rounded)
+            else:
+                amounts.append(money_half_up(total - running))
+    if mode != "cost":
+        notices = []
+        for item in resolved:
+            notices.extend(item["notices"])
     total_usd = money_half_up(sum(amounts, Decimal("0")))
-    for line, amount in zip(lines, amounts):
-        qty = int(to_dec(line.get("qty")))
+    if lines and total_usd <= 0:
+        raise MissingPrice([{
+            "sku": str(line.get("sku") or ""),
+            "basis": mode,
+            "tried": [resolved[index]["price_source"]],
+        } for index, line in enumerate(lines)])
+    out_lines: List[Dict[str, Any]] = []
+    for line, item, amount in zip(lines, resolved, amounts):
+        qty = _qty_of(line)
         total_qty += qty
         unit = money_half_up(amount / qty) if qty else Decimal("0")
-        retail = _num(line.get("retail_usd"))
-        purchase = _num(line.get("purchase_cny"))
+        retail = _positive(line.get("retail_usd"))
+        purchase = _purchase_cny(line)
         flags: List[str] = []
-        if purchase is not None and fx > 0 and unit < money_half_up(purchase / fx):
+        if purchase is not None and fx is not None and fx > 0 and unit < money_half_up(purchase / fx):
             flags.append("申报价低于采购价")
-        if retail is not None and retail > 0 and unit < money_half_up(retail * ratio):
+        if retail is not None and unit < money_half_up(retail * ratio):
             flags.append("申报价低于售价 30%")
         if retail is not None and unit > retail:
             flags.append("申报价高于售价")
+        line_notices = list(item["notices"])
+        if item["price_source"] != "legacy":
+            line_notices = [note for note in line_notices if "历史申报价" not in note]
         warnings.extend(flags)
         out_lines.append({
             "sku": line.get("sku"),
@@ -189,12 +332,12 @@ def quote_declared_value(
             "amount_usd": float(amount),
             "unit_usd": float(unit),
             "currency": "USD",
+            "price_source": item["price_source"],
+            "notice": "；".join(line_notices),
             "warnings": flags,
         })
     avg = money_half_up(total_usd / total_qty) if total_qty else Decimal("0")
-    blob = repr({"total": float(total_usd), "lines": out_lines})
-    if "1021.76" in blob:
-        raise AssertionError("逐行换算产生了 1021.76")
+    legacy_notice = FOB_NOTICE if any(item["price_source"] == "legacy" and mode == "fob" for item in resolved) else ""
     return {
         "basis": mode,
         "currency": "USD",
@@ -203,7 +346,7 @@ def quote_declared_value(
         "avg_usd": float(avg),
         "lines": out_lines,
         "warnings": warnings,
-        "fob_source_notice": FOB_NOTICE if FOB_NOTICE in notices else "",
+        "fob_source_notice": legacy_notice,
         **snapshot_from_row({
             "rate": snap.get("fx_rate"),
             "rate_type": snap.get("fx_rate_type"),
@@ -376,7 +519,11 @@ def resolve_retail(
 
 
 def product_cost_usd(cny: Any, fx_rate: Any) -> Decimal:
-    return money_half_up(to_dec(cny) / to_dec(fx_rate))
+    amount = _num(cny)
+    rate = _num(fx_rate)
+    if amount is None or rate is None or rate <= 0:
+        raise MissingPrice([{"sku": "", "basis": "retail", "tried": ["product_cost"]}])
+    return money_half_up(amount / rate)
 
 
 def sta_fee_comparison(estimate_min: Any, estimate_max: Any, entered: Any) -> Dict[str, Any]:

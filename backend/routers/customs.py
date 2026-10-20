@@ -105,7 +105,7 @@ def api_customs_export(body: CustomsExportRequest):
 
 @router.post("/api/declared-value/quote")
 def api_declared_value_quote(body: dict):
-    from fba_tool.declared_value import FxRateRequired, quote_declared_value
+    from fba_tool.declared_value import FxRateRequired, InvalidFx, MissingPrice, quote_declared_value
 
     try:
         return quote_declared_value(
@@ -114,8 +114,16 @@ def api_declared_value_quote(body: dict):
             body.get("fx"),
             month=str(body.get("month") or ""),
             min_retail_ratio=body.get("min_declared_ratio_of_retail") or "0.30",
+            fob_domestic_cost_rate=body.get("fob_domestic_cost_rate") or 0,
         )
+    except MissingPrice as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": exc.message, "missing": exc.missing},
+        ) from exc
     except FxRateRequired as exc:
         raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
+    except InvalidFx as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
