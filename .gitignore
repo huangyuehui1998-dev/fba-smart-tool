@@ -30,3 +30,16 @@ backend/static/
 # 疑似真实业务数据（真实 FBA 货件号）
 backend/tests/golden/*.json
 backend/_sta_compare.json
+
+# 任务存档与 templates 下的真实业务文件
+*.fbox
+backend/templates/*发票*.xlsx
+backend/templates/亚马逊FBA表*.csv
+backend/templates/箱唛*.pdf
+backend/templates/已填写好的*
+# 模板放行（防止上层规则误伤）
+!backend/templates/**/*.xlsx
+!backend/templates/*.csv
+!backend/templates/README.txt
+backend/templates/*发票*.xlsx
+backend/templates/亚马逊FBA表*.csv
