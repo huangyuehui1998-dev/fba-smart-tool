@@ -236,6 +236,8 @@ def test_manifest_excludes_real_data_files():
     cfg = set(M.CONFIG_WHITELIST)
     assert "invoice_history.default.json" not in cfg and "lingxing.json" not in cfg
     assert not any("sessions" in c for c in cfg)
+    assert M.forbidden_real_hits(ROOT) == []
+    assert "lingxing_listing_prices.xlsx" in M.FORBIDDEN_REAL_NAMES
 
 
 def test_spec_uses_manifest_only():

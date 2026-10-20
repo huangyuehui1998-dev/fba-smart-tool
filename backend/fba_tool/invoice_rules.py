@@ -171,6 +171,18 @@ def sku_totals(boxes: List[Box]) -> List[Tuple[str, int]]:
 
 
 # ---------------------------------------------------------------- 产品 / 价格 / 拦截
+def _invoice_unit(inv: Dict[str, Any], product: Dict[str, Any]) -> str:
+    unit = str(inv.get("unit") or "").strip()
+    if unit:
+        return unit
+    from fba_tool.user_config import param
+
+    fallback = param("invoice_unit_fallback_declare_unit", True)
+    if fallback in (False, 0, "0", "false", "False"):
+        return ""
+    return str(product.get("declare_unit") or "").strip()
+
+
 def invoice_fields(product: Dict[str, Any]) -> Dict[str, Any]:
     """产品库 → 发票字段。发票专用字段放在 extra_data.invoice（单位、每套个数、采购价、英文材质/用途、目的港 HS）。"""
     p = dict(product or {})
@@ -200,7 +212,7 @@ def invoice_fields(product: Dict[str, Any]) -> Dict[str, Any]:
         "purpose_cn": p.get("purpose") or "",
         "purpose_en": inv.get("purpose_en") or "",
         "hs_code": str(inv.get("dest_hs_code") or p.get("hs_code") or ""),
-        "invoice_unit": inv.get("unit") or "",
+        "invoice_unit": _invoice_unit(inv, p),
         "pcs_per_set": to_number(inv.get("pcs_per_set")) or 1,
         "purchase_price": inv.get("purchase_price"),
         "has_battery": inv.get("has_battery") or "否",

@@ -42,6 +42,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         # S9-step3 #6：价格上限（美元）。领星售价 / 常规价 / 导入价超过它当作无效、不写入；申报价校验也用它。
         # 100000 美元：D-14，用户确认 2026-10-17。
         "price_max": 100000,
+        "invoice_unit_fallback_declare_unit": True,
     },
     "factory_warehouse_columns": {},
     "forwarder_column_map": {},

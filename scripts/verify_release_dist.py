@@ -74,7 +74,20 @@ def check_client_entry() -> None:
         fail(f"{entry_name} 仍对 document 调用 hydrateRoot，水合不匹配会导致白屏")
 
 
+def check_forbidden_listing_files() -> None:
+    import sys
+
+    root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(root / "packaging"))
+    from release_manifest import forbidden_real_hits
+
+    hits = forbidden_real_hits(root)
+    if hits:
+        fail("仓库里有禁止提交的领星售价表：" + ", ".join(hits))
+
+
 def main() -> int:
+    check_forbidden_listing_files()
     check_index_html()
     check_mapdeps()
     check_favicon()

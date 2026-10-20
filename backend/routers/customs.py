@@ -101,3 +101,21 @@ def api_customs_export(body: CustomsExportRequest):
     if fmt == "xls":
         return file_response(out, name, "application/vnd.ms-excel")
     return xlsx_response(out, name)
+
+
+@router.post("/api/declared-value/quote")
+def api_declared_value_quote(body: dict):
+    from fba_tool.declared_value import FxRateRequired, quote_declared_value
+
+    try:
+        return quote_declared_value(
+            body.get("lines") or [],
+            str(body.get("basis") or "retail"),
+            body.get("fx"),
+            month=str(body.get("month") or ""),
+            min_retail_ratio=body.get("min_declared_ratio_of_retail") or "0.30",
+        )
+    except FxRateRequired as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

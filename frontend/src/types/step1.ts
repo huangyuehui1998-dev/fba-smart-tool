@@ -42,6 +42,7 @@ export interface ComputePreviewResponse {
   total_gross_kg?: number;
   weight_warnings?: GrossWeightWarning[];
   cost_dashboard?: CostDashboard;
+  master_gaps?: { sku: string; missing: string[] }[];
 }
 
 /** 录入单箱毛重与「装量×单件重+空箱重」不符，可能引发重量差异费。 */

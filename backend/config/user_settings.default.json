@@ -20,7 +20,8 @@
     "forwarder_country_default": "美国",
     "input_template_blank_rows": 10,
     "input_template_include_example": false,
-    "price_max": 100000
+    "price_max": 100000,
+    "invoice_unit_fallback_declare_unit": true
   },
   "factory_warehouse_columns": {},
   "forwarder_column_map": {}

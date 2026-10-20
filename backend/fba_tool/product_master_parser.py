@@ -374,6 +374,12 @@ def parse_business_product_master(
 
         raise ValueError("未在表头中找到 SKU 列，请确认上传的是产品信息主表")
 
+    # 说明字段只进返回的映射报告，不能当源列名去索引 DataFrame。
+    report_extra: Dict[str, str] = {}
+    if "产品成本" in str(col_map.get("declared_value") or ""):
+        report_extra["declared_value_currency"] = "CNY"
+        report_extra["column_note"] = "产品成本→declared_value（CNY）"
+
 
 
     mapped_data: Dict[str, pd.Series] = {}
@@ -466,7 +472,9 @@ def parse_business_product_master(
 
 
 
-    return records, {k: v for k, v in col_map.items()}
+    report = {k: v for k, v in col_map.items()}
+    report.update(report_extra)
+    return records, report
 
 
 

@@ -32,6 +32,7 @@ import { Step1CostDashboard } from "@/components/step1-cost-dashboard";
 import { emptyComputed, type ComputedDisplay } from "@/lib/step1-rows";
 import { usePreventBrowserFileDrop } from "@/hooks/use-prevent-browser-file-drop";
 import { useStep1Logic } from "@/hooks/use-step1-logic";
+import { MasterDataGapBanner } from "@/components/master-data-gap-banner";
 
 const EDITABLE_COLS = [
   { key: "sku", label: "SKU简称", w: "min-w-[120px]" },
@@ -68,6 +69,7 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
     actualPlacementFee,
     validationErrors,
     weightWarnings,
+    masterGaps,
     weightConfirmOpen,
     keepDeclaredWeights,
     useCalculatedWeights,
@@ -89,6 +91,7 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
 
   return (
     <div className="space-y-6 pb-32">
+      <MasterDataGapBanner gaps={masterGaps} />
       {(error || success) && (
         <div className="space-y-2">
           {error && (

@@ -44,6 +44,13 @@ export interface CustomsPackageData {
   order_no: string;
   buyer: string;
   trade_term: string;
+  declared_value_basis?: string;
+  fx_rate?: number | null;
+  fx_rate_type?: string;
+  fx_applicable_month?: string;
+  fx_source_url?: string;
+  fx_publish_date?: string;
+  net_weight_mode?: string;
   package_type: string;
   total_pieces: number;
   total_gross_kg: number;

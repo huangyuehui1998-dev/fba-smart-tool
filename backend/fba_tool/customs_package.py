@@ -15,7 +15,7 @@ from fba_tool.shipment_serialize import csv_shipment_from_dict
 from fba_tool.shipment_validator import ShipmentPair
 from fba_tool.user_config import load_settings
 
-DEFAULT_NET_RATIO = 0.9  # 仅 customs_net_weight_method="ratio" 时使用（可选，默认不用）
+DEFAULT_NET_RATIO = 0.95  # 仅 net_weight_mode="ratio" 时使用（非规范口径，默认不用）
 DEFAULT_NET_MINUS_PER_BOX = Decimal("0.2")  # v5 Q1：净重 = 毛重 − 0.2kg × 箱数
 DEFAULT_LOADING_PORT = "宁波北仑"  # v6 Q7
 DEFAULT_UNIT = "件"
@@ -111,6 +111,14 @@ class CustomsPackageData:
     freight: str = ""  # v6 Q11：运费一律留空
     payment_terms: str = "电汇"
     currency: str = "USD"
+    declared_value_basis: str = "retail"
+    trade_term_source: str = "profile"
+    fx_rate: Optional[float] = None
+    fx_rate_type: str = ""
+    fx_applicable_month: str = ""
+    fx_source_url: str = ""
+    fx_publish_date: str = ""
+    net_weight_mode: str = "tare_from_carton"
     source: str = "shipment"
     # S2-fix D2：申报价来源与提示。warnings 只提示；blocking 有内容时导出会被拦下
     price_sources: List[Dict[str, Any]] = field(default_factory=list)
@@ -179,11 +187,26 @@ def _net_weight_params() -> Tuple[str, Decimal, Decimal]:
     return method, per_box, ratio
 
 
-def compute_net_weight(gross: Any, boxes: int) -> float:
+def compute_net_weight(gross: Any, boxes: int, box_tares: Optional[List[Any]] = None) -> float:
+    """净重。默认 tare_from_carton：毛重 − 各箱皮重；皮重缺失时按 0.2kg/箱。"""
     method, per_box, ratio = _net_weight_params()
     if method == "ratio":
         return float(money_half_up(to_dec(gross) * ratio))
-    return float(net_weight_minus_per_box(gross, boxes, per_box))
+    if method == "minus_per_box":
+        return float(net_weight_minus_per_box(gross, boxes, per_box))
+    count = int(boxes or 0)
+    if count <= 0:
+        return 0.0
+    tares = list(box_tares or [])
+    if len(tares) != count:
+        return float(net_weight_minus_per_box(gross, count, Decimal("0.2")))
+    tare_sum = Decimal("0")
+    for tare in tares:
+        tare_sum += Decimal("0.2") if tare in (None, "") else to_dec(tare)
+    net = to_dec(gross) - tare_sum
+    if net < 0:
+        net = Decimal("0")
+    return float(money_half_up(net))
 
 
 def _weight_map_from_step1(step1_rows: List[Dict[str, Any]]) -> Dict[str, float]:
@@ -909,7 +932,7 @@ def build_customs_data(
         rp = get_default_rule_profile()
     except Exception:
         rp = {}
-    for attr in ("loading_port", "exemption_nature", "transport_mode"):
+    for attr in ("loading_port", "exemption_nature", "transport_mode", "trade_term", "declared_value_basis", "net_weight_mode"):
         if rp.get(attr):
             setattr(data, attr, str(rp[attr]))
 
@@ -1082,7 +1105,7 @@ def build_customs_from_tickets(
     )
     data.declare_mode = declare_mode_for(data.shipment_ids)
     rp = _rule_profile()
-    for attr in ("loading_port", "exemption_nature", "transport_mode"):
+    for attr in ("loading_port", "exemption_nature", "transport_mode", "trade_term", "declared_value_basis", "net_weight_mode"):
         if rp.get(attr):
             setattr(data, attr, str(rp[attr]))
     data = apply_overrides(data, overrides)

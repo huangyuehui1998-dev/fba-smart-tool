@@ -33,6 +33,8 @@ import {
 } from "@/components/ui/dialog";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { staFeeOutOfRange } from "@/lib/sta-fee";
+import { apiPostJson } from "@/lib/api/client";
 import { DEFAULT_THROW_RATIO } from "@/constants";
 import { useWorkflow } from "@/context/workflow-context";
 import { formatFileSize } from "@/lib/box-editor";
@@ -217,6 +219,63 @@ function Dropzone({
         ))}
       </div>
     </div>
+  );
+}
+
+function StaActualFeeCard({
+  fbaId,
+  estimateMin,
+  estimateMax,
+}: {
+  fbaId: string;
+  estimateMin: number | null;
+  estimateMax: number | null;
+}) {
+  const [entered, setEntered] = useState("");
+  const [note, setNote] = useState<string | null>(null);
+  const amount = Number(entered);
+  const comparable = estimateMin != null && estimateMax != null && entered.trim() !== "" && Number.isFinite(amount);
+  const outOfRange = comparable && staFeeOutOfRange(amount, estimateMin, estimateMax);
+
+  return (
+    <Card className={outOfRange ? "border-red-400" : undefined}>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm">STA 实际配置费</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-xs">
+        <Label htmlFor="sta-placement-fee">
+          实际配置费 (USD)
+          {estimateMin != null && estimateMax != null ? ` · 估算 $${estimateMin}–$${estimateMax}` : ""}
+        </Label>
+        <Input
+          id="sta-placement-fee"
+          data-testid="sta-placement-fee"
+          inputMode="decimal"
+          value={entered}
+          aria-invalid={outOfRange}
+          className={outOfRange ? "border-red-600 text-red-700" : undefined}
+          onChange={(event) => {
+            setEntered(event.target.value);
+            setNote(null);
+          }}
+          onBlur={() => {
+            if (!fbaId || !comparable || estimateMin == null || estimateMax == null) return;
+            void apiPostJson("/api/tickets/sta-placement-fee", {
+              fba_id: fbaId,
+              entered: amount,
+              estimate_min: estimateMin,
+              estimate_max: estimateMax,
+            })
+              .then(() => setNote(outOfRange ? "已保存，实际值不在估算区间内" : "已保存"))
+              .catch(() => setNote("保存失败"));
+          }}
+        />
+        {outOfRange && (
+          <p className="font-medium text-red-700">实际值不在估算区间内</p>
+        )}
+        {note && <p className="text-muted-foreground">{note}</p>}
+      </CardContent>
+    </Card>
   );
 }
 
@@ -699,6 +758,12 @@ export function Step4Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
           </CardContent>
         </Card>
       )}
+
+      <StaActualFeeCard
+        fbaId={shipments[0]?.shipment_id ?? ""}
+        estimateMin={actualPlacementFee?.applicable_range_min_usd ?? null}
+        estimateMax={actualPlacementFee?.applicable_range_max_usd ?? null}
+      />
 
       {(step4Ok || workerPackingPreview.length > 0) && workerPackingPreview.length > 0 && (
         <Tabs defaultValue={boxLabelMapping.length ? "mapping" : "worker_packing"} className="space-y-3">

@@ -262,6 +262,27 @@ def api_hs_template_upsert(body: dict):
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
+@router.post("/api/master-data/retail-prices")
+def api_retail_prices(body: dict):
+    from fba_tool.declared_value import FxRateRequired, import_retail_rows, parse_listing_table, resolve_retail
+
+    try:
+        rows = body.get("rows")
+        if body.get("headers"):
+            rows = parse_listing_table(body.get("headers") or [], body.get("table_rows") or [])
+        products = body.get("products") or {}
+        fx_by_pair = body.get("fx_by_pair") or {}
+        if body.get("mcp_error"):
+            return resolve_retail(products, xlsx_rows=rows or [], fx_by_pair=fx_by_pair, mcp_error=str(body.get("mcp_error")))
+        if body.get("source") == "xlsx" or body.get("headers"):
+            return import_retail_rows(rows or [], products, source="manual_xlsx", fx_by_pair=fx_by_pair)
+        return resolve_retail(products, mcp_rows=rows or [], fx_by_pair=fx_by_pair)
+    except FxRateRequired as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
 @router.get("/api/master-data/sku/{sku}")
 def api_master_data_sku(sku: str):
     rec = get_product_by_sku(sku)
