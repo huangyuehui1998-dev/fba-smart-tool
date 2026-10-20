@@ -433,7 +433,8 @@ export function AppSidebar({
   }, [taskName]);
 
   useEffect(() => {
-    setDeepseekKey(localStorage.getItem(DEEPSEEK_KEY_STORAGE) ?? "");
+    localStorage.removeItem(DEEPSEEK_KEY_STORAGE);
+    setDeepseekKey("");
     const storedModel = localStorage.getItem(DEEPSEEK_MODEL_STORAGE);
     if (DEEPSEEK_MODEL_OPTIONS.some((m) => m.value === storedModel)) {
       setDeepseekModel(storedModel as DeepseekModel);
@@ -454,8 +455,11 @@ export function AppSidebar({
   }, []);
 
   const saveDeepseekKey = (value: string) => {
-    setDeepseekKey(value);
-    localStorage.setItem(DEEPSEEK_KEY_STORAGE, value);
+    void fetch("/api/settings/deepseek-key", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: value }),
+    }).finally(() => setDeepseekKey(""));
   };
 
   const saveDeepseekModel = (value: DeepseekModel) => {

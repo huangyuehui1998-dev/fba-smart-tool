@@ -208,3 +208,26 @@ def get_limits():
         "throw_ratio": throw_ratio(),
         "input_columns": INPUT_COLUMNS,
     }
+
+
+@router.put("/api/settings/deepseek-key")
+def put_deepseek_key(body: dict):
+    """Key 只在 Windows 上用 DPAPI 落盘。响应里没有原文。"""
+    import sys
+
+    from fba_tool.deepseek_secret import save_key
+
+    if sys.platform != "win32":
+        raise HTTPException(status_code=422, detail="非 Windows 环境不能保存 DeepSeek Key")
+    key = str((body or {}).get("key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=422, detail="Key 不能为空")
+    save_key(key)
+    return {"status": "已设置"}
+
+
+@router.get("/api/settings/deepseek-key")
+def get_deepseek_key():
+    from fba_tool.deepseek_secret import status
+
+    return {"status": status()}

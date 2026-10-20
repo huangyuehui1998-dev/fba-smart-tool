@@ -28,8 +28,6 @@ CORS_ALLOW_ORIGINS = [
 
 ]
 
-CORS_ALLOW_ORIGIN_REGEX = r"https?://(127\.0\.0\.1|localhost)(:\d+)?"
-
 
 
 # 导出文件 MIME 类型

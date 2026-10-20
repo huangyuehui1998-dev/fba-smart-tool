@@ -13,15 +13,15 @@ import os
 import sys
 
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import JSONResponse, Response
 
 from fba_tool.app_paths import ensure_app_data_layout
 from fba_tool.master_db import init_master_db
+from fba_tool.strict_cors import StrictCORSMiddleware
 from security import install_access_control
-from settings import CORS_ALLOW_ORIGINS, CORS_ALLOW_ORIGIN_REGEX
+from settings import CORS_ALLOW_ORIGINS
 
 from routers.health import router as health_router
 from routers.config import router as config_router
@@ -159,6 +159,9 @@ def _mount_frontend_spa(app: FastAPI) -> None:
 
 
 def create_app() -> FastAPI:
+    from security import access_token, bind_host, check_bind_safety
+
+    check_bind_safety(bind_host(), access_token())
     from fba_tool.log_redact import install_redacting_logs
 
     install_redacting_logs()
@@ -177,14 +180,7 @@ def create_app() -> FastAPI:
         version="1.2.0",
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=CORS_ALLOW_ORIGINS,
-        allow_origin_regex=CORS_ALLOW_ORIGIN_REGEX,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    app.add_middleware(StrictCORSMiddleware, allow_origins=CORS_ALLOW_ORIGINS)
 
     install_access_control(app)
 
@@ -228,8 +224,6 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    from security import access_token, bind_host, check_bind_safety
+    from security import bind_host
 
-    _host = bind_host()
-    check_bind_safety(_host, access_token())
-    uvicorn.run("main:app", host=_host, port=int(os.environ.get("FBA_PORT", "8000")), reload=True)
+    uvicorn.run("main:app", host=bind_host(), port=int(os.environ.get("FBA_PORT", "8000")), reload=True)

@@ -29,7 +29,15 @@ function readStorage(key: string): string {
 }
 
 export function getDeepseekApiKey(): string {
-  return readStorage(DEEPSEEK_KEY_STORAGE).trim();
+  return "";
+}
+
+export async function saveDeepseekKey(key: string): Promise<void> {
+  await fetch("/api/settings/deepseek-key", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key }),
+  });
 }
 
 export function getDeepseekModel(): DeepseekModel {

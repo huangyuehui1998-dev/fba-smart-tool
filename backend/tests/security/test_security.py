@@ -98,11 +98,11 @@ def test_login_sets_cookie(monkeypatch):
     assert c.post("/api/data").status_code == 200
 
 
-def test_login_get_redirects(monkeypatch):
+def test_login_get_is_not_allowed(monkeypatch):
     c = _app(monkeypatch, "secret123")
     r = c.get("/api/auth/login", params={"token": "secret123"}, follow_redirects=False)
-    assert r.status_code in (302, 303, 307)
-    assert c.get("/api/data").status_code == 200
+    assert r.status_code == 405
+    assert c.get("/api/data").status_code == 401
 
 
 def test_login_form_post_redirects_and_sets_cookie(monkeypatch):
@@ -118,12 +118,19 @@ def test_login_form_post_wrong_token(monkeypatch):
     assert r.status_code == 401
 
 
-def test_login_page_without_token_shows_post_form(monkeypatch):
+def test_login_cookie_hides_password_and_expires(monkeypatch):
     c = _app(monkeypatch, "secret123")
-    r = c.get("/api/auth/login")
-    assert r.status_code == 200
-    assert 'method="post"' in r.text and 'type="password"' in r.text
-    assert "secret123" not in r.text
+    r = c.post("/api/auth/login", json={"token": "secret123"})
+    raw = r.headers.get("set-cookie", "")
+    assert "fba_session=" in raw
+    assert "secret123" not in raw
+    value = c.cookies.get("fba_session")
+    assert value and "secret123" not in value
+    tampered = value[:-1] + ("a" if value[-1] != "a" else "b")
+    c.cookies.set("fba_session", tampered)
+    assert c.get("/api/data").status_code == 401
+    expired = security.issue_session_value("secret123", now=int(__import__("time").time()) - security.SESSION_TTL_SECONDS - 5)
+    assert security.session_is_valid(expired, "secret123") is False
 
 
 def test_security_doc_warns_url_token_logged():
