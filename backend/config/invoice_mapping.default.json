@@ -1,0 +1,83 @@
+{
+  "_说明": "标签模式 + 表格模式（第1~40行扫描表头）。表头匹配前会做换行/空格清洗。",
+  "table_header_scan_max_row": 40,
+  "cell_overrides": {},
+  "label_aliases": {
+    "FBA单号": ["FBA单号", "货件编号", "Shipment ID", "ShipmentID"],
+    "ID号": ["ID号", "Reference ID", "Amazon Reference", "ReferenceID"],
+    "仓库代码": ["仓库代码", "目的仓", "FBA仓库"],
+    "件数": ["件数", "总箱数", "箱数"],
+    "个数": ["个数", "总商品数", "商品数量", "总数量"],
+    "单件长": ["单件长", "长(cm)", "长度"],
+    "单件宽": ["单件宽", "宽(cm)", "宽度"],
+    "单件高": ["单件高", "高(cm)", "高度"],
+    "总实重": ["总实重", "实重合计", "总重量"],
+    "计费吨": ["计费吨", "RT", "计费吨(RT)", "Revenue Ton", "计费重量"],
+    "邮编": ["邮编", "Postal Code", "Zip", "PostalCode"],
+    "国家代码": ["国家代码", "Country", "国家", "目的国"],
+    "省州代码": ["省州代码", "州", "Province", "State"],
+    "城市": ["城市", "City"],
+    "地址": ["地址", "Address", "详细地址", "Consignee", "收货人", "收件人"],
+    "Consignee": ["Consignee", "收货人", "收件人"],
+    "海关编码": ["海关编码", "HS Code", "HS编码", "清关编码", "HSCODE"],
+    "中文品名": ["中文品名", "品名中文"],
+    "英文品名": ["英文品名", "品名英文"],
+    "材料": ["材料", "材质", "材质/用途", "Material&Use", "Material"],
+    "用途": ["用途", "Use", "Purpose"],
+    "品牌": ["品牌", "Brand", "Brand品牌"],
+    "单个货值": ["单个货值", "货值", "申报单价", "DeclaredValue"],
+    "是否包税": ["是否包税", "包税", "Tax Included", "含税"],
+    "交货方式": ["交货方式", "运输方式", "Delivery Method", "Shipping Method"],
+    "是否买保险": ["是否买保险", "买保险", "Insurance", "是否投保"]
+  },
+  "header_defaults": {
+    "是否包税": "是",
+    "交货方式": "海运",
+    "是否买保险": "否"
+  },
+  "header_ai_fields": [],
+  "table_column_aliases": {
+    "shipment_id": ["Shipment ID", "ShipmentID", "FBA单号", "货件编号"],
+    "reference_id": ["Reference ID", "ReferenceID", "ID号", "Amazon Reference"],
+    "sku": ["SKU"],
+    "hs_code": ["海关编码", "HS CODE", "HSCODE", "HS编码", "清关编码"],
+    "material": [
+      "材质/用途Material&Use",
+      "材质/用途",
+      "材质",
+      "Material&Use",
+      "Material",
+      "材料"
+    ],
+    "purpose": ["用途", "Use", "Purpose"],
+    "battery": ["是否带电", "带电", "Battery", "是否带电池"],
+    "magnet": ["是否带磁", "带磁", "Magnet", "是否磁性"],
+    "declared_price": ["申报单价", "申报单价/USD", "DeclaredValue", "单个货值", "货值"],
+    "total_declared_value_usd": [
+      "总申报金额/USD",
+      "总申报金额",
+      "TotalDeclaredValue",
+      "申报总价",
+      "TotalValueUSD"
+    ],
+    "unit_weight_kg": [
+      "实际单件重/kg",
+      "单件重量/kg",
+      "UnitWeight",
+      "单件毛重/kg",
+      "UnitWeightKG"
+    ],
+    "english_name": ["英文品名", "品名英文", "ProductName", "Description"],
+    "chinese_name": ["中文品名", "品名中文"],
+    "total_qty": ["总数量", "个数", "商品数量", "总商品数", "QTY", "Quantity"],
+    "box_count": ["总箱数", "件数", "箱数", "CTNS"]
+  },
+  "computed_fields": {
+    "total_declared_value_usd": "total_qty * declared_price",
+    "unit_weight_kg": "total_weight_kg / total_qty"
+  },
+  "required_fields": ["ID号"],
+  "ai_only_fields": ["海关编码", "中文品名", "英文品名", "材料", "用途", "品牌", "单个货值"],
+  "deterministic_fields": ["FBA单号", "仓库代码", "件数", "个数", "单件长", "单件宽", "单件高", "总实重", "计费吨"],
+  "address_fields": ["邮编", "国家代码", "省州代码", "城市", "地址"]
+}

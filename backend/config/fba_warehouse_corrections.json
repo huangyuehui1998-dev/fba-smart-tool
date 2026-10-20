@@ -1,0 +1,18 @@
+{
+  "_说明": "FBA 仓库地址库纠错（D-06：拿不准的先查公开权威资料并注明出处）。导入琪珞「！」表和读取仓库表时都按这里覆盖，原表不改。",
+  "corrections": {
+    "VGT2": {
+      "company": "Amazon.com Services Inc.",
+      "address1": "6401 Howdy Wells Avenue",
+      "address2": "",
+      "address3": "",
+      "city": "Las Vegas",
+      "state": "NV",
+      "zip": "89115",
+      "was": "20701 Krameria Avenue, March Air Reserve Base, CA 92518（琪珞地址库原值）",
+      "reason": "琪珞表里写的是亚马逊公告中“仅限 UPS 小包”的转运地址（VGT2 Via UPS March Air Reserve Base），不是仓库实际地址；海运卡派、九方派送地址应写实际地址",
+      "source": "Amazon Seller Central 官方公告《Use alternate UPS shipping address for VGT2 fulfillment center in Nevada》https://sellercentral.amazon.com/seller-forums/discussions/t/b7539e16a4375457927b09d8d6de92b1 ：VGT2 physical address (for all shipments besides UPS) = Amazon.com Services Inc. 6401 Howdy Wells Avenue Las Vegas, NV 89115；旁证 warehouse.ninja/locations/amazon/vgt2、seabaycargo.com/amazon-warehouse/VGT2 同为 6401 (E) Howdy Wells Ave, Las Vegas, NV 89115；琪珞表自己的 VGT2-1 行也是该地址",
+      "verified_at": "2026-10-16"
+    }
+  }
+}

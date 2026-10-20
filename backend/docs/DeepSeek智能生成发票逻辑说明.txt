@@ -1,0 +1,319 @@
+================================================================================
+  FBA Smart Tool — DeepSeek 智能生成发票逻辑说明
+  更新日期：2026-05-30
+  关联文档：backend/docs/发票自动填写逻辑说明.txt
+================================================================================
+【现状说明（s8-docs，2026-10-16）】本文描述的是旧的 /api/invoice/generate 模板填格流程（仍可用）。
+现行主路径是 Step 4.5「按货代模板导出发票」（/api/invoice-export/*）和 T1–T8 识别面板（/api/invoice-templates/*），
+申报价按 D-01/D-12（product_fields.resolve_declared_price：常规价 > 90 天内非促销价，促销低 5% 以上按正常价并提示），
+文中“采购价 ÷ 6.8 = 申报单价”已不再使用。详见《FBA_Smart_Tool_代码架构定位手册.md》§7、§8.7 和《用户使用说明.md》。
+--------------------------------------------------------------------------------
+
+
+一、一句话概括
+--------------------------------------------------------------------------------
+点击「DeepSeek 智能生成发票」后，系统按「四层降级兜底」架构，从 CSV、PDF、
+产品库、DeepSeek 依次「榨取」数据，精准填入发票模板；AI 只补前两层填不满的
+空位，绝不覆盖已有权威数据。
+
+
+二、点击按钮后的完整旅程（时序）
+--------------------------------------------------------------------------------
+
+  [前置] 用户已上传发票模板 + 选择 Step 4 校验通过的货件（CSV + PDF 配对）
+
+  Step 0  前端读取侧边栏 DeepSeek 配置（API Key / 模型 / 温度）
+          → POST /api/invoice/generate
+
+  Step 1  后端解码 CSV、PDF、模板 xlsx
+          → parse_csv_shipment()        榨取第 1 层物理数据
+          → extract_pdf_address_block() 为第 3 层地址 AI 准备原料
+          → load_product_catalog()      准备第 2 层查字典
+          → detect_invoice_table_layout() 或 detect_template_cells()
+            识别模板是「表格模式 A」还是「标签模式 B」
+
+  Step 2  按 SKU / 字段依次过四层漏斗（见第三节）
+          → 生成 cells[]：{ cell, value, source, field_key }
+
+  Step 3  返回前端 → Fortune Sheet 按颜色着色
+          → 展示 total_tokens / estimated_cost_rmb（仅智能生成）
+
+  Step 4  用户复核黄色格、填写红色 Reference ID → 导出发票 xlsx
+
+
+三、四层降级兜底架构（核心「榨取」模型）
+--------------------------------------------------------------------------------
+
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │  第 1 层  🟩 绝对精准的物理数据          绝不经过 AI                │
+  │  第 2 层  🟦 企业专属内部规范            优先于 AI                  │
+  │  第 3 层  🟨 AI 智能推理兜底             只补前两层空缺             │
+  │  第 4 层  🟥 不可替代的人工复核          系统故意不填               │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  铁律：高层级数据一旦存在，低层级不得覆盖。
+        例：产品库已有 HS 编码 → DeepSeek 不会再改写成别的值。
+
+
+──────────────────────────────────────────────────────────────────────────────
+第 1 层：绝对精准的物理数据（🟩 绿色单元格）
+──────────────────────────────────────────────────────────────────────────────
+数据来源：亚马逊装箱单 CSV + 箱唛 PDF + Step 4 已校验货件数据
+
+榨取动作（后端 parse_csv_shipment + build_invoice_line_items）：
+
+  直接从 CSV 提取：
+    Shipment ID（FBA 货件号）
+    SKU、ASIN、FNSKU
+    总数量 total_qty、总箱数 box_count、箱号段 box_range
+    单箱长/宽/高（cm）、单箱毛重（kg）
+    仓库代码 shipping_mark
+
+  从 PDF / Step 4 关联：
+    箱唛地址原文（供第 3 层 AI 拆解，第 1 层本身不填结构化地址）
+
+  系统自动计算（公式字段，仍属绿色）：
+    unit_weight_kg        = 总毛重 / 总数量（单件实重）
+    total_declared_value_usd = 总数量 × 申报单价（需第 2/3 层先给出单价）
+    计费吨 RT             = logistics_metrics_from_box_specs()
+
+  规则默认值（不经 AI，硬编码）：
+    battery / 是否带电  → 「否」
+    magnet  / 是否带磁  → 「否」
+
+填写位置：
+  表格模式 → 表头行（第 1~40 行扫描到的 SKU 明细表）以下，每 SKU 一行
+  标签模式 → deterministic_fields 对应标签右侧单元格
+
+特点：货件号、数量、箱规错一个数字都会报关失败，因此这一层 100% 确定性，
+      普通填写与 DeepSeek 智能生成行为完全一致。
+
+
+──────────────────────────────────────────────────────────────────────────────
+第 2 层：企业专属的内部规范（🟦 蓝色单元格）
+──────────────────────────────────────────────────────────────────────────────
+数据来源：templates/产品信息表.csv（ProductCatalog）
+
+榨取动作（catalog.lookup(sku)）：
+
+  拿着第 1 层提取的 SKU，去本地产品库「查字典」：
+
+    中文品名、英文品名（若 CSV 商品名已足够则英文品名也可能来自 CSV 绿色）
+    海关编码 HS Code
+    材质 / 材料、用途、品牌
+    采购单价（RMB）
+
+  申报单价换算（蓝色逻辑，非 AI）：
+    declared_price = 采购单价 ÷ 6.8 → 美元申报单价
+    触发后自动回写第 1 层计算字段 total_declared_value_usd
+
+优势：
+  核心报关数据以企业主数据为准，避免 AI 幻觉导致 HS 编码/品名漂移扣关。
+  产品库越完整，第 3 层 AI 调用越少，token 费用越低。
+
+表格模式实现：_customs_by_sku() 中先 merged.update(rec.to_invoice_hints())
+标签模式实现：catalog.merge_for_skus() 优先填入 ai_only_fields
+
+
+──────────────────────────────────────────────────────────────────────────────
+第 3 层：AI 智能推理兜底（🟨 黄色单元格）
+──────────────────────────────────────────────────────────────────────────────
+数据来源：DeepSeek 大模型 + backend/config/invoice_history.json 历史申报习惯
+
+触发条件（三者同时满足才调用 API）：
+  ① 用户点击「DeepSeek 智能生成」（请求携带 api_key）
+  ② 该字段在第 1、2 层仍为空
+  ③ 有足够的上下文（商品名 / 地址文本 / 缺失字段列表）
+
+子流程 A — 地址块解析（发票顶部 2~7 行）
+  1. extract_pdf_address_block(pdf) 从箱唛截取 Ship To 杂乱文本
+  2. parse_address_with_ai() 发给 DeepSeek，拆解为结构化 JSON：
+       邮编、国家代码、省州代码、城市、地址、Consignee
+  3. _address_block_cells() 在 SKU 明细表头之上扫描标签，写入右侧空单元格
+  4. 表格模式 A 与标签模式 B 均执行；与底部 SKU 明细表填写并行、不互斥
+
+子流程 B — 头部标签混合扫描（发票顶部选项区）
+  【当前已实现】
+    · 地址类标签：Consignee / Country / City / 邮编 等（见子流程 A）
+    · 宏观指标：计费吨 RT（绿色，来自第 1 层箱规计算，非 AI）
+    · 头部选项规则默认：是否包税→「是」、交货方式→「海运」、是否买保险→「否」
+      （invoice_mapping.json → header_defaults，_header_option_cells 写入）
+  【规则默认，不经 DeepSeek】
+    · 是否带电 / 是否带磁 → 固定「否」（表格列 alias 匹配后写入）
+  【可选 AI 扩展】
+    · header_ai_fields 列表中的标签可在有 API Key 时由 infer_header_options_with_ai 推理
+    · 配置入口：invoice_mapping.json → header_defaults / header_ai_fields / label_aliases
+
+子流程 C — 残缺报关字段推理（SKU 明细区）
+  1. 对比第 2 层 merged 结果，列出仍缺失的 7 个报关键：
+       海关编码、中文品名、英文品名、材料、用途、品牌、单个货值
+  2. infer_customs_fields() 注入 invoice_history.json 历史类目参考
+  3. DeepSeek 推理合理值（如 用途→「宠物用品」、品牌→「无牌」）
+  4. 仅 merge 非空字段，不覆盖蓝色已有值
+
+  调用粒度：
+    表格模式 A → 每个 SKU 独立一次 API（更精准）
+    标签模式 B → 整票商品名列表一次 API（更省 token）
+
+着色：所有经 DeepSeek 写入的单元格 source = yellow「AI推理(需复核)」
+
+
+──────────────────────────────────────────────────────────────────────────────
+第 4 层：不可替代的人工复核（🟥 红色单元格）
+──────────────────────────────────────────────────────────────────────────────
+系统明确规定「不瞎填」的字段：
+
+  Reference ID / ID号 / 参考号
+    → 通常为内部 ERP 单号，系统无法从 CSV/PDF 推断
+    → 表格列 reference_id，默认空，required=true，导出前必须手工填写
+
+  SKU 图片 sku_image
+    → 需上传图片或粘贴链接，系统留空
+
+  无 API Key 时的地址 / 报关空缺
+    → 普通填写模式下，第 3 层不运行，直接标红待补
+
+原则：红色不是失败，而是强制人工确认点，防止 AI 或规则误填关键业务编号。
+
+
+四、两种填写按钮的差异
+--------------------------------------------------------------------------------
+
+  项目                  开始自动填写              DeepSeek 智能生成发票
+  --------------------------------------------------------------------------
+  前端入口              runFill(false)            runFill(true)
+  api_key               不传                      侧边栏 Key
+  第 1 层 物理数据       ✅ 完整榨取               ✅ 完整榨取（相同）
+  第 2 层 产品库         ✅ 查字典                 ✅ 查字典（相同）
+  第 3 层 AI 兜底        ❌ 跳过                   ✅ 地址 + 残缺报关
+  第 4 层 人工项         🔴 留空                   🔴 留空（相同）
+  token / 费用统计      无                        有
+  界面 loading          「填写中…」               「DeepSeek 生成中…」
+
+
+五、模板双模式与四层榨取的落点
+--------------------------------------------------------------------------------
+
+【模式 A】表格型（主流）
+  识别：第 1~40 行同时出现 SKU + Shipment ID / FBA单号 表头行
+  文件：invoice_table.py → detect_invoice_table_layout()
+
+  四层落点：
+    🟩 底部明细表每行：SKU、数量、箱规、计算字段、货件号…
+    🟦 同上明细表：HS 编码、中文品名、材质、品牌、申报单价…
+    🟨 顶部 2~7 行地址区 + 明细表中 AI 补全的空缺列
+    🟥 reference_id 列、sku_image 列
+
+【模式 B】标签型（旧式）
+  识别：未匹配表格表头 → 扫描左侧标签 + 右侧空单元格
+  配置：invoice_mapping.json → label_aliases
+
+  四层落点：
+    🟩 deterministic_fields 区（FBA单号、件数、箱规、计费吨…）
+    🟦 ai_only_fields 区（报关字段，产品库优先）
+    🟨 address_fields + 仍缺的 ai_only_fields
+    🟥 ID号（required）
+
+
+六、DeepSeek API 技术细节
+--------------------------------------------------------------------------------
+文件：backend/fba_tool/invoice_deepseek.py
+端点：https://api.deepseek.com/chat/completions
+格式：response_format = json_object
+超时：90 秒
+
+函数 1  parse_address_with_ai
+  输入：PDF 地址原文
+  输出：{ 邮编, 国家代码, 省州代码, 城市, 地址 }
+
+函数 2  infer_customs_fields
+  输入：商品名列表 + invoice_history.json + known_values（蓝色已有，防重复）
+  输出：{ 海关编码, 中文品名, 英文品名, 材料, 用途, 品牌, 单个货值 }
+  优化：missing_keys 为空则跳过 API，零 token 消耗
+
+模型与计费（deepseek_config.py / deepseek_billing.py）：
+  默认模型   deepseek-v4-flash（temperature 0.1）
+  可选模型   deepseek-v4-pro
+  响应附加   total_tokens、estimated_cost_rmb
+
+
+七、历史参考 invoice_history.json 的作用
+--------------------------------------------------------------------------------
+路径：backend/config/invoice_history.json
+
+  categories[] 存历史类目（keywords + 已验证的 HS/品名/材料/货值…）
+  infer_customs_fields 将其注入 Prompt，让 AI 模仿企业过往申报习惯
+
+维护建议：每批真实报关完成后，把复核过的条目追加进 categories，
+          第 3 层黄色字段会越来越少，逐步「沉淀」为第 2 层产品库数据。
+
+
+八、前端着色与复核清单
+--------------------------------------------------------------------------------
+
+  颜色    source     含义                     导出前动作
+  --------------------------------------------------------------------------
+  🟩 绿   green      第 1 层物理 / 公式计算    一般可直接信任
+  🟦 蓝   blue       第 2 层产品库             一般可直接信任
+  🟨 黄   yellow     第 3 层 DeepSeek          必须人工复核
+  🟥 红   red        第 4 层待补               必须手工填写
+
+导出前 Checklist：
+  □ 所有黄色格已目视复核（尤其 HS 编码、申报货值）
+  □ Reference ID 已填写（红色 → 改完可视为绿色）
+  □ SKU 图片（若模板要求）已补充
+
+
+九、错误降级（不阻断整票）
+--------------------------------------------------------------------------------
+  DeepSeek 超时 / 网络失败  → 该字段保持空或红色，其余层正常填入
+  PDF 无地址文本            → 跳过地址 AI，顶部地址格留空
+  产品库已完整              → 跳过 infer_customs_fields，节省 token
+  货件号与请求不一致        → HTTP 400，整票拒绝（安全校验）
+
+
+十、数据流总图
+--------------------------------------------------------------------------------
+
+  [DeepSeek 智能生成发票]
+           │
+           ▼
+  ┌─ Step 4 CSV/PDF ─────────────────────────────────────────┐
+  │  parse_csv_shipment ──→ 🟩 货件号/SKU/数量/箱规/ASIN      │
+  │  extract_pdf_address ─→ 地址原文（待 🟨 拆解）             │
+  └──────────────────────────────────────────────────────────┘
+           │
+           ▼
+  ┌─ 产品信息表.csv ──→ catalog.lookup ──→ 🟦 HS/品名/材质/采购价
+  └──────────────────────────────────────────────────────────┘
+           │
+           ▼  仍有空缺 + 有 API Key
+  ┌─ DeepSeek + invoice_history ──→ 🟨 地址 JSON + 残缺报关字段
+  └──────────────────────────────────────────────────────────┘
+           │
+           ▼
+  ┌─ 模板 xlsx ──→ 坐标映射 ──→ cells[] 写入 Fortune Sheet
+  │  🟥 Reference ID / SKU图片 故意留空
+  └──────────────────────────────────────────────────────────┘
+           │
+           ▼
+  用户复核 🟨🟥 → POST /api/export_invoice → 下载 xlsx
+
+
+十一、相关源码索引
+--------------------------------------------------------------------------------
+  backend/fba_tool/invoice_automation.py     build_invoice_draft、四层编排
+  backend/fba_tool/invoice_table.py          表格模式、计算字段、表头扫描
+  backend/fba_tool/invoice_deepseek.py       parse_address / infer_customs
+  backend/fba_tool/product_catalog.py        第 2 层产品库 lookup
+  backend/fba_tool/shipment_parser.py        第 1 层 CSV 解析
+  backend/config/invoice_mapping.json        标签别名、table_column_aliases
+  backend/config/invoice_history.json        第 3 层 AI 历史参考
+  backend/services/invoice_service.py        API 编排、token 统计回传
+  frontend/src/hooks/use-invoice.ts          runFill(true/false)
+  frontend/src/components/step45-workspace.tsx  两个填写按钮 UI
+
+================================================================================
+  核心记忆点：先榨 🟩 再查 🟦 才问 🟨，🟥 永远留给你。
+  DeepSeek 是兜底，不是主角；产品库越全，AI 越安静。
+================================================================================

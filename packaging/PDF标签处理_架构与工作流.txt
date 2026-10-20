@@ -1,0 +1,383 @@
+================================================================================
+FBA Smart Tool — PDF 标签处理：代码逻辑、工作流与软件架构
+文档版本：2026-06-27
+================================================================================
+【现行补充（s8-docs，2026-10-16）】S8 起 routers/pdf_tools.py 先校验输入，不合格直接 400：
+  尺寸不是数字或超出 10–600 mm；文件头不是 %PDF；PDF 损坏打不开；base64 解码失败；没传文件或文件为空。
+  错误信息会写出是哪个文件/第几份。其余流程不变。
+--------------------------------------------------------------------------------
+
+
+本文档描述「PDF 标签处理」模块在 FBA Smart Tool 中的定位、双入口工作流、
+前后端代码结构、核心算法与 API 契约，供开发维护与现场使用参考。
+
+与主文档《工作流与运行逻辑_V1.2.txt》第九章「侧栏与其它功能」互补；
+本模块与五步主工作流相对独立，可单独使用。
+
+
+================================================================================
+一、模块定位与业务价值
+================================================================================
+
+【解决什么问题】
+  亚马逊 / 货代回传的 PDF 标签页尺寸、排版不统一（一页多标、留白过大、
+  非热敏打印机标准尺寸等）。本模块通过「墨迹检测 → 自动切分 → 等比缩放
+  居中 → 输出指定毫米尺寸 PDF」，生成可直接送热敏打印机或归档的标准标签。
+
+【两条业务路径（双模块）】
+
+  模块 A — Step4 热敏箱贴（嵌入主流程）
+    用户在 Step4 上传亚马逊回传 CSV + 箱唛 PDF，校验通过后，一键下载
+    「10×10 热敏箱贴」合并 PDF（默认 100×100mm）。
+
+  模块 B — 侧边栏「PDF 标签处理」（独立工具页）
+    用户从侧栏进入 /pdf-labels，批量上传任意 PDF，选择目标尺寸，
+    一键智能转换；多文件时每个输入对应一个输出 PDF（保留原文件名）。
+
+【与 Step4 校验的关系】
+  Step4 的 pdf_validator / shipment_validator 负责「读 PDF 文字、核对仓点、
+  货件号」——属于校验逻辑，不是标签裁剪。
+  本模块只负责「像素级裁剪与重排版」，二者共用 PDF 字节来源但职责分离。
+
+
+================================================================================
+二、软件架构总览
+================================================================================
+
+【分层结构（与全站一致）】
+
+  浏览器 UI
+      ↓ fetch / XHR
+  backend/routers/pdf_tools.py          HTTP 路由（4 个端点）
+      ↓
+  backend/fba_tool/pdf_label_processor.py   核心算法（PyMuPDF + NumPy）
+  backend/fba_tool/pdf_sse.py               SSE 流式进度（模块 B）
+      ↓
+  utils/responses.py                    pdf_response / file_response 下载
+
+【技术依赖】
+  - PyMuPDF (fitz)：PDF 打开、渲染、矢量贴图、输出
+  - NumPy：墨迹掩膜、连通域
+  - SciPy（可选）：形态学膨胀，提升多标粘连切分稳定性
+  - 无写死坐标表；纯内容驱动 Bounding Box
+
+【架构示意】
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ 前端                                                             │
+  │  ┌──────────────────┐    ┌──────────────────────────────────┐ │
+  │  │ Step4Workspace   │    │ PdfToolsWorkspace (/pdf-labels)   │ │
+  │  │ 下载热敏箱贴按钮  │    │ 拖拽上传 / 选尺寸 / 一键转换       │ │
+  │  └────────┬─────────┘    └──────────────┬─────────────────────┘ │
+  │           │                              │                       │
+  │           └──────────┬───────────────────┘                       │
+  │                      ▼                                           │
+  │           frontend/src/lib/api/pdf-tools.ts                      │
+  └──────────────────────┼──────────────────────────────────────────────┘
+                         │ HTTP
+  ┌──────────────────────┼──────────────────────────────────────────────┐
+  │ 后端                 ▼                                           │
+  │           routers/pdf_tools.py                                   │
+  │                 ├─ GET  /api/pdf/sizes                           │
+  │                 ├─ POST /api/pdf/thermal_labels      (模块 A)    │
+  │                 ├─ POST /api/pdf/convert_labels      (同步遗留)  │
+  │                 └─ POST /api/pdf/convert_labels/stream (模块 B)  │
+  │                      │                                           │
+  │           pdf_label_processor.py  ←  PDFLabelProcessor           │
+  │           pdf_sse.py              ←  iter_convert_labels_sse     │
+  └──────────────────────────────────────────────────────────────────┘
+
+
+================================================================================
+三、前端：路由、组件与 API 客户端
+================================================================================
+
+【独立页面路由】
+  文件：frontend/src/routes/pdf-labels.tsx
+  路径：/pdf-labels
+  页面标题：PDF 标签处理 · FBA Smart Tool
+  布局：WorkflowProvider → AppShell → PdfToolsWorkspace
+  说明：虽包裹 WorkflowProvider，但转换流程不依赖 step 状态，可独立使用。
+
+【核心 UI 组件】
+  文件：frontend/src/components/pdf-tools-workspace.tsx
+  导出：PdfToolsWorkspace
+
+  主要交互：
+    1. 挂载时 GET /api/pdf/sizes 填充尺寸下拉（预设 + 自定义 mm）
+    2. 拖拽 / 点击上传 .pdf（同名文件去重）
+    3. 选择 size_key 或填写 width_mm / height_mm
+    4. 点击「一键智能转换」→ convertLabelPdfs()（XHR + SSE）
+    5. 实时显示上传进度与逐文件处理进度
+    6. 完成后浏览器逐个下载结果 PDF（间隔约 250ms，保留原文件名）
+    7. 「返回主流程」链接 → /
+
+【API 客户端】
+  文件：frontend/src/lib/api/pdf-tools.ts
+
+  函数                          用途
+  ─────────────────────────────────────────────────────────
+  fetchPdfLabelSizes()          拉取预设尺寸列表
+  convertLabelPdfs(files,opts)  模块 B：multipart + SSE 解析
+  downloadThermalLabels(ships)  模块 A：JSON POST，触发浏览器下载
+
+  内部辅助：
+    parseSseBlocks      解析 text/event-stream 事件块
+    base64ToPdfBlob     SSE complete 里 files[].pdf_base64 → Blob
+    downloadResultFiles 多文件顺序触发下载
+
+【主流程集成（模块 A）】
+  文件：frontend/src/hooks/use-shipment-validation.ts
+        函数 downloadThermalLabelsPdf()
+        读取 workflow 中 shipments[].pdf_base64
+
+  文件：frontend/src/components/step4-workspace.tsx
+        按钮：「下载 10×10 热敏箱贴 (PDF)」
+
+【侧栏入口】
+  文件：frontend/src/components/app-sidebar.tsx
+  位置：设置与工具 折叠区 → 「PDF 标签处理」→ Link to="/pdf-labels"
+
+
+================================================================================
+四、后端：路由与 API 契约
+================================================================================
+
+【路由注册】
+  backend/main.py → _ROUTERS 包含 pdf_tools_router
+
+【端点一览】
+
+  ┌────────┬──────────────────────────────────┬─────────────────────────┐
+  │ 方法   │ 路径                             │ 用途                    │
+  ├────────┼──────────────────────────────────┼─────────────────────────┤
+  │ GET    │ /api/pdf/sizes                   │ 预设尺寸列表            │
+  │ POST   │ /api/pdf/thermal_labels          │ 模块 A：合并热敏 PDF    │
+  │ POST   │ /api/pdf/convert_labels          │ 模块 B 同步（ZIP/单文件）│
+  │ POST   │ /api/pdf/convert_labels/stream   │ 模块 B SSE（当前前端用）│
+  └────────┴──────────────────────────────────┴─────────────────────────┘
+
+  默认 size_key：carton_100x100（100×100mm 外箱标）
+
+【GET /api/pdf/sizes】
+  响应：{ "sizes": [ { "key", "name", "width_mm", "height_mm" }, ... ] }
+  数据源自 pdf_label_processor.PRESET_SIZES
+
+【POST /api/pdf/thermal_labels】（模块 A）
+  请求体 JSON：
+    - pdf_base64: string[]           直接传 base64 列表，或
+    - shipments: [{ pdf_base64 }]   Step4 校验结果结构
+    - size_key / width_mm / height_mm（可选覆盖尺寸）
+
+  处理链：
+    base64 解码 → thermal_labels_pdf() → 多 PDF 各自处理后 merge_pdf_bytes
+  响应：单个 PDF 附件下载
+    100×100 时文件名：10x10热敏箱贴.pdf
+
+【POST /api/pdf/convert_labels/stream】（模块 B，前端现行路径）
+  请求：multipart/form-data
+    - files[]：一个或多个 PDF
+    - size_key, width_mm?, height_mm?
+
+  响应：Content-Type: text/event-stream
+  事件类型（由 pdf_sse.py 格式化）：
+    - progress：{ percent, message }  上传与并行处理进度
+    - complete：{ files: [{ filename, pdf_base64 }] }
+    - error：{ message }
+
+  特点：每个输入文件对应一个输出 PDF，不合并；文件名保留上传时 basename。
+
+【POST /api/pdf/convert_labels】（同步遗留）
+  同上 multipart；单文件直接返回 PDF，多文件打 ZIP「标签转换.zip」。
+  当前 React 前端未调用，保留兼容脚本/旧客户端。
+
+
+================================================================================
+五、核心算法：pdf_label_processor.py
+================================================================================
+
+【设计原则】
+  1. 内容驱动：渲染页面为位图 → 墨迹掩膜（像素 < 阈值视为墨迹）
+  2. 连通域 / 聚类：一页多个独立标签（如 24-up）自动切分为多个 LabelBox
+  3. 矢量无损重排：从原 PDF 按 rect 裁剪矢量内容，贴到新页面
+  4. 等比缩放 + 居中：目标页面为 LabelSize 指定毫米尺寸
+  5. 并行：多页 / 多文件用 ThreadPoolExecutor
+
+【关键类型】
+  LabelSize       目标物理尺寸（key, name, width_mm, height_mm）
+  ProcessOptions  detect_dpi, ink_threshold, merge_gap_mm, min_label_mm 等
+  LabelBox        page_index + fitz.Rect 墨迹外接矩形
+  ProcessedFile   输出文件名、pdf_bytes、label_count、page_count
+
+【预设尺寸 PRESET_SIZES】
+  carton_100x100   外箱标 100×100mm   （Step4 热敏默认）
+  product_60x40    产品标 60×40mm
+  product_100x150  面单 100×150mm
+  product_40x30    小标 40×30mm
+
+【PDFLabelProcessor 主流程】
+  process(pdf_bytes, size)
+    → _detect_all_labels：逐页检测（多页可并行）
+    → _detect_page_labels：墨迹掩膜 → 连通组件 → 过滤过小区域 → LabelBox[]
+    → _compose / _render_into：每个 LabelBox 生成一页目标尺寸 PDF
+    → 返回合并后的 pdf bytes
+
+  process_many(items, size)
+    → 多文件并行 process_named
+    → 用于批量独立输出（模块 B）
+
+【模块级函数】
+  thermal_labels_pdf(pdfs, size_key, ...)
+    对每个 PDF 调用 processor.process，再 merge_pdf_bytes → 单文件下载
+
+  process_files_parallel(items, size, on_progress?)
+    线程池批量处理，供同步 API 与 SSE 共用
+
+  merge_pdf_bytes(list[bytes])
+    PyMuPDF 合并多份 PDF 字节流（模块 A 专用）
+
+  resolve_size_params / list_preset_sizes
+    尺寸解析与 API 列表
+
+
+================================================================================
+六、SSE 流式处理：pdf_sse.py
+================================================================================
+
+  iter_convert_labels_sse(items, size_key, width_mm, height_mm)
+    - 后台线程执行 process_files_parallel，主线程从 queue 读进度
+    - yield sse_progress / sse_complete_files / sse_error
+    - 避免长时间处理导致 HTTP 连接无响应
+
+  pdf_download_filename(size, prefix)
+    根据尺寸生成下载文件名（如 10x10热敏箱贴.pdf）
+
+
+================================================================================
+七、用户工作流（操作步骤）
+================================================================================
+
+【工作流 B — 独立 PDF 标签处理】
+
+  1. 打开应用 → 侧栏「设置与工具」→「PDF 标签处理」
+  2. 进入 /pdf-labels 页面
+  3. 拖拽或选择若干 .pdf 文件
+  4. 选择目标尺寸（外箱标 / 产品标 / 面单 / 自定义 mm）
+  5. 点击「一键智能转换」
+  6. 观察进度条与逐文件处理提示
+  7. 完成后浏览器自动下载各结果 PDF（文件名与上传一致）
+  8. 可选：「返回主流程」回到 Step1 工作区
+
+【工作流 A — Step4 热敏箱贴（主流程内）】
+
+  1. 主流程 Step4：上传亚马逊回传 CSV + 各货件箱唛 PDF
+  2. 执行三维交叉校验（POST /api/shipment/validate，可 SSE 进度）
+  3. 校验通过后，前端持有 shipments[]，每项含 pdf_base64
+  4. 点击「下载 10×10 热敏箱贴 (PDF)」
+  5. POST /api/pdf/thermal_labels，后端处理并合并为单一 PDF
+  6. 浏览器下载 10x10热敏箱贴.pdf
+
+  注意：Step4 的 CSV/PDF 仅存浏览器内存，不写入 .fbox 工程文件；
+        重新打开工程后需重新上传 CSV/PDF 才能再次下载热敏箱贴。
+
+
+================================================================================
+八、与 Step4 货件服务的数据衔接
+================================================================================
+
+  文件：backend/services/shipment_service.py
+
+  build_validate_response() 在校验成功后组装：
+    shipments[] = {
+      shipment_id, warehouse, csv_base64, pdf_base64, parsed_shipment?, ...
+    }
+
+  pdf_base64 来源：用户上传的箱唛 PDF 原文件字节 → Base64
+  模块 A 不再要求用户重新选文件，直接消费校验结果中的 pdf_base64。
+
+  相关但非本模块的 Step4 PDF 逻辑：
+    fba_tool/pdf_validator.py      提取 PDF 文字做仓点/货件号比对
+    fba_tool/box_label_mapping.py  严格模式下本地箱号 ↔ 亚马逊箱号
+    fba_tool/box_label_filename.py 箱唛 PDF 文件名解析（导出排序用）
+
+
+================================================================================
+九、拆分 / 合并行为说明
+================================================================================
+
+  概念          实现位置                         用户可见效果
+  ─────────────────────────────────────────────────────────────────
+  一页多标切分   _detect_page_labels              24-up 等 → 多页输出
+  单文件处理     PDFLabelProcessor.process        每标一页目标尺寸
+  多货件合并     merge_pdf_bytes (模块 A)         一个下载文件
+  多文件独立输出 process_files_parallel (模块 B)  每输入一 PDF，不合并
+  同步多文件 ZIP api_convert_labels              遗留路径，打 ZIP
+
+  无单独的「PDF 合并工具」「PDF 拆分工具」菜单；拆分与合并内嵌于上述流程。
+
+
+================================================================================
+十、文件路径速查
+================================================================================
+
+【前端】
+  frontend/src/routes/pdf-labels.tsx
+  frontend/src/components/pdf-tools-workspace.tsx
+  frontend/src/lib/api/pdf-tools.ts
+  frontend/src/hooks/use-shipment-validation.ts      （模块 A 下载）
+  frontend/src/components/step4-workspace.tsx      （模块 A 按钮）
+  frontend/src/components/app-sidebar.tsx          （侧栏入口）
+  frontend/src/routeTree.gen.ts                    （路由注册）
+
+【后端】
+  backend/main.py
+  backend/routers/pdf_tools.py
+  backend/fba_tool/pdf_label_processor.py
+  backend/fba_tool/pdf_sse.py
+  backend/services/shipment_service.py             （pdf_base64 供给）
+  backend/utils/responses.py
+  backend/test_pdf_label_processor.py              （单元测试）
+
+【文档】
+  packaging/工作流与运行逻辑_V1.2.txt                （第九章摘要）
+  packaging/PDF标签处理_架构与工作流.txt             （本文档）
+
+
+================================================================================
+十一、测试与维护要点
+================================================================================
+
+【单元测试】backend/test_pdf_label_processor.py
+  - test_single_label_output_size     单标输出页尺寸
+  - test_grid_splits_into_multiple_pages  网格多标切分
+  - test_process_many_merges_files      process_many 行为
+
+【常见问题】
+  Q: 检测不到标签 / 输出空白？
+     A: 调低 ink_threshold 或检查 PDF 是否纯图片、墨迹过浅。
+
+  Q: 一页多标被合成一块？
+     A: 调小 merge_gap_mm 或确认 SciPy 可用以改善形态学分离。
+
+  Q: Step4 下载热敏箱贴按钮灰色？
+     A: 需先完成 Step4 校验且 shipments 含 pdf_base64。
+
+  Q: 独立工具转换很慢？
+     A: 大 PDF / 多页会走线程池；观察 SSE progress 消息。
+
+【打包注意】
+  PyInstaller spec 需包含 fitz(PyMuPDF)、numpy、scipy（若安装）等 hiddenimports；
+  与主程序一同打包，无单独 exe。
+
+
+================================================================================
+十二、版本演进建议（备忘）
+================================================================================
+
+  - 模块 A 与 B 已共用 pdf_label_processor，新增尺寸只需扩展 PRESET_SIZES
+  - 若需「多文件合并为一个热敏 PDF」在独立工具页，可复用 merge_pdf_bytes
+  - 热敏默认 100×100 与 Step4 文案「10×10」一致，改尺寸需同步 UI 文案
+
+================================================================================
+文档结束
+================================================================================

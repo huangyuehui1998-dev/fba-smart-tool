@@ -1,0 +1,43 @@
+{
+  "forwarders": [
+    {
+      "id": "qiluo",
+      "name": "琪珞国际",
+      "template_file": "qiluo.xlsx",
+      "header_row": 1,
+      "first_data_row": 2,
+      "created_at": "2026-06-25T00:00:00"
+    },
+    {
+      "id": "send",
+      "name": "SEND（亚马逊 SEND 渠道）",
+      "template_file": "send.xlsx",
+      "header_row": 14,
+      "first_data_row": 15,
+      "created_at": "2026-10-16T00:00:00",
+      "export_adapter": "send",
+      "invoice_export": {
+        "source": "SEND 原始样例 FBA19P4N6MM2发票.xlsx（第13批）",
+        "duty_included": "是 Yes",
+        "use_forwarder_ior": "否 No",
+        "file_name": "{shipment_id}发票.xlsx"
+      }
+    },
+    {
+      "id": "jiufang",
+      "name": "九方",
+      "template_file": "jiufang.xlsx",
+      "header_row": 24,
+      "first_data_row": 25,
+      "created_at": "2026-10-16T00:00:00",
+      "export_adapter": "jiufang",
+      "invoice_export": {
+        "source": "九方系统导出样例 LCL*-箱单发票.xlsx（第11/13/14/15批，8 票）",
+        "channel": "CN2US-C-公斤",
+        "image_placeholder": "${LiquidationInvoice_imgUrl}",
+        "shipper": {"company": "JOY", "address": "Hubei Wuhan Han Nan Qu Dong Jing Jie Chuan Tou Shan 1 Hao", "contact": "王", "tel": "8615871468266"},
+        "file_name": "{order_no}-箱单发票.xlsx"
+      }
+    }
+  ]
+}

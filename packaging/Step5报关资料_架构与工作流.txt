@@ -1,0 +1,678 @@
+================================================================================
+FBA Smart Tool — Step 5 报关资料：软件架构、完整逻辑与计算规则
+文档版本：2026-06-27
+================================================================================
+【现行补充（s8-docs，2026-10-16）】
+  - 货值（单个货值/申报单价）来自 product_fields.resolve_declared_price：D-01 经 D-12 修订——正常价 = 领星 regular_price，
+    没有就用 90 天内最后一次非促销价；领星现价比正常价低 5% 以上按正常价申报，预览给 promo_price_not_used 提示；
+    手填价未被采用时提示 manual_price_not_used。
+  - HS 编码必须 8 或 10 位数字（hs_code.py，产品库保存时校验，错了 400）；钓具参考编码 GET /api/master-data/hs-presets，只做参考。
+  - 来源 C：按工单/货件（build_customs_from_tickets）组装，规则同上。
+--------------------------------------------------------------------------------
+
+
+本文档描述主工作流第五步「报关资料」在 FBA Smart Tool 中的定位、前后端架构、
+数据装配与合并算法、净重/金额计算规则、Excel 模板写入映射及 API 契约，
+供开发维护与现场使用参考。
+
+与 Step 4（货件校验）、Step 4.5（货代发票）紧密衔接；产出形态为
+「预览 + 可编辑 + 导出 .xlsx」，仿 Step 4.5 交互模式。
+
+
+================================================================================
+一、模块定位与业务价值
+================================================================================
+
+【解决什么问题】
+  跨境电商 9810 合并报关需同时提交：报关单、申报要素、发票、箱单、合同、
+  代理报关委托书等 7 个 sheet（含 2 个静态说明 sheet）。手工从发货表、
+  发票、主数据多处复制易错、格式不统一。本模块在一键预览后允许微调，
+  再导出符合国家模板格式的 .xlsx。
+
+【前置条件】
+  - Step 4 货件校验必须通过（step4Ok = true）
+  - workflow 中须含 shipments[].parsed_shipment（CSV 解析后的箱明细）
+  - 订单号/合同号：页面手填（不自动从货件号推断）
+  - 出口商主体：从「出口商档案」选择（支持多家、可设默认）
+
+【两条数据来源（A/B 切换）】
+
+  来源 A — invoice（复用 Step 4.5 发票明细）
+    直接读取 invoiceDraft.cells 中按行聚合的发票 line items
+    （含 HS、品牌、申报单价、数量等）。适合已在 4.5 核对过货值的用户。
+
+  来源 B — shipment（仅 Step 4，自行重算）
+    从 parsed_shipment 按 SKU 聚合，再查产品库 + 主数据库补 HS/品牌/货值，
+    不调 AI。等价于 invoice_automation._customs_by_sku 的第 2 层（产品库）。
+
+【多 SKU 合并规则】
+  不论 A/B，最终商品行按「中文品名 + HS 编码」合并为一个报关项号；
+  数量、金额、箱数、毛重、净重累加；单价 = 合并后总额 / 合并后数量。
+
+【产出物】
+  - 预览：JSON 结构化数据（CustomsPackageData），前端 6 个 Tab 可编辑
+  - 导出：基于 backend/templates/customs/报关资料模板.xlsx 填充后的 .xlsx
+
+
+================================================================================
+二、软件架构总览
+================================================================================
+
+【分层结构（与全站一致）】
+
+  浏览器 UI（Step5Workspace）
+      ↓ fetch JSON / blob
+  backend/routers/customs.py           报关 preview / export
+  backend/routers/config.py            出口商档案 CRUD（/api/exporters）
+      ↓
+  backend/fba_tool/customs_package.py  数据装配、合并、净重、金额大写
+  backend/fba_tool/customs_export.py   openpyxl 写模板、多行扩展
+  backend/fba_tool/exporter_profiles.py 出口商持久化
+  backend/fba_tool/shipment_serialize.py  workflow → ShipmentPair
+      ↓
+  backend/templates/customs/报关资料模板.xlsx   出厂只读基底（7 sheet）
+  app_data/config/exporter_profiles.json        用户出口商档案
+
+【技术依赖】
+  - openpyxl：读写 .xlsx 模板（运行时只改动态单元格，静态 sheet 保留）
+  - xlrd：一次性转换旧版 .xls 模板（scripts/convert_customs_template.py）
+  - pandas：货件 box_items / box_specs 分组聚合
+  - 产品库 product_catalog + 主库 master_db：HS/品名/品牌/货值/净重
+
+【架构示意】
+
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │ 前端                                                                 │
+  │  Step5Workspace ── useCustoms ── lib/api/customs.ts                 │
+  │       │                    │                                         │
+  │       │                    └── lib/api/exporters.ts（侧栏档案管理）   │
+  │  AppSidebar / ExportersSection                                      │
+  │  workflow-context：shipments, invoiceDraft, inputRows, step4Ok      │
+  └──────────────────────────┼──────────────────────────────────────────┘
+                             │ POST /api/customs/preview
+                             │ POST /api/customs/export
+                             │ GET/PUT/DELETE /api/exporters
+  ┌──────────────────────────┼──────────────────────────────────────────┐
+  │ 后端                     ▼                                          │
+  │  routers/customs.py                                                 │
+  │       ├─ preview → build_customs_data → JSON                        │
+  │       └─ export  → export_customs_package → xlsx bytes              │
+  │  fba_tool/customs_package.py                                        │
+  │       ├─ pairs_from_workflow                                        │
+  │       ├─ _sku_rows_from_pairs (B) / _rows_from_invoice_draft (A)    │
+  │       ├─ _merge_rows（中文品名+HS）                                  │
+  │       └─ build_customs_data                                         │
+  │  fba_tool/customs_export.py                                         │
+  │       └─ 7 sheet cell map + insert_rows + 样式复制                   │
+  └─────────────────────────────────────────────────────────────────────┘
+
+【关键源文件索引】
+
+  后端核心
+    backend/fba_tool/customs_package.py      数据模型与装配
+    backend/fba_tool/customs_export.py       Excel 导出
+    backend/fba_tool/exporter_profiles.py    出口商档案
+    backend/routers/customs.py               HTTP 路由
+    backend/schemas/customs.py               请求契约
+    backend/config/exporter_profiles.default.json  出厂默认出口商
+
+  模板与脚本
+    scripts/convert_customs_template.py      xls → xlsx 一次性转换
+    backend/templates/customs/报关资料模板.xlsx
+    scripts/verify_bundled_resources.py      打包前校验模板存在
+
+  前端
+    frontend/src/components/step5-workspace.tsx
+    frontend/src/hooks/use-customs.ts
+    frontend/src/lib/api/customs.ts
+    frontend/src/lib/api/exporters.ts
+    frontend/src/components/app-sidebar.tsx  （ExportersSection）
+
+  测试
+    backend/test_customs_package.py
+    backend/test_customs_export.py
+
+
+================================================================================
+三、工作流与用户操作路径
+================================================================================
+
+【主流程步骤】
+
+  Step 1 录入 → Step 2 排箱 → Step 3 导出 → Step 4 回传校验
+      → Step 4.5 发票（可选，来源 A 需要）
+      → Step 5 报关资料
+
+【Step 5 页面操作序列】
+
+  1. 进入 Step 5（Header 点击或 Step 4.5「Step 5 报关资料」）
+  2. 选择出口商（下拉，数据来自 /api/exporters）
+  3. 手填订单号/合同号（必填，如 JUS7HB115）
+  4. 选择数据来源：
+       A · 发票明细 — 需 workflow.invoiceDraft 非空
+       B · 发货重算 — 仅需 Step 4 通过
+  5. 点击「生成预览」→ POST /api/customs/preview
+  6. 在 Tab（报关单/申报要素/发票/箱单/合同/委托书）中编辑字段
+  7. 点击「生成报关资料 (.xlsx)」→ POST /api/customs/export（带编辑后 data）
+  8. 浏览器下载 报关资料_{订单号}.xlsx
+
+【侧栏出口商档案（独立可测）】
+
+  路径：侧边栏 → 系统设置 → 出口商档案
+  操作：列表 / 新增 / 编辑 / 删除 / 设为默认
+  持久化：app_data/config/exporter_profiles.json
+
+  默认出厂档案（backend/config/exporter_profiles.default.json）：
+    id: huabenchen
+    name: 武汉花笨橙电子商务有限公司
+    credit_code: 91420113MACWNNKU99
+    signed_at / domestic_source: 武汉
+
+
+================================================================================
+四、数据模型
+================================================================================
+
+【CustomsLineItem — 合并后单行商品】
+
+  字段                  说明
+  ─────────────────────────────────────────────────────────
+  seq                   项号（1 起）
+  chinese_name          中文品名（合并键之一）
+  hs_code               海关 HS 编码（合并键之一）
+  qty                   数量
+  unit                  单位（默认「件」）
+  unit_price            单价 USD（合并后 = amount / qty）
+  amount                行金额 USD
+  brand                 品牌
+  model                 型号（默认「无型号」）
+  brand_type            品牌类型（默认「自主品牌」）
+  export_preferential   出口享惠情况（默认模板文案）
+  declare_elements      申报要素串（自动拼接，见 §六）
+  quarantine_code       检疫附加码（默认空，可手填）
+  box_count             箱数（合并累加）
+  gross_kg              行毛重 kg
+  net_kg                行净重 kg（可页面覆盖）
+  origin_country        原产国（默认「中国」）
+  dest_country          目的国（默认「美国」）
+  source_place          境内货源地（来自出口商 domestic_source）
+  tax_exemption         征免（默认「照章征税」）
+
+【CustomsPackageData — 整包预览/导出结构】
+
+  头信息
+    exporter              出口商档案 dict
+    order_no              订单号/合同号（手填）
+    buyer                 境外收货人（默认 Amazon）
+    trade_term            成交方式（默认 C&F）
+    package_type          包装种类（默认 纸箱）
+    total_pieces          总件数（箱数，见 §五）
+    total_gross_kg        总毛重
+    total_net_kg          总净重（可覆盖）
+    total_qty             总数量（商品件数合计）
+    total_amount          总金额 USD
+    remarks               报关单备注串（见 §五）
+    dates                 各日期 ISO 字符串（见 §五）
+    amount_in_words       合同金额大写英文
+    main_goods_name       委托书主要货物名（前 3 品名用顿号连接）
+    hs_codes_summary      委托书 HS 汇总（去重顿号连接）
+    source                invoice | shipment
+
+  固定业务常量（写入模板或预留）
+    supervision_mode=9810, exemption_nature=601, transport_mode=海运运输
+    dest/trade/discharge_country=美国, loading_port=深圳, payment_terms=电汇
+    currency=USD
+
+  lines[]               CustomsLineItem 列表
+
+
+================================================================================
+五、完整计算逻辑与公式记录
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────
+5.1  workflow → 货件对（pairs_from_workflow）
+────────────────────────────────────────────────────────────────────────────
+
+  输入：workflow_json.shipments[] 每项含
+        shipment_id, warehouse, parsed_shipment
+
+  处理：csv_shipment_from_dict(parsed_shipment) → CsvShipment
+        包装为 ShipmentPair(shipment_id, warehouse_code, csv, pdf_stub)
+
+  输出：List[ShipmentPair]；box_items 为空则跳过
+
+────────────────────────────────────────────────────────────────────────────
+5.2  来源 B — 按 SKU 展开（_sku_rows_from_pairs）
+────────────────────────────────────────────────────────────────────────────
+
+  对每个 ShipmentPair.csv：
+
+  (1) 按 SKU groupby box_items
+  (2) 对每个 SKU：
+        boxes     = 该 SKU 出现的箱号列表（去重）
+        qty       = Σ 该 SKU 在 box_items 中的「数量」
+        box_count = len(boxes)
+        gross_kg  = Σ spec_map[箱号].实重(kg)  （spec 来自 box_specs）
+
+  (3) 产品信息 _catalog_hints(sku) 合并顺序：
+        product_catalog.to_invoice_hints()
+        → master_db.get_product_by_sku（中文品名、hs_code、brand、unit_weight…）
+        → lookup_customs_name(sku)
+
+  (4) 单价 unit_price：
+        优先 catalog/主数据「单个货值」；无则 0
+
+  (5) 行金额 amount：
+        amount = round(unit_price × qty, 2)   （unit_price 为 0 则 amount=0）
+
+  (6) 行净重 net_kg（见 5.4）
+
+  输出：raw_rows[]，每 SKU 一行（尚未合并）
+
+────────────────────────────────────────────────────────────────────────────
+5.3  来源 A — 发票草稿展开（_rows_from_invoice_draft）
+────────────────────────────────────────────────────────────────────────────
+
+  输入：invoiceDraft.cells[]，每项含 cell（如 B12）、field_key、value
+
+  处理：
+    - 按 cell 行号聚合为 by_row[row_num][field_key] = value
+    - 跳过无 sku 且无 chinese_name 的行
+    - qty = total_qty 或 qty；≤0 跳过
+    - declared = declared_price 或 unit_price
+    - amount = total_declared_value_usd，或 round(declared × qty, 2)
+    - gross = box_weight 或 total_weight_kg
+    - net：有 unit_weight_kg 则 unit_weight_kg × qty，否则 gross × 净重系数
+
+  输出：raw_rows[]（结构同 B，便于统一合并）
+
+────────────────────────────────────────────────────────────────────────────
+5.4  净重估算（优先级）
+────────────────────────────────────────────────────────────────────────────
+
+  配置项：user_settings.json → parameters.customs_net_weight_ratio
+          默认 0.9（DEFAULT_NET_RATIO）
+
+  【SKU 行级 net_kg】
+
+    优先级 1 — Step 1 主数据「单个重量(kg)」
+      unit_net = step1_rows 中该 SKU 的 单个重量(kg)
+      net_kg   = round(unit_net × qty, 2)
+
+    优先级 2 — 主数据库 unit_weight（单品净重，Fee Preview 字段）
+      net_kg   = round(unit_weight × qty, 2)
+
+    优先级 3 — 毛重 × 系数
+      net_kg   = round(gross_kg × customs_net_weight_ratio, 2)
+
+  【来源 A 补充】
+    若 invoice cell 有 unit_weight_kg：
+      net_kg = round(unit_weight_kg × qty, 2)
+    否则若 gross > 0：net_kg = round(gross × 系数, 2)
+
+  【页面覆盖】
+    用户在 Step 5 编辑 lines[].net_kg 或 total_net_kg
+    → 导出时 POST body.data 直接携带修改值（不再重算）
+
+────────────────────────────────────────────────────────────────────────────
+5.5  多 SKU 合并（_merge_rows）
+────────────────────────────────────────────────────────────────────────────
+
+  合并键：key = (chinese_name.strip(), hs_code.strip())
+  跳过：中文品名为空的行
+
+  对同一 key 累加：
+    qty, amount, box_count, gross_kg, net_kg
+  保留：首行的 unit、model、material、purpose；brand 取首个非空
+
+  合并后重算：
+    unit_price = round(amount / qty, 2)    若 qty=0 则 0
+    seq        = 1, 2, 3 …（按合并后顺序）
+    declare_elements = _build_declare_elements(...)
+
+  申报要素串格式：
+    "1|2|{用途或材料或宠物用}|品牌：{品牌}牌|型号：{型号}"
+    示例：1|2|宠物用|品牌：JoyBlooms牌|型号：无型号
+
+────────────────────────────────────────────────────────────────────────────
+5.6  汇总字段（build_customs_data）
+────────────────────────────────────────────────────────────────────────────
+
+  total_qty    = round(Σ lines[].qty, 2)
+  total_amount = round(Σ lines[].amount, 2)
+  total_gross  = round(Σ lines[].gross_kg, 2)
+  total_net    = round(Σ lines[].net_kg, 2)
+
+  total_pieces（报关单「件数」= 总箱数）：
+    优先 _count_total_boxes(pairs)：
+      对所有货件 (shipment_id, 箱号) 去重计数
+    若结果为 0：fallback Σ lines[].box_count
+
+  若 total_gross 仍为 0 且有 pairs：
+    total_gross = Σ 全部 box_specs.实重(kg)
+    若 total_net 仍为 0：total_net = round(total_gross × 系数, 2)
+
+  remarks（报关单备注 B16）：
+    "订单编号：{order_no}。仓库编码：{wh1，wh2…}。FBA编码：{sid1，sid2…}。"
+    仓库 / FBA 号从 pairs 去重按出现顺序拼接
+
+  main_goods_name = 前 3 个合并品名用「、」连接
+  hs_codes_summary = 所有 HS 去重后用「、」连接
+
+  amount_in_words = amount_to_english_words(total_amount)
+    先 round(total_amount, 2)，拆分为整数美元 + 美分（0–99）：
+    - 美分为 0："{DOLLARS} US DOLLARS ONLY"
+    - 美分非 0："{DOLLARS} US DOLLARS AND {CENTS} CENTS ONLY"
+    例：16334.60 → "SIXTEEN THOUSAND THREE HUNDRED THIRTY FOUR US DOLLARS AND SIXTY CENTS ONLY"
+    例：16334.00 → "SIXTEEN THOUSAND THREE HUNDRED THIRTY FOUR US DOLLARS ONLY"
+    英文金额与数字格 total_amount 严格对应，避免报关行退单。
+
+────────────────────────────────────────────────────────────────────────────
+5.7  默认日期（default_dates）
+────────────────────────────────────────────────────────────────────────────
+
+  基准日 = 当天（服务器本地 date.today()）
+
+  字段                          默认值
+  ─────────────────────────────────────────────────────────
+  export_date                   当天
+  declare_date                  当天
+  invoice_date                  当天
+  contract_date                 当天
+  packing_date                  当天
+  shipment_deadline             当天 + 15 天
+  entrust_import_export_date    当天 + 1 天
+  entrust_doc_received_date     当天
+  entrust_sign_date             当天 - 1 天
+
+  页面可改 dates.*；导出时 _parse_date 解析 YYYY-MM-DD 为 datetime.date 对象
+  写入 openpyxl（不写 ISO 字符串），Excel 识别为日期并套用模板单元格格式；
+  无法解析的日期跳过写入（不写纯文本）。
+
+  总计/合计格：_set 直接赋 cell.value = 计算结果，覆盖模板原有 SUM 等公式
+  （insert_rows 后静态公式引用范围易错乱，以程序内汇总值为准）。
+
+────────────────────────────────────────────────────────────────────────────
+5.8  overrides 应用（apply_overrides）
+────────────────────────────────────────────────────────────────────────────
+
+  头字段：order_no, buyer, trade_term, total_pieces, total_gross_kg,
+          total_net_kg, total_qty, total_amount, remarks, amount_in_words,
+          main_goods_name, dest_country, trade_country
+
+  dates：dict 合并覆盖
+
+  lines：按 seq 匹配，覆盖 chinese_name, hs_code, qty, unit, unit_price,
+         amount, brand, model, declare_elements, box_count, gross_kg, net_kg
+
+
+================================================================================
+六、Excel 模板与 Cell Map（openpyxl 1-indexed）
+================================================================================
+
+【模板来源】
+  旧版国家模板 .xls（如 JUS7HB115-合并报关-9810-报关资料.xls）
+  经 scripts/convert_customs_template.py 转为：
+  backend/templates/customs/报关资料模板.xlsx
+
+  打包：FBA_Smart_Tool.spec datas 含 backend/templates/（含 customs 子目录）
+  运行时：load_workbook(模板) 作基底，只写动态单元格；sheet 1「填制规范」、
+          sheet 内静态说明 URL 等不做修改。
+
+【7 个 Sheet 索引】
+
+  idx 0  报关单        动态
+  idx 1  填制规范      静态保留
+  idx 2  申报要素      动态
+  idx 3  发票          动态
+  idx 4  箱单          动态
+  idx 5  合同          动态
+  idx 6  委托书        动态
+
+【多行扩展规则（customs_export._ensure_data_rows）】
+
+  模板内已有首行示例 + 若干空行；若合并后项数超过 (total_row - first_row)：
+    在 total_row 处 insert_rows，并 copy 示例行样式。
+  写入合并单元格时：_top_left_cell 定位合并区左上角再赋值。
+  写入总计/合计时：cell.value = 数值，覆盖模板公式（见 §5.7）。
+
+────────────────────────────────────────────────────────────────────────────
+Sheet 0 — 报关单
+────────────────────────────────────────────────────────────────────────────
+
+  头区
+    A4   境内发货人名称        exporter.name
+    C3   信用代码              exporter.credit_code
+    A8   生产销售单位名称      exporter.name
+    C7   生产销售单位代码      exporter.credit_code
+    A6   境外收货人            buyer（默认 Amazon）
+    A10  合同协议号            order_no
+    H3   出口日期              dates.export_date
+    E12  件数                  total_pieces
+    G12  毛重(kg)              total_gross_kg
+    B16  备注                  remarks
+
+  商品明细（首行 20，总计行基准 27）
+    A  项号      B  HS      D  品名      G  数量    H  单位
+    I  单价      J  总价      K  原产国    M  目的国
+    P  货源地    S  征免
+
+  总计行（可能随插入下移）
+    G  总数量    J  总金额
+
+────────────────────────────────────────────────────────────────────────────
+Sheet 2 — 申报要素（首行 10）
+────────────────────────────────────────────────────────────────────────────
+
+    A 序号   B 品名   C HS   D 检疫码   E 品牌   F 型号
+    G 品牌类型   H 出口享惠   I 其他申报要素(declare_elements)
+
+────────────────────────────────────────────────────────────────────────────
+Sheet 3 — 发票
+────────────────────────────────────────────────────────────────────────────
+
+  G2  发票号 No          order_no
+  C3  客户                buyer
+  G3  日期                dates.invoice_date
+  G6  成交方式            trade_term
+
+  明细首行 8，总计基准行 15
+    A 序号  C 品名  D 数量  E 单位  F 单价  G 金额
+  总计 G 列 = total_amount
+
+────────────────────────────────────────────────────────────────────────────
+Sheet 4 — 箱单
+────────────────────────────────────────────────────────────────────────────
+
+  G2  日期      dates.packing_date
+  G3  发票号    order_no
+  B4  客户      buyer
+  G4  合同号    order_no
+  D6  目的国    dest_country
+
+  明细首行 9，合计基准行 15
+    B 品名  C 箱数  D 数量  E 单位  F 毛重  G 净重
+  合计：C=total_pieces, D=total_qty, F=total_gross_kg, G=total_net_kg
+
+────────────────────────────────────────────────────────────────────────────
+Sheet 5 — 合同
+────────────────────────────────────────────────────────────────────────────
+
+  B2  卖方              exporter.name
+  F6  合同号            order_no
+  F8  日期              dates.contract_date
+  F10 签约地            exporter.signed_at
+  F11 成交方式          trade_term
+  B8  买方              buyer
+
+  明细首行 18，合计基准行 24
+    A 品名  C 数量  D 单位  E 单价  F 金额  G 币制(USD)
+  合计：C=total_qty, F=total_amount
+
+  插入行后偏移 shift = total_row - 24：
+    A{28+shift}  金额大写 amount_in_words
+    B{32+shift}  装运期   dates.shipment_deadline
+    C{33+shift}  目的国   dest_country
+
+────────────────────────────────────────────────────────────────────────────
+Sheet 6 — 委托书
+────────────────────────────────────────────────────────────────────────────
+
+  H5   编号              order_no
+  C21  委托方            exporter.name
+  C22  主要货物名称      main_goods_name
+  C23  HS 编码           hs_codes_summary
+  C24  货物总价          total_amount
+  C25  进出口日期        entrust_import_export_date
+  C28  原产地/货源地     domestic_source 或 signed_at
+  H23  收到单证日期      entrust_doc_received_date
+  H24  签署日期          entrust_sign_date
+
+
+================================================================================
+七、API 契约
+================================================================================
+
+【报关】
+
+  POST /api/customs/preview
+    Body: CustomsPreviewRequest
+      source: "invoice" | "shipment"
+      exporter_id?: string
+      order_no: string
+      dates?: Record<string, string>
+      overrides?: object
+      workflow_json: { input_rows, shipments, box_editor, forwarder, ... }
+      invoice_draft?: object   （source=invoice 时必填）
+    Response: { ok: true, data: CustomsPackageData }
+
+  POST /api/customs/export
+    Body: CustomsExportRequest（同上 + data?: 编辑后完整预览）
+      若带 data：直接使用前端编辑结果 + overrides，不再全量重算
+      否则：同 preview 逻辑 build 后导出
+    Response: application/vnd.openxmlformats... 附件
+              文件名 报关资料_{order_no}.xlsx
+
+【出口商档案】（routers/config.py）
+
+  GET    /api/exporters              → { profiles: [...] }
+  PUT    /api/exporters/{id}         → 新增/更新
+  DELETE /api/exporters/{id}
+  POST   /api/exporters/active       → body { id } 设默认
+
+  持久化路径：app_data/config/exporter_profiles.json
+  结构：
+    {
+      "active_id": "huabenchen",
+      "profiles": [
+        { "id", "name", "credit_code", "address", "tel",
+          "signed_at", "domestic_source" }
+      ]
+    }
+
+
+================================================================================
+八、前端状态与交互（useCustoms / Step5Workspace）
+================================================================================
+
+【依赖 workflow-context】
+  step4Ok, shipments, invoiceDraft, inputRows, boxEditorApi, forwarder
+
+【buildWorkflowJson 发送字段】
+  input_rows  — Step1 行（rowToApi）
+  box_editor, forwarder, shipments（含 parsed_shipment）
+
+【本地 state】
+  source, exporterId, orderNo, data（预览结果）, activeTab
+
+【canPreview 条件】
+  step4Ok && shipments.length > 0 && orderNo 非空
+  && (source===shipment || invoiceDraft 存在)
+
+【Tab 与可编辑字段】
+  报关单    — 合同号、出口日期、件数、毛重、净重、备注 + 明细表
+  申报要素  — 品名、HS、品牌、型号、申报要素
+  发票      — 发票号、日期、成交方式 + 明细
+  箱单      — 日期、目的国 + 箱数/毛净重明细
+  合同      — 合同日期、装运期、金额大写 + 明细
+  委托书    — 只读展示主要字段
+
+【导出】
+  exportCustomsBlob({ ...previewPayload, data: 当前编辑态 })
+  → triggerDownload(blob, filename)
+
+
+================================================================================
+九、与 Step 4 / 4.5 的衔接关系
+================================================================================
+
+  Step 4 validate
+    → 前端保存 shipments[].parsed_shipment（box_items, box_specs, …）
+    → step4Ok = true 才允许进入 Step 5
+
+  Step 4.5 invoice
+    → invoiceDraft.cells（表格模式 line items）
+    → 来源 A 直接消费，不再调 DeepSeek
+
+  Step 1 input_rows
+    → 来源 B 净重优先级 1：SKU → 单个重量(kg)
+    → 通过 workflow_json.input_rows 传入后端
+
+  产品主数据 / 产品库
+    → 来源 B 的 HS、中文品名、品牌、单个货值
+    → 与 4.5 发票 ETL 产品库层同源，无 AI
+
+【职责边界】
+  Step 4     校验货件真实性（不负责报关单格式）
+  Step 4.5   货代发票（单票/单货代模板）
+  Step 5     9810 合并报关资料包（7 sheet 国家模板）
+
+
+================================================================================
+十、运维与打包
+================================================================================
+
+【首次 / 更换 .xls 模板】
+  python scripts/convert_customs_template.py
+  可选参数：[源.xls路径] [输出.xlsx路径]
+  默认源：dist/app_data/templates/*9810*.xls 或同目录首个 .xls
+  默认输出：backend/templates/customs/报关资料模板.xlsx
+
+【发布前校验】
+  python scripts/verify_bundled_resources.py
+  检查项含：backend/templates/customs/报关资料模板.xlsx
+
+【单元测试】
+  pytest backend/test_customs_package.py backend/test_customs_export.py
+  覆盖：合并项数、备注串、净重、金额大写、关键单元格写入
+
+【常见错误】
+  400 缺少货件数据        → Step 4 未校验或未写入 parsed_shipment
+  400 来源 A 需要发票草稿  → 先完成 4.5 或改选 B
+  404 未找到出口商        → 侧栏新增出口商或恢复默认配置
+  500 模板不存在          → 运行 convert_customs_template.py
+
+
+================================================================================
+十一、计算示例（心算核对用）
+================================================================================
+
+  假设两 SKU 合并前：
+    SKU-A  中文品名=宠物垫  HS=6307909000  qty=100  unit_price=10  gross=50kg
+           step1 单重=0.4kg → net = 40kg
+    SKU-B  中文品名=宠物垫  HS=6307909000  qty=80   unit_price=10  gross=40kg
+           无单重 → net = 40 × 0.9 = 36kg
+
+  合并后 1 项：
+    qty=180, amount=1800, unit_price=10, box_count=累加, gross=90, net=76
+    seq=1, declare_elements 按合并行品牌/用途生成
+
+  总件数：若两货件共 115 个物理箱 → total_pieces=115（与 SKU 无关）
+
+  备注：订单编号：JUS7HB115。仓库编码：VGT2，SCK4。FBA编码：FBA19xxx，…。
+
+
+================================================================================
+文档结束
+================================================================================

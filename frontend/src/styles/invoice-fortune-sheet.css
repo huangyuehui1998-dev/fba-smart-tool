@@ -1,0 +1,97 @@
+/* Step 4.5 审核模式：隐藏 FortuneSheet 多余 chrome，保留行列号与网格 */
+.invoice-fortune-sheet {
+  height: min(72vh, 720px);
+  min-height: 480px;
+  /* 为底部横向滚动条留出空间，避免被圆角容器裁切 */
+  padding-bottom: 14px;
+  box-sizing: border-box;
+}
+
+.invoice-fortune-sheet-host {
+  min-width: 0;
+  min-height: 0;
+}
+
+.invoice-fortune-sheet .fortune-toolbar,
+.invoice-fortune-sheet .luckysheet-toolbar,
+.invoice-fortune-sheet .fortune-formula-bar,
+.invoice-fortune-sheet .luckysheet-wa-editor,
+.invoice-fortune-sheet .fortune-sheet-tab,
+.invoice-fortune-sheet .luckysheet-sheet-area,
+.invoice-fortune-sheet .fortune-stat-area {
+  display: none !important;
+}
+
+.invoice-fortune-sheet .fortune-container {
+  height: 100% !important;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+}
+
+.invoice-fortune-sheet .fortune-workarea,
+.invoice-fortune-sheet .luckysheet-work-area {
+  flex: 0 0 auto !important;
+  height: auto !important;
+  min-height: 0 !important;
+}
+
+.invoice-fortune-sheet .fortune-sheet-container,
+.invoice-fortune-sheet .luckysheet-grid-container {
+  flex: 1 1 auto !important;
+  min-height: 0 !important;
+  min-width: 0 !important;
+  position: relative;
+}
+
+.invoice-fortune-sheet .fortune-sheet-area,
+.invoice-fortune-sheet .fortune-col-body {
+  min-height: 0;
+  min-width: 0;
+}
+
+.invoice-fortune-sheet .fortune-sheet-overlay {
+  min-width: 0;
+}
+
+.invoice-fortune-sheet .fortune-row-body {
+  position: relative !important;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* 横向 / 纵向滚动条：确保可见、可拖动 */
+.invoice-fortune-sheet .luckysheet-scrollbar-x {
+  display: block !important;
+  visibility: visible !important;
+  height: 12px !important;
+  min-height: 12px !important;
+  bottom: 0 !important;
+  z-index: 30 !important;
+  background: rgba(248, 250, 252, 0.96);
+  border-top: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.invoice-fortune-sheet .luckysheet-scrollbar-y {
+  display: block !important;
+  visibility: visible !important;
+  width: 12px !important;
+  min-width: 12px !important;
+  z-index: 30 !important;
+  background: rgba(248, 250, 252, 0.96);
+  border-left: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+.invoice-fortune-sheet .luckysheet-scrollbar-ltr::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.invoice-fortune-sheet .luckysheet-scrollbar-ltr::-webkit-scrollbar-thumb {
+  background-color: #94a3b8;
+  border-radius: 8px;
+}
+
+.invoice-fortune-sheet .luckysheet-scrollbar-ltr::-webkit-scrollbar-thumb:hover {
+  background-color: #64748b;
+}

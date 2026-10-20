@@ -1,0 +1,36 @@
+{
+  "_说明": "S8 D4：只用于“按货代模板导出发票”的货代（不进货代报价表下拉）。模板由 scripts/generate_invoice_export_templates.py 从真实样例生成。",
+  "forwarders": [
+    {
+      "id": "qiluo_t6",
+      "name": "琪珞·FBA专线导入模版（T6）",
+      "template_file": "qiluo_t6.xlsx",
+      "export_adapter": "qiluo_t6",
+      "invoice_export": {
+        "source": "琪珞 T6 第7批第1票 VGT2-29箱（第6/7批 10 份）",
+        "file_name": "{shipment_id}-琪珞发票.xlsx",
+        "weight_meaning": "单箱重（D-2026-10-16-09：T6“单件实重”= 单箱重）"
+      }
+    },
+    {
+      "id": "qiluo_t5",
+      "name": "琪珞·下单模板 单行汇总（T5/T7）",
+      "template_file": "qiluo_t5.xlsx",
+      "export_adapter": "qiluo_t5",
+      "invoice_export": {
+        "source": "琪珞 T5 第3/5批样例；空白版 T7 义乌宁波运单下单模板",
+        "file_name": "{shipment_id}-琪珞下单模板.xlsx"
+      }
+    },
+    {
+      "id": "deshu",
+      "name": "德速·Commercial Invoice 9810（T3）",
+      "template_file": "deshu_t3.xlsx",
+      "export_adapter": "deshu_t3",
+      "invoice_export": {
+        "source": "德速 T3 第2/9批样例",
+        "file_name": "{shipment_id}-德速发票.xlsx"
+      }
+    }
+  ]
+}

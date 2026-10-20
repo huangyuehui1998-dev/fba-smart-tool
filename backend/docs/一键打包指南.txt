@@ -1,0 +1,157 @@
+================================================================================
+  FBA Smart Tool V1.0 — 单机一键启动版 · 打包指南
+  更新日期：2026-05-30
+================================================================================
+【现状说明（s8-docs，2026-10-16）】本文是历史文档，内容停在当时版本，不随代码更新。现行说明看：用户 用户使用说明.md、便携包 packaging/使用说明.txt、开发 backend/README.md、代码定位 FBA_Smart_Tool_代码架构定位手册.md、交接 交接文档_给新Bot.md / HANDOFF_交接清单.md。
+（现行打包：scripts\build_standalone.ps1 → dist\FBA_Smart_Tool_V3.2_便携版.zip，见 backend/README.md 与架构手册 §3.3。）
+
+
+一、架构说明
+--------------------------------------------------------------------------------
+开发模式（程序员日常）：
+  终端 1：cd backend && uvicorn main:app --reload --port 8002
+  终端 2：cd frontend && npm run dev          → http://localhost:8080
+
+单机一键版（仓库同事）：
+  双击 FBA_Smart_Tool.exe 或运行 run_app.py
+    → FastAPI 同时提供 /api/* 与 React 静态页
+    → 浏览器自动打开 http://127.0.0.1:端口/
+
+关键文件：
+  backend/main.py              API + 挂载前端 SPA
+  backend/static_ui.py         StaticFiles + TanStack Router 回退 index.html
+  backend/static/              前端构建产物（npm run build 后同步）
+  run_app.py                   找端口、启服务、开浏览器
+  scripts/sync_frontend_static.py   复制 frontend/dist/client → backend/static
+  packaging/FBA_Smart_Tool.spec     PyInstaller 配置
+
+
+二、环境准备（仅打包机器需要）
+--------------------------------------------------------------------------------
+1. Node.js 18+ 与 npm
+2. Python 3.11+（推荐与 backend\.venv 一致）
+3. 后端依赖已安装：
+     cd backend
+     python -m venv .venv
+     .\.venv\Scripts\activate
+     pip install -r requirements.txt
+     pip install pyinstaller
+
+4. 前端依赖已安装：
+     cd frontend
+     npm install
+
+
+三、标准打包流程（逐步执行）
+--------------------------------------------------------------------------------
+
+【步骤 1】构建前端（启用 SPA Shell，产出 index.html / _shell.html）
+
+  cd frontend
+  npm run build
+
+  说明：
+    - vite.config.ts 已开启 tanstackStart.spa.enabled
+    - 产物目录：frontend/dist/client/
+    - 含 assets/*.js、*.css 与 _shell.html（构建脚本会复制为 index.html）
+
+【步骤 2】同步静态资源到后端
+
+  cd ..   （回到项目根目录 FBA_Smart_Tool）
+  python scripts/sync_frontend_static.py
+
+  成功输出：已同步 .../frontend/dist/client -> .../backend/static
+
+【步骤 3】本地验证一键启动（可选但强烈建议）
+
+  python run_app.py
+
+  预期：
+    - 控制台打印服务地址（默认 8002，占用则自动 8003…）
+    - 1~2 秒后浏览器打开，能看到 Step 1 工作区
+    - 刷新 /master-data 不 404（SPA 回退正常）
+    - /api/health 返回 {"status":"ok",...}
+
+【步骤 4】PyInstaller 打单文件 exe
+
+  cd backend
+  .\.venv\Scripts\activate
+  pip install pyinstaller
+
+  pyinstaller ..\packaging\FBA_Smart_Tool.spec ^
+    --noconfirm ^
+    --distpath ..\dist ^
+    --workpath ..\build\pyinstaller
+
+  输出：dist\FBA_Smart_Tool.exe
+
+【一键脚本】Windows PowerShell 可代替步骤 1~4：
+
+  powershell -ExecutionPolicy Bypass -File scripts\build_standalone.ps1
+
+
+四、分发给仓库同事
+--------------------------------------------------------------------------------
+1. 将 dist\FBA_Smart_Tool.exe 复制到 U 盘或共享文件夹
+2. 同事双击 exe，等待浏览器弹出即可使用
+3. 首次运行会在 exe 同目录自动创建 app_data/（业务数据与代码隔离）：
+     app_data/fba_master.db           产品主数据库（SQLite）
+     app_data/invoice_history.json    发票 AI 历史参考
+     app_data/config/                 用户配置、任务会话索引
+     app_data/templates/              用户上传的 Excel 模板
+     app_data/sessions/               任务自动保存与历史
+     app_data/logs/  app_data/cache/  日志与本地缓存（预留）
+
+出厂默认配置仍在 exe 内置的 backend/config/、backend/templates/（只读），
+不会覆盖 app_data/ 中已有文件。
+
+注意：
+  - 不要关闭黑色控制台窗口，关闭即停止服务
+  - 防火墙若提示，请允许「专用网络」访问
+  - DeepSeek API Key 仍在软件侧边栏「系统设置」中填写
+
+
+五、PyInstaller spec 说明（packaging/FBA_Smart_Tool.spec）
+--------------------------------------------------------------------------------
+打包内容（datas）：
+  backend/static/      → 前端页面（必须步骤 2 同步后再打包）
+  backend/config/      → 默认配置与 invoice_history.json
+  backend/templates/     → 默认 xlsx/csv 模板
+
+入口脚本：
+  run_app.py（项目根目录）
+
+hiddenimports 已包含 uvicorn 子模块、multipart、pandas、openpyxl 等。
+若打包后运行报 ModuleNotFoundError，在 spec 的 hiddenimports 追加模块名后重打。
+
+体积提示：
+  含 pandas + openpyxl 的 onefile exe 通常 80~150 MB，属正常现象。
+
+
+六、常见问题
+--------------------------------------------------------------------------------
+Q: 浏览器打开但页面空白？
+A: 确认打包前执行了 sync_frontend_static.py，且 backend/static/index.html 存在。
+
+Q: 刷新子路由 404？
+A: 检查 main.py 是否调用 mount_frontend_spa；非 /api 路径应回退 index.html。
+
+Q: 8002 端口被占用？
+A: run_app.py 会自动尝试 8003~8011；控制台会打印实际端口。
+
+Q: 开发时还想用 Vite 热更新？
+A: 继续 npm run dev + uvicorn，无需 run_app.py。static 挂载在无 index.html 时自动跳过。
+
+Q: 如何更新模板/配置后重新打包？
+A: 修改 backend/templates 或 config → 重新执行「步骤 4」PyInstaller 即可
+   （若只改前端，需从步骤 1 重做）。
+
+
+七、相关命令速查
+--------------------------------------------------------------------------------
+  npm run build                              # 前端生产构建
+  python scripts/sync_frontend_static.py       # 同步到 backend/static
+  python run_app.py                            # 开发机一键试跑
+  pyinstaller packaging/FBA_Smart_Tool.spec    # 打 exe（见步骤 4 完整参数）
+
+================================================================================

@@ -1,0 +1,648 @@
+"""亚马逊 FBA 货件 CSV/PDF 解析：按真实箱号 (U-index) 重排。"""
+from __future__ import annotations
+
+import csv
+import io
+import re
+from collections import defaultdict
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+
+import pandas as pd
+import pdfplumber
+
+from fba_tool.sku_keys import sku_key
+from fba_tool.volume_weight import (
+    detect_length_unit,
+    detect_weight_unit,
+    is_packaging_label,
+    normalize_box_spec_row,
+)
+from fba_tool.warehouse_codes import (
+    extract_warehouse_from_text,
+    is_valid_warehouse_code,
+    normalize_code as normalize_warehouse_code,
+)
+
+
+class PdfTextError(Exception):
+    """PDF 文本无法解析（加密/扫描件/图片型/损坏）时抛出，携带明确原因。"""
+
+FBA_BOX_CODE_RE = re.compile(r"(FBA[A-Z0-9]+)U0*(\d+)\s*$", re.I)
+WAREHOUSE_STRICT_RE = re.compile(r"\b([A-Z]{2,4}\d{1,2}|[A-Z]{4})\b")
+WAREHOUSE_SUFFIX_RE = re.compile(r"[-_\s]([A-Z]{2,4}\d{1,2}|[A-Z]{4})(?:\.pdf|\.csv|\s*)$", re.I)
+WAREHOUSE_BLACKLIST = {"AMZN", "INCH", "MIXED", "UNIT", "CTN", "PCS", "FNSKU", "SKU", "BOX", "QTY"}
+BOX_COL_HEADER_RE = re.compile(r"箱子\s*(\d+)")
+QTY_RE = re.compile(r"(?:QTY|数量)[:\s：]*(\d+)", re.I)
+
+FBA_BOX_TOKEN_RE = re.compile(r"FBA[A-Z0-9]+U\d+", re.I)
+FNSKU_RE = re.compile(r"\b(X0[A-Z0-9]{8,})\b", re.I)
+MIXED_SKU_RE = re.compile(r"mixed\s*sku", re.I)
+
+BoxData = Dict[int, Dict[str, int]]
+
+
+@dataclass
+class PdfBoxPage:
+    page_index: int
+    shipment_id: str
+    fba_box_id: str
+    box_no: int
+    sku: str = ""
+    fnsku: str = ""
+    qty: int = 0
+    is_mixed: bool = False
+    raw_text: str = ""
+    warehouse_code: str = ""
+
+
+def format_box_u_label(box_no: int) -> str:
+    return f"U{int(box_no):03d}"
+
+
+def normalize_fba_box_id(value: str) -> str:
+    return re.sub(r"\s+", "", str(value or "").strip().upper())
+
+
+@dataclass
+class CsvShipment:
+    shipment_id: str
+    warehouse_code: str
+    box_count: int
+    column_to_box: Dict[int, int] = field(default_factory=dict)
+    box_data: BoxData = field(default_factory=dict)
+    box_items: pd.DataFrame = field(default_factory=pd.DataFrame)
+    box_specs: pd.DataFrame = field(default_factory=pd.DataFrame)
+    box_fba_ids: Dict[int, str] = field(default_factory=dict)
+    sku_fnsku: Dict[str, str] = field(default_factory=dict)
+    # 仓库代码从哪来：货件名称 / 文件名 / CSV头部；空 = 没识别出（UNKN）。界面上可据此标“来自文件名”
+    warehouse_source: str = ""
+    # CSV 头部“配送地址”原文（如 'BLOOMINGTON, CA'）；S4-fix1 发票核对用它对 FBA 仓库地址库，不用货件名称
+    ship_to: str = ""
+
+
+@dataclass
+class PdfShipment:
+    shipment_id: str
+    page_count: int
+    box_data: BoxData = field(default_factory=dict)
+    box_items: pd.DataFrame = field(default_factory=pd.DataFrame)
+    pages: List[PdfBoxPage] = field(default_factory=list)
+
+
+CSV_ENCODINGS = ("utf-8-sig", "utf-8", "gbk")
+
+
+def decode_csv_bytes(file_bytes: bytes) -> str:
+    """按 UTF-8-SIG → UTF-8 → GBK 依次严格解码；都失败时明确报编码问题（D4）。"""
+    for enc in CSV_ENCODINGS:
+        try:
+            return file_bytes.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    raise ValueError(
+        "CSV 文件编码无法识别（已尝试 UTF-8-SIG、UTF-8、GBK）。"
+        "请在 Excel 里“另存为 → CSV UTF-8(逗号分隔)”后重新上传。"
+    )
+
+
+def parse_csv_shipment(
+    file_bytes: bytes,
+    allow_unassigned_fba: bool = False,
+    file_name: str = "",
+) -> CsvShipment:
+    text = decode_csv_bytes(file_bytes)
+    rows = list(csv.reader(io.StringIO(text)))
+
+    shipment_id = _csv_meta(rows, "货件编号")
+    shipment_name = _csv_meta(rows, "货件名称")
+    # 仓库取值顺序：货件名称 → 文件名 → 其余头部字段（跳过工作流程 ID 等 UUID 字段）
+    warehouse, warehouse_source = "", ""
+    for cand, label in (
+        (_warehouse_from_name(shipment_name), "货件名称"),
+        (_warehouse_from_filename(file_name), "文件名"),
+        (_warehouse_from_name(_scan_text(rows)), "CSV头部"),
+    ):
+        if cand:
+            warehouse, warehouse_source = cand, label
+            break
+    box_count = _to_int(_csv_meta(rows, "箱子数量"))
+
+    header_idx, box_start = _find_sku_header(rows)
+    column_to_box = _build_column_to_box_map(rows, box_start, allow_unassigned_fba)
+    if not column_to_box:
+        raise ValueError("CSV 未找到「箱号」行或 FBA...U 映射，无法建立真实箱号对应关系。")
+
+    box_data = _extract_box_data(rows, header_idx, box_start, column_to_box)
+    sku_fnsku = _extract_sku_fnsku_map(rows, header_idx)
+    box_items = _box_data_to_items_df(box_data, warehouse, sku_fnsku)
+    box_specs = pd.DataFrame(_extract_box_specs(rows, warehouse, box_start, column_to_box))
+    box_fba_ids = _extract_fba_box_ids(rows, box_start, column_to_box)
+
+    if box_count <= 0 and box_data:
+        box_count = max(box_data.keys())
+
+    return CsvShipment(
+        shipment_id=(shipment_id or "UNKNOWN").upper(),
+        warehouse_code=warehouse or "UNKN",
+        warehouse_source=warehouse_source,
+        ship_to=_csv_meta(rows, "配送地址") or "",
+        box_count=box_count,
+        column_to_box=column_to_box,
+        box_data=box_data,
+        box_items=box_items,
+        box_specs=box_specs,
+        box_fba_ids=box_fba_ids,
+        sku_fnsku=sku_fnsku,
+    )
+
+
+def parse_pdf_shipment(file_bytes: bytes) -> PdfShipment:
+    pages = parse_pdf_pages(file_bytes)
+    shipment_id = ""
+    records: List[Dict] = []
+    box_data: BoxData = defaultdict(dict)
+
+    for page in pages:
+        if page.shipment_id and not shipment_id:
+            shipment_id = page.shipment_id
+        if page.box_no <= 0:
+            continue
+        if page.sku and page.qty > 0 and not page.is_mixed:
+            records.append({"箱号": page.box_no, "SKU": page.sku, "数量": page.qty})
+            box_data[page.box_no][page.sku] = page.qty
+
+    pdf_fnsku = {
+        str(p.sku).strip(): str(p.fnsku).strip().upper()
+        for p in pages
+        if str(p.sku or "").strip() and str(p.fnsku or "").strip()
+    }
+    return PdfShipment(
+        shipment_id=(shipment_id or "UNKNOWN").upper(),
+        page_count=len(pages) if pages else 0,
+        box_data={k: dict(v) for k, v in sorted(box_data.items())},
+        box_items=_box_data_to_items_df(box_data, warehouse="", sku_fnsku=pdf_fnsku),
+        pages=pages,
+    )
+
+
+def parse_pdf_pages(file_bytes: bytes) -> List[PdfBoxPage]:
+    pages: List[PdfBoxPage] = []
+    try:
+        with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+            for idx, page in enumerate(pdf.pages):
+                try:
+                    text = page.extract_text() or ""
+                except Exception:
+                    text = ""
+                parsed = _parse_pdf_page_text(text, idx)
+                if parsed:
+                    pages.append(parsed)
+    except Exception:
+        return []
+    return pages
+
+
+def _parse_pdf_page_text(text: str, page_index: int) -> Optional[PdfBoxPage]:
+    if not text.strip():
+        return None
+
+    flat = text.replace("\n", " ")
+    shipment_id, box_no = _extract_fba_box_code(flat)
+    if box_no <= 0:
+        shipment_id, box_no = _extract_fba_box_code(text)
+
+    fba_box_id = ""
+    for token in FBA_BOX_TOKEN_RE.findall(text.upper()):
+        sid, bno = _extract_fba_box_code(token)
+        if bno > 0:
+            fba_box_id = token.upper()
+            if not shipment_id and sid:
+                shipment_id = sid
+            if box_no <= 0:
+                box_no = bno
+            break
+
+    if box_no <= 0:
+        return None
+
+    is_mixed = bool(MIXED_SKU_RE.search(text))
+    sku = "" if is_mixed else _extract_pdf_sku(text)
+    qty = 0 if is_mixed else _extract_pdf_qty(text)
+    fnsku_m = FNSKU_RE.search(text)
+    fnsku = fnsku_m.group(1).upper() if fnsku_m else ""
+
+    warehouse_code = ""
+    for m in WAREHOUSE_STRICT_RE.finditer(text.upper()):
+        cand = m.group(1)
+        if cand.startswith("FBA") or cand in WAREHOUSE_BLACKLIST:
+            continue
+        if re.match(r"^[A-Z]{2,3}\d{1,2}$", cand) or re.match(r"^[A-Z]{4}$", cand):
+            warehouse_code = cand
+            break
+
+    return PdfBoxPage(
+        page_index=page_index,
+        shipment_id=(shipment_id or "").upper(),
+        fba_box_id=fba_box_id,
+        box_no=box_no,
+        sku=sku,
+        fnsku=fnsku,
+        qty=qty,
+        is_mixed=is_mixed,
+        raw_text=text,
+        warehouse_code=warehouse_code,
+    )
+
+
+def extract_pdf_shipment_id(file_bytes: bytes) -> str:
+    return parse_pdf_shipment(file_bytes).shipment_id
+
+
+def _build_column_to_box_map(rows: List[List[str]], box_start: int, allow_unassigned: bool = False) -> Dict[int, int]:
+    mapping: Dict[int, int] = {}
+    box_id_row = _find_box_id_row(rows, box_start)
+    if not box_id_row:
+        return mapping
+
+    box_index = 1
+    for col_idx, cell in enumerate(box_id_row):
+        if col_idx < box_start:
+            continue
+        cell_str = str(cell).strip()
+        box_no = _fba_suffix_to_box_no(cell_str)
+        if box_no > 0:
+            mapping[col_idx] = box_no
+        elif allow_unassigned and cell_str == "待分配":
+            mapping[col_idx] = box_index
+        box_index += 1
+    return mapping
+
+
+def _find_box_id_row(rows: List[List[str]], box_start: int) -> List[str] | None:
+    best_row = None
+    best_score = 0
+    for row in rows:
+        if len(row) <= box_start:
+            continue
+        label_hit = any(str(c).strip() in {"箱号", "编号", "Box ID"} for c in row)
+        fba_hits = sum(1 for c in row[box_start:] if _fba_suffix_to_box_no(str(c).strip()) > 0)
+        score = (10 if label_hit else 0) + fba_hits
+        if score > best_score:
+            best_score = score
+            best_row = row
+    return best_row if best_score > 0 else None
+
+
+def _extract_box_data(
+    rows: List[List[str]], header_idx: int, box_start: int, column_to_box: Dict[int, int]
+) -> BoxData:
+    box_data: BoxData = defaultdict(dict)
+    if header_idx < 0:
+        return {}
+
+    for row in rows[header_idx + 1 :]:
+        if not row:
+            continue
+        sku = str(row[0]).strip()
+        if not sku or sku_key(sku) in {"sku", "seller sku"}:
+            continue
+        if re.search(r"(length|width|height|weight|长度|宽度|高度|重量|包装)", sku, flags=re.I):
+            break
+
+        for col_idx, true_box in column_to_box.items():
+            if col_idx >= len(row):
+                continue
+            qty = _to_int(row[col_idx])
+            if qty > 0:
+                box_data[true_box][sku] = box_data[true_box].get(sku, 0) + qty
+
+    return {k: dict(v) for k, v in sorted(box_data.items())}
+
+
+def _fnsku_col_index(header_row: List[str]) -> int:
+    for i, cell in enumerate(header_row):
+        if str(cell or "").strip().upper() == "FNSKU":
+            return i
+    return -1
+
+
+def _extract_sku_fnsku_map(rows: List[List[str]], header_idx: int) -> Dict[str, str]:
+    out: Dict[str, str] = {}
+    if header_idx < 0 or header_idx >= len(rows):
+        return out
+    fn_col = _fnsku_col_index(rows[header_idx])
+    if fn_col < 0:
+        return out
+    for row in rows[header_idx + 1 :]:
+        if not row:
+            continue
+        sku = str(row[0]).strip()
+        if not sku or sku_key(sku) in {"sku", "seller sku"}:
+            continue
+        if re.search(r"(length|width|height|weight|长度|宽度|高度|重量|包装)", sku, flags=re.I):
+            break
+        fnsku = str(row[fn_col]).strip().upper() if fn_col < len(row) else ""
+        if sku and fnsku:
+            out[sku] = fnsku
+    return out
+
+
+def _extract_fba_box_ids(
+    rows: List[List[str]], box_start: int, column_to_box: Dict[int, int]
+) -> Dict[int, str]:
+    sorted_cols = sorted(column_to_box.keys())
+    fba_ids: Dict[int, str] = {}
+    for row in rows:
+        if not row or len(row) <= box_start:
+            continue
+        label = _row_packaging_label(row)
+        if label.lower() not in {"箱号", "编号", "box id"} and label != "箱号":
+            continue
+        for col_idx in sorted_cols:
+            if col_idx >= len(row):
+                continue
+            cell = str(row[col_idx]).strip()
+            if cell and _fba_suffix_to_box_no(cell) > 0:
+                fba_ids[column_to_box[col_idx]] = cell
+    return fba_ids
+
+
+def _extract_box_specs(
+    rows: List[List[str]], warehouse: str, box_start: int, column_to_box: Dict[int, int]
+) -> List[Dict]:
+    length_vals: Dict[int, float] = {}
+    width_vals: Dict[int, float] = {}
+    height_vals: Dict[int, float] = {}
+    weight_vals: Dict[int, float] = {}
+    length_unit = width_unit = height_unit = "in"
+    weight_unit = "lb"
+    fba_ids: Dict[int, str] = {}
+
+    sorted_cols = sorted(column_to_box.keys())
+
+    for row in rows:
+        if not row or len(row) <= box_start:
+            continue
+        label = _row_packaging_label(row)
+        label_lower = label.lower()
+
+        if "包装箱长度" in label or ("length" in label_lower and "包装" in label_lower):
+            length_vals = _row_values_by_col(row, sorted_cols)
+            length_unit = detect_length_unit(label)
+        elif "包装箱宽度" in label or ("width" in label_lower and "包装" in label_lower):
+            width_vals = _row_values_by_col(row, sorted_cols)
+            width_unit = detect_length_unit(label)
+        elif "包装箱高度" in label or ("height" in label_lower and "包装" in label_lower):
+            height_vals = _row_values_by_col(row, sorted_cols)
+            height_unit = detect_length_unit(label)
+        elif "包装箱重量" in label or ("weight" in label_lower and "包装" in label_lower):
+            weight_vals = _row_values_by_col(row, sorted_cols)
+            weight_unit = detect_weight_unit(label)
+        elif label_lower in {"箱号", "编号"} or label == "箱号":
+            for col_idx in sorted_cols:
+                fba_ids[col_idx] = str(row[col_idx]).strip() if col_idx < len(row) else ""
+
+    records: List[Dict] = []
+    for col_idx, true_box in column_to_box.items():
+        l_raw = length_vals.get(col_idx, 0.0)
+        w_raw = width_vals.get(col_idx, 0.0)
+        h_raw = height_vals.get(col_idx, 0.0)
+        wt_raw = weight_vals.get(col_idx, 0.0)
+        if l_raw <= 0 and w_raw <= 0 and h_raw <= 0 and wt_raw <= 0:
+            continue
+
+        normalized = normalize_box_spec_row(
+            l_raw, w_raw, h_raw, wt_raw,
+            length_unit=length_unit, width_unit=width_unit,
+            height_unit=height_unit, weight_unit=weight_unit,
+        )
+        if normalized["长(cm)"] <= 0 or normalized["宽(cm)"] <= 0 or normalized["高(cm)"] <= 0:
+            continue
+        if normalized["实重(kg)"] <= 0:
+            continue
+
+        records.append({
+            "仓库代码": warehouse,
+            "箱号": true_box,
+            **normalized,
+            "FBA箱号": fba_ids.get(col_idx, ""),
+        })
+    return records
+
+
+def _row_values_by_col(row: List[str], cols: List[int]) -> Dict[int, float]:
+    return {col: _to_float(row[col]) if col < len(row) else 0.0 for col in cols}
+
+
+def _records_to_box_data(records: List[Dict]) -> BoxData:
+    box_data: BoxData = defaultdict(dict)
+    for rec in records:
+        box = int(rec["箱号"])
+        sku = str(rec["SKU"])
+        qty = int(rec["数量"])
+        box_data[box][sku] = box_data[box].get(sku, 0) + qty
+    return {k: dict(v) for k, v in sorted(box_data.items())}
+
+
+def _box_data_to_items_df(
+    box_data: BoxData,
+    warehouse: str,
+    sku_fnsku: Dict[str, str] | None = None,
+) -> pd.DataFrame:
+    fn_map = sku_fnsku or {}
+    rows = []
+    for box_no, skus in sorted(box_data.items()):
+        for sku, qty in sorted(skus.items()):
+            if qty > 0:
+                rows.append(
+                    {
+                        "仓库代码": warehouse,
+                        "箱号": box_no,
+                        "SKU": sku,
+                        "数量": qty,
+                        "FNSKU": str(fn_map.get(sku, "") or "").strip().upper(),
+                    }
+                )
+    if not rows:
+        return pd.DataFrame(columns=["仓库代码", "箱号", "SKU", "数量", "FNSKU"])
+    return pd.DataFrame(rows)
+
+
+def _extract_fba_box_code(text: str) -> Tuple[str, int]:
+    for token in re.findall(r"FBA[A-Z0-9]+U\d+", text.upper()):
+        m = FBA_BOX_CODE_RE.match(token)
+        if m:
+            return m.group(1).upper(), int(m.group(2))
+    return "", 0
+
+
+def _fba_suffix_to_box_no(cell: str) -> int:
+    m = FBA_BOX_CODE_RE.match(cell.upper())
+    if m:
+        return int(m.group(2))
+    m2 = re.search(r"U0*(\d+)\s*$", cell.upper())
+    return int(m2.group(1)) if m2 else 0
+
+
+def _extract_pdf_sku(text: str) -> str:
+    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+    sku_lines: List[str] = []
+    capture = False
+    for ln in lines:
+        upper = ln.upper()
+        if "SINGLE SKU" in upper or upper.startswith("SKU"):
+            capture = True
+            continue
+        if capture:
+            if re.search(r"(?:QTY|数量|P1\s*-)", ln, flags=re.I):
+                break
+            if re.match(r"^J-[A-Z0-9\-]+$", ln, flags=re.I) or re.match(r"^\d+PCS-FBA$", ln, flags=re.I):
+                sku_lines.append(ln)
+            elif sku_lines:
+                break
+    if sku_lines:
+        joined = "".join(sku_lines).replace(" ", "")
+        if joined.endswith("-FBA") or "PCS" in joined.upper():
+            return joined
+    m = re.search(r"(J-[A-Z0-9\-]+(?:\d+PCS-FBA))", text.replace("\n", ""), flags=re.I)
+    return m.group(1) if m else ""
+
+
+def _extract_pdf_qty(text: str) -> int:
+    m = QTY_RE.search(text)
+    if m:
+        return int(m.group(1))
+    m = re.search(r"数量\s*(\d+)", text)
+    return int(m.group(1)) if m else 0
+
+
+def _find_sku_header(rows: List[List[str]]) -> Tuple[int, int]:
+    for i, row in enumerate(rows):
+        if not row:
+            continue
+        if sku_key(row[0]) != "sku":
+            continue
+        for j, cell in enumerate(row):
+            if BOX_COL_HEADER_RE.search(str(cell)):
+                return i, j
+    return -1, 7
+
+
+def _csv_meta(rows: List[List[str]], label: str) -> str:
+    for row in rows[:20]:
+        if not row:
+            continue
+        if str(row[0]).strip().strip('"') == label and len(row) > 1:
+            return str(row[1]).strip().strip('"')
+    return ""
+
+
+def _warehouse_from_name(text: str) -> str:
+    text = str(text or "").strip()
+    m = WAREHOUSE_SUFFIX_RE.search(text)
+    if m:
+        cand = m.group(1).upper()
+        if not cand.startswith("FBA") and cand not in WAREHOUSE_BLACKLIST:
+            return cand
+
+    for m in WAREHOUSE_STRICT_RE.finditer(text.upper()):
+        cand = m.group(1)
+        if cand.startswith("FBA") or cand in WAREHOUSE_BLACKLIST:
+            continue
+        if re.match(r"^[A-Z]{2,3}\d{1,2}$", cand) or re.match(r"^[A-Z]{4}$", cand):
+            return cand
+    return ""
+
+
+def resolve_optimal_warehouse(csv_warehouse: str, pdf_name: str, pdf_pages: List[PdfBoxPage]) -> str:
+    """多源投票机制确定最终仓库代码（方案 D）"""
+    candidates = {}
+    
+    pdf_text_cands = {}
+    for page in pdf_pages:
+        if getattr(page, "warehouse_code", ""):
+            cand = page.warehouse_code
+            pdf_text_cands[cand] = pdf_text_cands.get(cand, 0) + 1
+    if pdf_text_cands:
+        best_pdf_cand = sorted(pdf_text_cands.items(), key=lambda x: x[1], reverse=True)[0][0]
+        candidates[best_pdf_cand] = candidates.get(best_pdf_cand, 0) + 5
+        
+    if csv_warehouse and csv_warehouse != "UNKN":
+        candidates[csv_warehouse] = candidates.get(csv_warehouse, 0) + 4
+        
+    pdf_file_cand = _warehouse_from_name(pdf_name)
+    if pdf_file_cand:
+        candidates[pdf_file_cand] = candidates.get(pdf_file_cand, 0) + 3
+        
+    if not candidates:
+        return "UNKN"
+        
+    best_warehouse = sorted(candidates.items(), key=lambda x: x[1], reverse=True)[0][0]
+    return best_warehouse
+
+
+_UUID_RE = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|\bwf[0-9a-fA-F-]{8,}", re.I)
+_SCAN_SKIP_LABELS = ("工作流程名称", "工作流程编号", "工作流程 ID", "Workflow")
+
+
+_FILE_WH_RE = re.compile(r"[A-Z]{3}[0-9][A-Z0-9]?")
+
+
+def _warehouse_from_filename(file_name: str) -> str:
+    """文件名里的仓库代码，例如“第一票ONT8.csv” → ONT8（中文与英文相邻也能识别）。
+
+    文件名随手起，误判风险高（如“JAN5批次”“USA1”），所以只接受已知仓库表里的代码
+    （内置白名单 + app_data/config/warehouse_codes.json），不按格式兜底。
+    """
+    from fba_tool.warehouse_codes import known_warehouse_codes
+
+    import os
+
+    stem = os.path.splitext(os.path.basename(str(file_name or "")))[0]
+    for tok in re.findall(r"[A-Za-z0-9]+", stem):
+        t = tok.upper()
+        if _FILE_WH_RE.fullmatch(t) and t in known_warehouse_codes():
+            return t
+    return ""
+
+
+def _scan_text(rows: List[List[str]]) -> str:
+    """头部扫描文本：只看表头上方的“标签,值”元数据行；跳过工作流程 ID 行并去掉 UUID，
+    避免把 UUID 片段（如 bf26）或列名（如 ASIN）误认成仓库代码。"""
+    parts = []
+    for r in rows[:12]:
+        if not r or not any(str(c).strip() for c in r):
+            break
+        if any(str(r[0]).strip().strip('"').startswith(k) for k in _SCAN_SKIP_LABELS):
+            continue
+        parts.append(_UUID_RE.sub(" ", ",".join(r)))
+    return " ".join(parts)
+
+
+def _row_packaging_label(row: List[str]) -> str:
+    for cell in row:
+        text = str(cell or "").strip()
+        if is_packaging_label(text):
+            return text
+    return str(row[0] if row else "").strip()
+
+
+def _to_int(v) -> int:
+    try:
+        s = str(v).strip()
+        if not s:
+            return 0
+        return int(float(s))
+    except Exception:
+        return 0
+
+
+def _to_float(v) -> float:
+    try:
+        s = str(v).strip()
+        if not s:
+            return 0.0
+        return float(s)
+    except Exception:
+        return 0.0

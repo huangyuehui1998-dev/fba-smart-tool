@@ -1,0 +1,628 @@
+{
+ "_note": "领星 MCP search 真实返回（2026-10-16 实测，只保留 toolId/displayName/toolType/inputSchema，去掉 traceId 等）",
+ "tools": {
+  "get_my_sids": {
+   "toolId": "get_my_sids",
+   "displayName": "查询我的店铺列表",
+   "toolType": "read",
+   "inputSchema": {
+    "type": "object",
+    "properties": {}
+   }
+  },
+  "get_multi_platform_shop_list": {
+   "toolId": "get_multi_platform_shop_list",
+   "displayName": "查询多平台店铺列表",
+   "toolType": "read",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "store_id": {
+      "description": "店铺ID数组，用于筛选指定店铺",
+      "type": "array"
+     },
+     "amazon_store_id": {
+      "description": "亚马逊店铺ID数组，用于筛选指定亚马逊店铺",
+      "type": "array"
+     },
+     "platform_code": {
+      "description": "数据量较大，建议先通过platform_code参数筛选特定平台，避免全量返回被截断。平台CODE数组，用于筛选指定平台的店铺。平台CODE枚举: 10001=Amazon, 10002=Shopify, 10003=eBay, 10004=Wish, 10005=AliExpress, 10006=Shopee, 10007=Lazada, 10008=Walmart, 10009=Custom, 10010=Wayfair, 10011=TikTok, 10012=MercadoLibre, 10013=Cdiscount, 10014=NewEgg, 10015=Rakuten, 10016=Shopline, 10017=Teapplix, 10018=Shoplazza, 10019=Ueeshop, 10020=Coupang, 10021=SHEIN平台模式, 10022=Temu, 10024=Temu半托管, 10025=Otto, 10026=Ozon, 10027=SHEIN代运营, 10028=SHEIN半托管, 10029=AliExpress半托管, 10030=AliExpress全托管, 10031=AliExpress海外托管, 10032=Tiktok全托管, 10033=Qoo10, 10034=Mirakl, 10035=Amazon VC, 10036=Kaufland, 10037=Allegro, 10038=Line, 10039=SPS, 10041=阿里国际站, 10042=SPOTTER。注意：若用户提及的平台不在上述列表中，可先不传platform_code调用本接口获取全量数据后从返回的platform_code/platform_name中确认实际编码。",
+      "type": "array"
+     }
+    }
+   }
+  },
+  "erp_listing": {
+   "toolId": "erp_listing",
+   "displayName": "查询 Listing 列表",
+   "toolType": "read",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "search_value": {
+      "description": "搜索字段值，字符串数组；与 search_field 配合使用",
+      "type": "array",
+      "items": {
+       "type": "string"
+      }
+     },
+     "on_sale_time_start": {
+      "description": "开售时间-开始",
+      "type": "string"
+     },
+     "principal_uids": {
+      "description": "负责人ID，多个用逗号隔开",
+      "type": "string"
+     },
+     "offset": {
+      "default": 0,
+      "description": "分页偏移量，起始为0",
+      "type": "integer"
+     },
+     "length": {
+      "default": 20,
+      "description": "每页长度",
+      "type": "integer"
+     },
+     "open_date_end": {
+      "description": "创建时间-结束",
+      "type": "string"
+     },
+     "on_sale_time_end": {
+      "description": "开售时间-结束",
+      "type": "string"
+     },
+     "exact_search": {
+      "default": "0",
+      "description": "是否精确搜索，0-模糊，1-精确",
+      "type": "string"
+     },
+     "sids": {
+      "description": "店铺ID，多个用逗号隔开",
+      "type": "string"
+     },
+     "sort_type": {
+      "description": "排序类型，desc-倒序，asc-正序",
+      "type": "string"
+     },
+     "uid": {
+      "description": "用户ID",
+      "type": "string"
+     },
+     "fulfillment_channel_type": {
+      "description": "配送方式，FBA或FBM",
+      "type": "string"
+     },
+     "sort_field": {
+      "description": "排序字段，可选值：msku, asin, parent_asin, local_sku, afn_fulfillable_quantity, seller_rank, review_num, open_date_time, status, total_volume, on_sale_time, yesterday_volume, seven_volume, fourteen_volume, thirty_volume 等",
+      "type": "string"
+     },
+     "is_pair": {
+      "description": "是否配对",
+      "type": "string"
+     },
+     "open_date_start": {
+      "description": "创建时间-开始",
+      "type": "string"
+     },
+     "pvi_ids": {
+      "description": "属性值ID，多个英文逗号隔开",
+      "type": "string"
+     },
+     "mids": {
+      "description": "国家ID，多个用逗号隔开",
+      "type": "string"
+     },
+     "is_resale": {
+      "description": "是否筛选重售商品，1-是，2-否",
+      "type": "number"
+     },
+     "bid": {
+      "description": "品牌ID，多个用逗号隔开",
+      "type": "string"
+     },
+     "cid": {
+      "description": "分类ID，多个用逗号隔开",
+      "type": "string"
+     },
+     "search_field": {
+      "description": "搜索字段，例如 msku-MSKU、brand-亚马逊品牌",
+      "type": "string"
+     },
+     "status": {
+      "description": "listing状态，多个用逗号隔开",
+      "type": "string"
+     }
+    },
+    "required": [
+     "offset",
+     "length",
+     "pvi_ids"
+    ]
+   }
+  },
+  "get_fba_stock_list": {
+   "toolId": "get_fba_stock_list",
+   "displayName": "查询 FBA 仓库库存",
+   "toolType": "read",
+   "inputSchema": {
+    "additionalProperties": false,
+    "type": "object",
+    "properties": {
+     "search_value": {
+      "description": "搜索值",
+      "type": "string"
+     },
+     "asin_principal": {
+      "description": "Listing负责人uid，对应[查询ERP用户信息列表](docs/BasicData/AccoutLists)uid字段 多个使用,分隔",
+      "type": "string"
+     },
+     "is_hide_zero_stock": {
+      "description": "是否隐藏零库存行: 0 不隐藏零库存行 1 隐藏零库存行",
+      "type": "string"
+     },
+     "offset": {
+      "description": "分页偏移量，默认0",
+      "type": "integer"
+     },
+     "senior_search_list": {
+      "description": "高级搜索列表，详情见附加说明",
+      "type": "string"
+     },
+     "is_parant_asin_merge": {
+      "description": "是否合并父ASIN: 0 不合并父ASIN 1 合并父ASIN",
+      "type": "string"
+     },
+     "length": {
+      "description": "分页长度，默认20，仅支持20、50、100、200、500、1000、2000、5000",
+      "type": "integer"
+     },
+     "is_cost_page": {
+      "default": 0,
+      "description": "成本页面标识，默认 0。",
+      "type": "integer"
+     },
+     "sid": {
+      "description": "店铺id（支持多个，使用,分隔）",
+      "type": "string"
+     },
+     "fulfillment_channel_type": {
+      "description": "配送方式: FBA FBM",
+      "type": "string"
+     },
+     "attribute": {
+      "description": "属性",
+      "type": "string"
+     },
+     "bid": {
+      "description": "品牌",
+      "type": "string"
+     },
+     "is_contain_del_ls": {
+      "description": "是否显示已删除Listing: 0 不显示已删除Listing 1 显示已删除Listing",
+      "type": "string"
+     },
+     "search_field": {
+      "description": "搜索维度: sku product_name seller_sku fnsku asin parent_asin spu spu_name",
+      "type": "string"
+     },
+     "cid": {
+      "description": "分类",
+      "type": "string"
+     },
+     "status": {
+      "description": "在售状态: 0 停售 1 在售",
+      "type": "string"
+     },
+     "query_fba_storage_quantity_list": {
+      "default": false,
+      "description": "true 是、false 否；默认false，如果传入true,则出参数据中的欧洲共享仓会将出参字段-fba_storage_quantity_list的值返回",
+      "type": "boolean"
+     }
+    }
+   }
+  },
+  "query_fba_valid_list": {
+   "toolId": "query_fba_valid_list",
+   "displayName": "查询 FBA 补货建议",
+   "toolType": "read",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "parentAsin": {
+      "description": "父ASIN，dataType=4时才有",
+      "type": "string"
+     },
+     "fulfillmentChannelType": {
+      "default": "FBA",
+      "description": "配送方式，默认FBA",
+      "type": "string"
+     },
+     "seniorSearchList": {
+      "default": [],
+      "description": "高级搜索列表，默认空数组",
+      "type": "array"
+     },
+     "offset": {
+      "default": 0,
+      "description": "分页偏移量，默认0",
+      "type": "integer"
+     },
+     "productId": {
+      "description": "产品ID，dataType=3时才有",
+      "type": "integer"
+     },
+     "searchField": {
+      "default": "asin",
+      "description": "搜索字段，默认asin",
+      "type": "string"
+     },
+     "star": {
+      "default": "0",
+      "description": "星标筛选，默认0",
+      "type": "string"
+     },
+     "cidList": {
+      "default": [],
+      "description": "分类ID列表，默认空数组",
+      "type": "array"
+     },
+     "dataType": {
+      "default": 1,
+      "description": "基础数据类型。1-asin，2-msku，3-sku，4-父asin",
+      "type": "integer",
+      "enum": [
+       1,
+       2,
+       3,
+       4
+      ]
+     },
+     "length": {
+      "default": 20,
+      "description": "每页长度，默认20",
+      "type": "integer"
+     },
+     "searchDate": {
+      "default": "sugDatePurchase",
+      "description": "搜索日期字段，默认sugDatePurchase",
+      "type": "string"
+     },
+     "hashId": {
+      "description": "hashId，dataType=1或2时才有",
+      "type": "string"
+     },
+     "listingStatusList": {
+      "default": [],
+      "description": "Listing状态列表，默认空数组",
+      "type": "array"
+     },
+     "rangeSelectList": {
+      "default": [],
+      "description": "范围筛选列表，默认空数组",
+      "type": "array"
+     },
+     "bidList": {
+      "default": [],
+      "description": "品牌ID列表，默认空数组",
+      "type": "array"
+     },
+     "sortKey": {
+      "default": "",
+      "description": "排序key，默认空字符串",
+      "type": "string"
+     },
+     "restockStatus": {
+      "default": [
+       0
+      ],
+      "description": "补货状态，默认[0]，0-正常补货，1-暂不补货",
+      "type": "array"
+     },
+     "sortType": {
+      "default": "desc",
+      "description": "排序类型，默认desc",
+      "type": "string"
+     },
+     "analysisMode": {
+      "default": 2,
+      "description": "补货建议模式。1-普通模式，2-海外仓中转模式",
+      "type": "integer",
+      "enum": [
+       1,
+       2
+      ]
+     },
+     "sortField": {
+      "default": "estimatedSaleAvgQuantity",
+      "description": "排序字段，默认estimatedSaleAvgQuantity",
+      "type": "string"
+     },
+     "storeIdList": {
+      "default": [],
+      "description": "店铺ID列表，默认空数组",
+      "type": "array"
+     },
+     "principalUidList": {
+      "default": [],
+      "description": "负责人UID列表，默认空数组",
+      "type": "array"
+     },
+     "searchValue": {
+      "default": "",
+      "description": "搜索值，默认空字符串",
+      "type": "string"
+     },
+     "tagIdList": {
+      "default": [],
+      "description": "标签ID列表，默认空数组",
+      "type": "array"
+     }
+    }
+   }
+  },
+  "query_product_performance_asin_lists": {
+   "toolId": "query_product_performance_asin_lists",
+   "displayName": "查询 ASIN 维度产品表现",
+   "toolType": "read",
+   "inputSchema": {
+    "type": "object",
+    "properties": {
+     "end_date": {
+      "description": "结束日期，格式yyyy-MM-dd",
+      "type": "string"
+     },
+     "date_type": {
+      "default": "purchase",
+      "description": "时间筛选类型，purchase-下单时间，settlement-结算时间",
+      "type": "string",
+      "enum": [
+       "purchase",
+       "settlement"
+      ]
+     },
+     "date_view_type": {
+      "description": "日期维度展示，可选值：day-日, week-周, month-月",
+      "type": "string"
+     },
+     "regions": {
+      "default": [],
+      "description": "区域列表",
+      "type": "array"
+     },
+     "summary_field": {
+      "default": "asin",
+      "description": "汇总行维度，可选值：asin, parent_asin, msku, sku, spu",
+      "type": "string",
+      "enum": [
+       "asin",
+       "parent_asin",
+       "msku",
+       "sku",
+       "spu"
+      ]
+     },
+     "developers": {
+      "default": [],
+      "description": "开发人员列表",
+      "type": "array"
+     },
+     "gtag_ids": {
+      "default": [],
+      "description": "商品标签ID列表",
+      "type": "array"
+     },
+     "purchase_status": {
+      "default": 0,
+      "description": "采购状态，0-全部",
+      "type": "integer"
+     },
+     "sub_summary_type": {
+      "description": "Tab下子汇总行维度，可选值：category, listing_tag, asin, sku",
+      "type": "string"
+     },
+     "first_order_start_time": {
+      "description": "首单开始时间",
+      "type": "string"
+     },
+     "first_order_end_time": {
+      "description": "首单结束时间",
+      "type": "string"
+     },
+     "currency_code": {
+      "default": "CNY",
+      "description": "货币，如CNY、USD",
+      "type": "string"
+     },
+     "date_range_type": {
+      "default": 0,
+      "description": "日期范围类型，0-自定义",
+      "type": "integer"
+     },
+     "date_view_order_type": {
+      "description": "分组类型，1-按时间分组，2-按ASIN分组，0-不分组",
+      "type": "integer"
+     },
+     "sids": {
+      "default": "",
+      "description": "店铺ID，多个用逗号隔开",
+      "type": "string"
+     },
+     "owner_uids": {
+      "default": [],
+      "description": "负责人UID列表",
+      "type": "array"
+     },
+     "mids": {
+      "default": "",
+      "description": "国家ID，多个用逗号隔开",
+      "type": "string"
+     },
+     "is_resale": {
+      "default": "",
+      "description": "是否筛选重售商品",
+      "type": "string"
+     },
+     "product_states": {
+      "default": [],
+      "description": "产品状态列表",
+      "type": "array"
+     },
+     "summary_field_level2": {
+      "default": "",
+      "description": "自定义维度第二个下拉框，可选值：country, mid",
+      "type": "string"
+     },
+     "cids": {
+      "default": [],
+      "description": "分类ID列表",
+      "type": "array"
+     },
+     "summary_field_level1": {
+      "default": "asin",
+      "description": "自定义维度第一个下拉框，可选值：asin, parent_asin, msku, spu, sku, principal, developer",
+      "type": "string"
+     },
+     "ad_cost_type": {
+      "default": "",
+      "description": "广告费用类型",
+      "type": "string"
+     },
+     "start_date": {
+      "description": "开始日期，格式yyyy-MM-dd",
+      "type": "string"
+     },
+     "delivery_methods": {
+      "default": [],
+      "description": "配送方式列表，如FBA、FBM",
+      "type": "array"
+     },
+     "search_value": {
+      "default": [],
+      "description": "搜索值，数组格式",
+      "type": "array"
+     },
+     "is_recently_enum": {
+      "default": false,
+      "description": "是否仅查询近期数据",
+      "type": "boolean"
+     },
+     "principal_uids": {
+      "default": [],
+      "description": "负责人UID列表",
+      "type": "array"
+     },
+     "turn_on_summary": {
+      "default": 1,
+      "description": "是否开启汇总，1-开启 0-不开启，SKU维度请设置为1",
+      "type": "integer"
+     },
+     "offset": {
+      "default": 0,
+      "description": "分页偏移量，起始为0",
+      "type": "integer"
+     },
+     "parent_key": {
+      "description": "需要展开时填入",
+      "type": "string"
+     },
+     "date_sort_type": {
+      "description": "时间排序方式，desc-倒序，asc-正序",
+      "type": "string"
+     },
+     "listing_end_cdate": {
+      "description": "Listing创建结束时间",
+      "type": "string"
+     },
+     "order_types": {
+      "default": [],
+      "description": "订单类型列表",
+      "type": "array"
+     },
+     "length": {
+      "default": 20,
+      "description": "每页长度",
+      "type": "integer"
+     },
+     "auto_tags": {
+      "default": [],
+      "description": "自动标签列表",
+      "type": "array"
+     },
+     "listing_start_cdate": {
+      "description": "Listing创建开始时间",
+      "type": "string"
+     },
+     "sort_type": {
+      "default": "desc",
+      "description": "排序类型，desc-倒序，asc-正序",
+      "type": "string",
+      "enum": [
+       "desc",
+       "asc"
+      ]
+     },
+     "is_grandchild": {
+      "description": "展开级别，0-第一级展开，1-第二级展开",
+      "type": "integer"
+     },
+     "promotions": {
+      "default": [],
+      "description": "促销活动列表",
+      "type": "array"
+     },
+     "extend_search": {
+      "default": [],
+      "description": "扩展搜索条件",
+      "type": "array"
+     },
+     "sort_field": {
+      "default": "volume",
+      "description": "排序字段，可选值：volume-销量, sales_amount-销售额, profit-利润, order_num-订单数, msku, asin, parent_asin, local_sku",
+      "type": "string"
+     },
+     "query_order_profit": {
+      "default": false,
+      "description": "是否查询订单利润",
+      "type": "boolean"
+     },
+     "only_query_today": {
+      "default": false,
+      "description": "是否仅查询今天数据",
+      "type": "boolean"
+     },
+     "bids": {
+      "default": [],
+      "description": "品牌ID列表",
+      "type": "array"
+     },
+     "attr_value_ids": {
+      "default": [],
+      "description": "属性值ID列表",
+      "type": "array"
+     },
+     "search_field": {
+      "default": "asin",
+      "description": "搜索字段，可选值：spu, spu_name, model, parent_asin, asin, msku, item_name, local_sku, local_name",
+      "type": "string",
+      "enum": [
+       "spu",
+       "spu_name",
+       "model",
+       "parent_asin",
+       "asin",
+       "msku",
+       "item_name",
+       "local_sku",
+       "local_name"
+      ]
+     }
+    },
+    "required": [
+     "offset",
+     "length"
+    ]
+   }
+  }
+ }
+}

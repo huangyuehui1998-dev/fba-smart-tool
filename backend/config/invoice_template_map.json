@@ -1,0 +1,390 @@
+{
+  "version": 1,
+  "_说明": "S4 发票模板映射（D-2026-10-16-04 / -08 / -09）。可在用户配置目录放同名文件按模板 id 覆盖任意字段。label 匹配规则：去掉空白、*、全角括号后，表头等于 label 优先，否则以 label 开头。",
+  "meanings": {
+    "qty_meaning": {
+      "per_box": "每箱数量（× 区间箱数）",
+      "row_total": "这一行的合计数量"
+    },
+    "weight_meaning": {
+      "per_box": "单箱重量",
+      "per_unit": "单件（单个商品）重量 × 每箱数量 = 单箱重",
+      "range_total": "这一行箱号区间的合计重量",
+      "ticket_total": "整票总重量"
+    },
+    "warehouse_prefer": {
+      "filename": "表内仓库和文件名仓库不一致时取文件名",
+      "sheet": "取表内"
+    },
+    "box_count_source": {
+      "forecast_if_conflict": "箱号区间超出预报件数时以预报件数为准",
+      "range": "以箱号区间为准"
+    }
+  },
+  "templates": {
+    "T1": {
+      "name": "九方·下单模板（新）",
+      "forwarder": "九方",
+      "decision": "盘点 S4a：表内有“是否九方进口商”“交货方式=九方提货”；运费表第10批 FBA19HPYMVDM 等记录为九方",
+      "detect": {
+        "sheets": [
+          "下单",
+          "渠道名称列表"
+        ],
+        "labels": [
+          "是否九方进口商",
+          "货箱编号"
+        ]
+      },
+      "sheet": "下单",
+      "header_label": "货箱编号",
+      "fields": {
+        "warehouse": {
+          "label": "仓库代码",
+          "at": "right"
+        },
+        "forecast_boxes": {
+          "label": "总箱数",
+          "at": "right"
+        }
+      },
+      "columns": {
+        "box_range": "货箱编号",
+        "shipment_id": "唛头",
+        "reference_id": "ReferenceID",
+        "weight": "货箱重量",
+        "length": "货箱长度",
+        "width": "货箱宽度",
+        "height": "货箱高度",
+        "sku": "SKU",
+        "english_name": "英文品名",
+        "chinese_name": "中文品名",
+        "brand": "品牌",
+        "model": "型号",
+        "material": "材质",
+        "purpose": "用途",
+        "hs_code": "清关编码",
+        "qty": "总数量",
+        "unit": "单位",
+        "unit_price": "申报单价"
+      },
+      "qty_meaning": "row_total",
+      "weight_meaning": "range_total",
+      "warehouse_prefer": "filename",
+      "box_count_source": "forecast_if_conflict"
+    },
+    "T2": {
+      "name": "SEND Invoice Template",
+      "forwarder": "SEND",
+      "decision": "盘点 S4a：A1“SEND箱单发票模板”；运费表第13批渠道“亚马逊SEND”",
+      "detect": {
+        "labels": [
+          "SEND箱单发票模板",
+          "FBA Shipment ID"
+        ]
+      },
+      "sheet_index": 0,
+      "header_label": "箱号Box",
+      "fields": {
+        "shipment_id": {
+          "label": "FBA Shipment ID",
+          "at": "right"
+        }
+      },
+      "columns": {
+        "box_range": "箱号",
+        "weight": "重量",
+        "reference_id": "ReferenceID",
+        "sku": "SKU",
+        "qty": "SKU个数",
+        "english_name": "英文品名",
+        "chinese_name": "中文品名",
+        "brand": "品牌",
+        "material": "材质",
+        "purpose": "用途",
+        "model": "型号",
+        "hs_code": "目的港清关编码",
+        "unit": "单位",
+        "unit_price": "申报单价"
+      },
+      "qty_meaning": "row_total",
+      "weight_meaning": "per_box",
+      "warehouse_prefer": "filename",
+      "box_count_source": "range"
+    },
+    "T3": {
+      "name": "Commercial Invoice（9810 单证报关版）",
+      "forwarder": "德速",
+      "decision": "D-2026-10-16-09 第1点：运费表“FBA运费-记录”第22–26行（第2批 FBA19CG4R0LP 等）、第52–56行（第9批 FBA19GQXZW0N 等）货代=德速，渠道“美西极速达/快船准时达”与模板渠道一致；可信度高",
+      "detect": {
+        "sheets": [
+          "发票填写模板",
+          "渠道能力"
+        ],
+        "labels": [
+          "Commercial Invoice",
+          "箱号段(起始-结束)"
+        ]
+      },
+      "sheet": "发票填写模板",
+      "header_label": "Shipment ID",
+      "fields": {
+        "shipment_id": {
+          "label": "参考号",
+          "at": "right"
+        },
+        "warehouse": {
+          "label": "目的仓库代码",
+          "at": "right"
+        },
+        "forecast_boxes": {
+          "label": "总件数",
+          "at": "right"
+        },
+        "order_no": {
+          "label": "订单号",
+          "at": "right"
+        }
+      },
+      "columns": {
+        "shipment_id": "ShipmentID",
+        "reference_id": "ReferenceID",
+        "box_range": "箱号段",
+        "sku": "SKU",
+        "english_name": "英文品名",
+        "chinese_name": "中文品名",
+        "hs_code": "海关编码",
+        "brand": "Brand",
+        "material": "材质",
+        "purpose": "用途",
+        "model": "型号",
+        "qty": "每箱数量",
+        "unit": "单位",
+        "unit_price": "申报单价",
+        "weight": "单箱重量",
+        "length": "单箱长",
+        "width": "单箱宽",
+        "height": "单箱高"
+      },
+      "qty_meaning": "per_box",
+      "weight_meaning": "per_box",
+      "warehouse_prefer": "filename",
+      "box_count_source": "forecast_if_conflict",
+      "notes": "第9批“单箱重量”实际填的是单件重（1.7025 × 4 = 6.81 = CSV 单箱重 15.01 lb），默认仍按表头读，导入时用货件 CSV 自动纠正；第2批一行写多个 SKU，数量列是该行合计（=运费表数量 55）"
+    },
+    "T4": {
+      "name": "COMMERCIAL INVOICE 下单模板（旧）",
+      "forwarder": "九方",
+      "decision": "D-2026-10-16-09 第1点：运费表第32–36行（第4批 FBA19F46QLMY/F46KLD1/F4BDYRN/F48J3TQ/F49MKQW）货代=九方，备注里有九方 LCL 单号；第4批目录有九方“LCL2605RX78 青岛(黄岛)仓入仓单”；渠道名称列表与 T1 相同；可信度高",
+      "detect": {
+        "sheets": [
+          "下单模板"
+        ],
+        "labels": [
+          "COMMERCIAL INVOICE & Packing List",
+          "箱号段(起始~结束)"
+        ],
+        "_说明": "S8 D3：去掉“渠道名称列表”——第4批原件只有“下单模板”一张表（另外几张是货代下发时才带的说明页），靠两个表头标签区分 T1/T4"
+      },
+      "sheet": "下单模板",
+      "header_label": "Shipment ID",
+      "fields": {
+        "warehouse": {
+          "label": "仓库代码",
+          "at": "right"
+        }
+      },
+      "columns": {
+        "shipment_id": "ShipmentID",
+        "reference_id": "ReferenceID",
+        "box_range": "箱号段",
+        "box_count": "总箱数",
+        "sku": "SKU",
+        "english_name": "英文品名",
+        "chinese_name": "中文品名",
+        "brand": "Brand",
+        "material": "材质",
+        "purpose": "用途",
+        "hs_code": "清关编码",
+        "model": "型号",
+        "qty": "总数量",
+        "unit": "单位",
+        "unit_price": "申报单价",
+        "weight": "单箱重量",
+        "length": "长",
+        "width": "宽",
+        "height": "高"
+      },
+      "qty_meaning": "row_total",
+      "weight_meaning": "per_box",
+      "warehouse_prefer": "filename",
+      "box_count_source": "range"
+    },
+    "T5": {
+      "name": "下单模板 黄底信息必填（单行汇总）",
+      "forwarder": "琪珞",
+      "decision": "D-2026-10-16-09 第1点：运费表第27–31行（第3批 FBA19DGT9N5J 等）、第37–41行（第5批 FBA19FS81Y33 等）货代=琪珞，渠道“合德以星卡派”与模板走货渠道“O-合德/以星统配卡派”一致；可信度高",
+      "detect": {
+        "sheets": [
+          "Sheet1",
+          "渠道"
+        ],
+        "labels": [
+          "黄底信息必填",
+          "海关编码(多个用,隔开)"
+        ]
+      },
+      "sheet": "Sheet1",
+      "header_label": "海关编码(多个用",
+      "fields": {
+        "shipment_id": {
+          "label": "FBA单号",
+          "at": "right"
+        },
+        "warehouse": {
+          "label": "仓库代码",
+          "at": "below"
+        }
+      },
+      "columns": {
+        "hs_code": "海关编码",
+        "chinese_name": "中文品名",
+        "english_name": "英文品名",
+        "material": "材料",
+        "purpose": "用途",
+        "brand": "品牌",
+        "qty": "个数",
+        "unit_price": "单个货值",
+        "box_count": "件数",
+        "length": "单件长",
+        "width": "单件宽",
+        "height": "单件高",
+        "weight": "总实重"
+      },
+      "multi_value_sep": ",，",
+      "qty_meaning": "row_total",
+      "weight_meaning": "ticket_total",
+      "warehouse_prefer": "filename",
+      "box_count_source": "range",
+      "blank_variant": "T7"
+    },
+    "T6": {
+      "name": "琪珞 FBA专线导入模版",
+      "forwarder": "琪珞",
+      "decision": "盘点 S4a + 运费表第42–51行（第6、7批）货代=琪珞；“单件实重”列含义不固定（D-2026-10-16-09 第2点，S4-fix1 重写）：第7批 5 票是单箱重、第6批 5 票是单件重，不设默认，由货件 CSV Σ单箱重判定；第6批第1票箱数 6、第5票仓库 MGE3 见第3–4点",
+      "detect": {
+        "sheets": [
+          "发票",
+          "！"
+        ],
+        "labels": [
+          "FBA专线导入模版",
+          "单件实重"
+        ]
+      },
+      "sheet": "发票",
+      "header_label": "箱序号",
+      "fields": {
+        "shipment_id": {
+          "label": "FBA",
+          "at": "right"
+        },
+        "warehouse": {
+          "label": "仓库代码",
+          "at": "right"
+        },
+        "forecast_boxes": {
+          "label": "预报件数",
+          "at": "right"
+        }
+      },
+      "columns": {
+        "box_range": "箱序号",
+        "shipment_id": "FBAID",
+        "reference_id": "POAnumber",
+        "chinese_name": "物品中文名",
+        "english_name": "物品英文名",
+        "qty": "单箱内数量",
+        "unit_price": "申报单价",
+        "material": "材质",
+        "purpose": "用途",
+        "brand": "品牌",
+        "model": "型号",
+        "hs_code": "海关编码",
+        "weight": "单件实重",
+        "length": "长",
+        "width": "宽",
+        "height": "高"
+      },
+      "qty_meaning": "per_box",
+      "weight_meaning": null,
+      "warehouse_prefer": "filename",
+      "box_count_source": "forecast_if_conflict",
+      "notes": "“件”在本模板（预报件数）和报关单填制规范第二十四条里都指运输包装件数，所以“单件实重”= 单箱重；第6批填成了单件商品重，导入时用货件 CSV 自动纠正",
+      "weight_meaning_note": "null = 不默认，由货件 CSV 判定（csv_decides）；可在用户配置或 overrides 里手动指定"
+    },
+    "T7": {
+      "name": "义乌、宁波运单下单模板（空白）",
+      "forwarder": "琪珞",
+      "decision": "结构与 T5 相同，是 T5 的空白版；按 T5 解析，不单独维护映射",
+      "parse_as": "T5",
+      "detect": {
+        "same_as": "T5"
+      }
+    },
+    "T8": {
+      "name": "九方系统导出 箱单发票",
+      "forwarder": "九方",
+      "decision": "盘点 S4a：文件名 LCL 订单号、“Order#（九方系统订单号）”",
+      "detect": {
+        "sheets": [
+          "Invoice",
+          "Packing list"
+        ],
+        "labels": [
+          "Order#（九方系统订单号）",
+          "*Shipment ID"
+        ]
+      },
+      "parser": "jiufang_export",
+      "invoice": {
+        "sheet": "Invoice",
+        "header_label": "Shipment ID",
+        "fields": {
+          "warehouse": {
+            "label": "FBA CODE",
+            "at": "right"
+          }
+        },
+        "columns": {
+          "shipment_id": "ShipmentID",
+          "reference_id": "ReferenceID",
+          "sku": "SKU",
+          "english_name": "GoodsofDescription",
+          "chinese_name": "中文品名",
+          "brand": "Brand",
+          "model": "Model",
+          "material": "Material",
+          "purpose": "Purpose",
+          "hs_code": "H.S.Code",
+          "qty": "Unit个数",
+          "unit": "单位",
+          "unit_price": "UnitPrice"
+        }
+      },
+      "packing": {
+        "sheet": "Packing list",
+        "header_label": "Shipment ID",
+        "columns": {
+          "shipment_id": "ShipmentID",
+          "cartons": "Carton",
+          "weight": "G.W"
+        }
+      },
+      "qty_meaning": "row_total",
+      "weight_meaning": "per_box",
+      "warehouse_prefer": "sheet",
+      "box_count_source": "range"
+    }
+  }
+}

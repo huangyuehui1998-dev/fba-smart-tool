@@ -1,0 +1,92 @@
+{
+  "_说明": "领星字段映射。listing 段的键名已用领星 MCP erp_listing（只读）实际返回核对过（2026-10-16）。excel_headers 是领星后台导出 Excel/CSV 的列名候选，【待用户提供导出样本核对】。",
+  "listing": {
+    "sku": [
+      "msku"
+    ],
+    "local_sku": [
+      "local_sku"
+    ],
+    "fnsku": [
+      "fnsku"
+    ],
+    "asin": [
+      "asin"
+    ],
+    "parent_asin": [
+      "parent_asin"
+    ],
+    "english_name": [
+      "item_name"
+    ],
+    "local_name": [
+      "local_name"
+    ],
+    "fulfillment_channel": [
+      "fulfillment_channel_type"
+    ],
+    "listing_status": [
+      "status_text"
+    ],
+    "listing_price": [
+      "listing_price",
+      "price",
+      "landed_price"
+    ],
+    "listing_price_currency": [
+      "listing_price_currency_code",
+      "currency_symbol"
+    ],
+    "_不用作申报价": {
+      "list_price": "亚马逊划线价（List Price），不是实际售价",
+      "regular_price": "常规价，促销期间可能高于实际售价",
+      "landed_price": "含运费到手价；FBA 下 shipping=0 时与 listing_price 相同，只做兜底",
+      "b2b_price": "企业购价格"
+    }
+  },
+  "excel_headers": {
+    "sku": [
+      "MSKU",
+      "msku",
+      "Seller SKU",
+      "卖家SKU"
+    ],
+    "fnsku": [
+      "FNSKU",
+      "fnsku"
+    ],
+    "asin": [
+      "ASIN",
+      "asin"
+    ],
+    "local_sku": [
+      "SKU",
+      "本地SKU",
+      "品名SKU"
+    ],
+    "listing_price": [
+      "价格",
+      "售价",
+      "Listing价格",
+      "listing_price",
+      "Price"
+    ],
+    "listing_price_currency": [
+      "币种",
+      "货币",
+      "货币符号"
+    ],
+    "local_name": [
+      "品名",
+      "本地品名",
+      "local_name"
+    ]
+  },
+  "carton": {
+    "available_in_mcp": false,
+    "_说明": "领星 MCP 当前 276 个工具里没有本地产品/箱规查询接口；装箱任务接口（warehouse_packing_task_list）本账号 0 条。箱规走 xlsx 批量导入（templates/箱规导入模板.xlsx）。"
+  },
+  "_currency": "币种统一存 ISO 代码：只给 currency_symbol=\"$\" 时存 USD（lingxing_adapter.normalize_currency）。",
+  "_来源": "用户决定（依据 docs/用户决策记录.md D-2026-10-16-01（06:04 对话原话 + 06:27 书面确认，美东））：Listing 数据以领星 MCP erp_listing 拉取为主要来源（预览确认后写入），Excel/CSV 文件导入只作备用。",
+  "_申报价": "用户决定（依据 docs/用户决策记录.md D-2026-10-16-01（06:04 对话原话 + 06:27 书面确认，美东））：申报价 = 领星 listing_price > 手填 declared_value > 领星 price/landed_price > 旧 declared_value；领星售价不受手填锁定。 手填价未采用时导出一律提示 manual_price_not_used。"
+}

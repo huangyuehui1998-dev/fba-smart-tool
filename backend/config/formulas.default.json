@@ -1,0 +1,21 @@
+{
+  "internal": {
+    "carton_count": "={total_col}{row}/{carton_col}{row}",
+    "check_qty": "=SUM({first_box_col}{row}:{last_box_col}{row})",
+    "volume": "={col}{length_row}*{col}{width_row}*{col}{height_row}/{volume_divisor}",
+    "gross_lb": "={col}{weight_row}*{internal_gross_lb_factor}",
+    "width_in": "={col}{width_row}/{inch_to_cm_factor}",
+    "length_in": "={col}{length_row}/{inch_to_cm_factor}",
+    "height_in": "={col}{height_row}/{inch_to_cm_factor}",
+    "sum_weight_row": "=SUM({first_box_col}{weight_row}:{last_box_col}{weight_row})",
+    "sum_volume_row": "=SUM({first_box_col}{volume_row}:{last_box_col}{volume_row})"
+  },
+  "sta": {
+    "packed_qty": "=SUM({first_box_col}{row}:INDEX({first_box_col}{row}:XFD{row},1,{box_count_ref}))",
+    "box_header": "=IF({box_count_ref}>={box_no},\"单箱 {box_no} 装箱\",\"\")",
+    "box_type": "=IF({box_count_ref}>={box_no},\"{sta_box_prefix}{box_no}\",\"\")"
+  },
+  "labels": {
+    "internal_box_header": "第{box_no}箱"
+  }
+}

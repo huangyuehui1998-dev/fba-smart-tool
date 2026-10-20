@@ -1,0 +1,249 @@
+FBA Smart Tool — 整体工作流与运行逻辑
+==========================================
+
+【现行补充（s8-docs，2026-10-16，按 tag s8-fix1 代码核对）】
+本文正文写于早期版本，以下几点已变化，以本段和《FBA_Smart_Tool_代码架构定位手册.md》§7（17 个 router 全表）、
+《用户使用说明.md》为准：
+- 端口：开发后端 127.0.0.1:8000–8099、前端 Vite 5173–5199；便携版 127.0.0.1:8002 起（8002–8011、18002–18019），
+  端口写在数据目录的 .server_port。环境变量 FBA_APP_DATA_DIR 换数据目录，FBA_NO_BROWSER=1 不自动开浏览器。
+- Step 2 尾数：/api/tail_pool 只算尾数池，不再回退重排；/api/box/assign_tail 在 SKU 不在清单、无尾数、
+  分配数大于剩余尾数、目标箱号大于最大箱号+1 时返回 400。Step 3 箱单件数超过计划时内部表/亚马逊表导出返回 400。
+- Step 3.5 分仓：仓库代码以货件 CSV 为准（resolve_routing_warehouse），文件名兜底；冲突警告随 /api/routing/preview
+  的响应头 X-Routing-Warnings 返回；导出空数据返回 400「数据为空：请先生成货代表预览」。
+- Step 4：同一货件 CSV 或箱唛 PDF 传两份 → 校验失败「❌ 重复上传」。
+- Step 4.5：按货代模板导出（/api/invoice-export/*：SEND、九方、琪珞 T6/T5、德速 T3；未知货代 422「不支持该货代」）；
+  “识别货代发票模板”面板（/api/invoice-templates/*）识别 T1–T8。德速/琪珞 T6 重量口径：面板选择 > 上传货代原件
+  按货件 CSV 核对 > 配置 invoice_export.weight_basis > 留空并提示 weight_basis_undecided；单件重 = 箱重 ÷ 箱内件数。
+  旧的 /api/invoice/generate（模板填格 + 可选 DeepSeek）仍在。
+- 申报价：D-01 经 D-12 修订（product_fields.resolve_declared_price）：正常价 = 领星 regular_price，没有就用 90 天内
+  最后一次非促销价；领星现价比正常价低 5% 以上视为促销，按正常价申报并提示 promo_price_not_used；不用 list_price。
+  已不再用“采购价 ÷ 6.8”。
+- Step 5 报关：customs_package / customs_export；HS 必须 8 或 10 位数字（hs_code.py），钓具参考编码
+  GET /api/master-data/hs-presets（只做参考）。
+- 主数据：PATCH /api/master-data/sku/{sku} 对不存在的 SKU 返回 404（带 ?create=true 才新建），HS 格式错或数字字段
+  非数字返回 400。领星同步只用只读工具（lingxing_scheduler.READ_ONLY_TOOLS），预览里乱码 SKU/缺 FNSKU/ASIN 的
+  进“需复核”组默认不勾；定时同步在侧栏设置。
+- PDF 标签：尺寸 10–600 mm、非 PDF/坏 PDF/base64 损坏都返回 400。
+- 配置：出厂默认 backend/config/*.default.json，个人设置在 app_data/config；user_settings.json / formulas.json
+  写坏时 GET /api/config/errors 报出，界面顶部黄色横幅提示，改好或删除坏文件后刷新消失。
+--------------------------------------------------------------------------------
+
+一、系统架构
+------------
+
+[浏览器 localhost:8080]
+  React + TanStack Router (UI)
+  WorkflowContext (全局状态)
+  localStorage (工作流自动保存)
+       |
+       | fetch /api/*
+       v
+[FastAPI localhost:8002]
+  main.py 路由层
+  fba_tool 业务模块
+  SQLite fba_master.db (产品主数据库)
+  user_settings.json (抛重系数等)
+
+层级说明：
+  前端  | Vite + React + TanStack Router | 五步工作流 UI、侧边栏设置、主数据库页
+  状态  | WorkflowContext                | 跨步骤共享 SKU、装箱方案、货件、发票等
+  后端  | FastAPI + pandas               | 解析、计算、排箱、导出、校验
+  持久化| SQLite + localStorage          | 主数据长期存；当前任务浏览器内自动存
+
+
+二、页面与导航结构
+------------------
+
+  /              → 主工作流 (Step 1 → 2 → 3 → 4 → 4.5)
+  /master-data   → 产品主数据库（独立页，侧边栏进入）
+
+侧边栏还承载：任务名、步骤指示、DeepSeek 配置、模板管理、历史文件等系统设置。
+
+
+三、主工作流（7 步）
+--------------------
+
+流程概览：
+
+  Step 1 发货录入
+      ↓
+  Step 2 智能排箱
+      ↓
+  Step 3 导出预览
+      ↓
+  Step 3.5 分仓刷仓（可选）
+      ↓
+  Step 4 回传校验
+      ↓
+  Step 4.5 发票生成
+      ↓
+  Step 5 报关资料
+
+  产品主数据库 (/master-data) ──(优先覆盖尺寸/FNSKU)──→ Step 1 及后续步骤
+
+  【数据一致性】已访问步骤可来回查看，数据保留。
+  修改 Step 1 发货数据或重新锁定排箱 → 下游标记「已过期」，禁止当正式稿下载；
+  须按序重跑后才能再导出。顶部琥珀色圆点 = 过期仍可查看。
+  完整货件包请保存 .fbox；浏览器草稿会记住步骤（含 4/5 水位）。
+
+
+Step 1 — 发货录入 + 成本精算
+----------------------------
+
+你要做什么：
+  录入每个 SKU 的发货数量、箱规、重量。
+
+数据来源（三选一）：
+  - 粘贴文本 → 本地规则 / DeepSeek 解析
+  - 上传 Excel 样表
+  - 手工在表格里填
+
+运行逻辑：
+  1. 表格变更 → 400ms 防抖 → 调用 POST /api/compute_preview
+  2. 后端先用「产品主数据库」按 SKU 合并 (apply_master_to_input_rows)
+  3. 返回：预计整箱数/尾数/净重毛重、总方数 CBM、体积重、入库配置费预估
+  4. 同时调用 POST /api/validate_input 校验必填项
+  5. SKU 旁显示 🟢官方 / 🟡人工（主库是否有完整尺寸）
+  6. 校验通过 → 点「下一步」进入 Step 2
+
+底部固定栏：总整箱数、总净重/毛重、CBM、体积重、平均密度
+成本控制台：亚马逊 1仓 / 2-3仓 / 5+仓 配置费区间（2026 政策）
+
+
+Step 2 — 智能排箱
+-----------------
+
+输入：Step 1 的 SKU 行（经主库合并后的数据）
+
+运行逻辑：
+  1. 进入时调用 POST /api/calculate_boxes → 自动生成装箱方案
+  2. 返回 box_editor（箱号 × SKU × 数量）、tail_pool（尾数池）、metrics（每箱指标）
+  3. 可手工调整：改箱号、混装、把尾数拖入某箱 (POST /api/box/assign_tail)
+  4. 实时刷新箱指标 POST /api/box_metrics（超重告警）
+  5. 确认方案 → boxLocked = true → 下一步
+
+核心后端：fba_tool/boxing.py — 按单箱装量、重量上限自动分箱
+
+
+Step 3 — 导出预览
+-----------------
+
+输入：锁定后的装箱方案
+
+运行逻辑：
+  1. POST /api/export/step3/preview → 生成 SKU×箱号 矩阵预览
+  2. 可下载两类 Excel：
+     - 内部版  POST /api/export/step3/internal
+     - 亚马逊版 POST /api/export/step3/amazon
+
+用途：给工厂/仓库看装箱矩阵，或上传亚马逊创建货件前的核对。
+
+
+Step 4 — 回传校验（货件 + 导出表）
+----------------------------------
+
+你要做什么：
+  上传亚马逊回传的 CSV + 箱规 PDF/CSV，与系统方案对账。
+
+运行逻辑：
+  1. 上传货件 CSV → POST /api/shipments/parse → 解析多货件结构
+  2. POST /api/shipments/validate → 校验 SKU/数量/分仓是否与 Step 1~3 一致
+  3. 校验通过后生成：
+     - 工厂横向表 POST /api/export/factory
+     - 货代报价表 POST /api/export/forwarder（含分仓小计、CBM、宏观物流画像）
+  4. 展示货件宏观画像：总方数、计费吨、重货/泡货判定等
+
+历史文件：可从侧边栏历史面板点选之前上传过的文件，不必重复上传。
+
+
+Step 4.5 — 发票自动化
+---------------------
+
+前提：Step 4 校验通过 (step4Ok = true)
+
+运行逻辑：
+  1. 选择货件 → 上传发票 Excel 模板
+  2. POST /api/invoice/preview → 预览待填单元格
+  3. POST /api/invoice/generate 或 DeepSeek 辅助填充
+  4. 在线 Spreadsheet 编辑 → POST /api/invoice/apply_edits → POST /api/export_invoice 导出
+
+单元格来源标记：精确匹配 / 本地规则 / AI 推断 / 缺失
+
+
+四、产品主数据库（横切能力）
+----------------------------
+
+  Fee Preview 报告 ──┐
+  库存报告         ──┼──→ POST /api/master-data/upload
+                     │         ↓
+                     │    master_data_parser (单位换算 cm/kg)
+                     │         ↓
+                     │    SQLite product_master
+                     │         ↓
+                     └──→ apply_master_to_input_rows → Step 1/2/3/4
+
+能力说明：
+  上传   | Fee Preview + Inventory CSV/TXT，模糊表头匹配
+  单位   | in/lb 自动转 cm/kg 入库
+  合并   | 同 SKU upsert；只有三码无尺寸也允许（尺寸 NULL）
+  劫持   | Step 1/2/3/4 计算前自动查主库覆盖 FNSKU、箱规、重量
+  标记   | 三边尺寸齐全 → 🟢官方；否则 → 🟡人工
+
+
+五、全局状态与持久化
+------------------
+
+WorkflowContext 保存的关键数据：
+
+  inputRows        | 产生于 Step 1      | 全流程 SKU 基准
+  fnskuOverrides   | 样表/主库          | FNSKU 映射
+  boxEditorApi     | Step 2             | 装箱明细
+  boxLocked        | Step 2 确认        | 是否允许重算
+  step3Matrix      | Step 3             | 导出矩阵
+  shipments        | Step 4             | 货件 bundles
+  forwarder 等     | Step 4 导出        | 货代/工厂表
+  invoiceDraft     | Step 4.5           | 发票草稿
+
+自动保存：
+  变更写入 localStorage (fba_workflow_autosave)，刷新页面可恢复任务名、步骤、录入行、装箱方案。
+
+
+六、后端 API 按步骤索引
+-----------------------
+
+  主库    | /api/master-data/upload, /list, /resolve-skus
+  Step 1  | /api/parse_text, /parse_excel, /compute_preview, /validate_input
+  Step 2  | /api/calculate_boxes, /box_metrics, /tail_pool, /box/assign_tail
+  Step 3  | /api/export/step3/preview, /internal, /amazon
+  Step 4  | /api/shipments/parse, /validate, /export/factory, /export/forwarder
+  Step 4.5| /api/invoice/preview, /generate, /apply_edits, /export_invoice
+  配置    | /api/config/limits, /api/config/settings, /api/templates/*
+
+
+七、一次完整运行的时序
+----------------------
+
+  1. [可选] 用户上传亚马逊报告 → master-data/upload → SQLite 写入 SKU/尺寸
+  2. Step1 录入 SKU → compute_preview → 主库合并 → 返回预览 + 配置费
+  3. 用户点下一步 → calculate_boxes → 装箱方案 + 尾数池
+  4. 用户调整并锁定 → export/step3/preview → 下载内部/亚马逊表
+  5. 用户上传货件 CSV + 箱规 → shipments/validate → 工厂表 + 货代表
+  6. 用户上传发票模板 → invoice/generate → 编辑并导出发票
+
+
+八、本地启动方式
+----------------
+
+  开发 | 后端 uvicorn main:app --port 8002 | http://127.0.0.1:8002/docs
+       | 前端 npm run dev (FBA_BACKEND_PORT=8002) | http://127.0.0.1:5173
+  打包 | python run_app.py 或 一键启动.bat | http://127.0.0.1:8002
+
+前端 /api 请求由 Vite 代理到后端端口（见 .dev/ports.json）。
+
+
+九、一句话总结
+--------------
+
+这是一个「录入 → 自动排箱 → 导出 → 亚马逊回传对账 → 发票」的 FBA 发货流水线；
+产品主数据库作为横切层，让官方尺寸/FNSKU 优先于人工录入；
+Step 1 成本控制台在录入阶段就给出 2026 入库配置费预估。

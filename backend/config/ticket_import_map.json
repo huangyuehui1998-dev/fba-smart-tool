@@ -1,0 +1,53 @@
+{
+  "_说明": "票级数据导入的列名映射（方案 v8 §3.2 P14）。键 = shipment_ticket 字段，值 = 表头候选（去掉换行/空格后按“开头匹配”）。列名取自用户测试文件实际表头。",
+  "tencent": {
+    "_来源": "腾讯表格文档.xlsx Sheet1（如第 14 批）",
+    "fba_id": ["FBA编码"],
+    "ticket_no": ["票数"],
+    "plan_name": ["FBA计划名称"],
+    "warehouse_code": ["仓库代码"],
+    "order_no": ["订单编号"],
+    "region": ["分区"],
+    "box_count": ["箱数"],
+    "total_qty": ["单票总数量"],
+    "channel": ["渠道"],
+    "unit_freight": ["单价"],
+    "chargeable_kg": ["计费重量"],
+    "total_freight": ["总运费"],
+    "gross_kg": ["毛重"],
+    "net_kg": ["净重"]
+  },
+  "freight": {
+    "_来源": "01-J-宠物庭院-FBA运费-入库配置费测算.xlsx 「FBA运费-记录」",
+    "forwarder": ["货代"],
+    "plan_name": ["FBA计划名称"],
+    "fba_id": ["FBA编码"],
+    "warehouse_code": ["仓库代码"],
+    "channel": ["渠道"],
+    "unit_freight": ["单价"],
+    "order_no": ["合同协议号"],
+    "chargeable_kg": ["计费重(货代)", "计费重"],
+    "total_freight": ["总运费"],
+    "etd": ["发货时间-开船"],
+    "eta_expected": ["预计妥投时间"],
+    "delivered_at": ["实际妥投时间"],
+    "amazon_received_at": ["亚马逊上架时间"]
+  },
+  "jiufang": {
+    "_来源": "九方《LCL…-单箱数据-运营(企微用-SEND).xlsx》Sheet1",
+    "lcl_no": ["运单号"],
+    "box_no": ["外箱号"],
+    "box_weight": ["单箱实重"],
+    "length": ["长"],
+    "width": ["宽"],
+    "height": ["高"],
+    "chargeable_kg": ["计费重"]
+  },
+  "priority": {
+    "_说明": "同一字段多个来源时，排名高的不被排名低的覆盖；手填最高。毛重按 v5 Q2 以腾讯表格（发票单箱重合计）为准；九方实测重只在没有腾讯表格毛重时先填，逐箱明细存 boxes_json。",
+    "manual": 3,
+    "tencent": 2,
+    "freight": 1,
+    "jiufang": 1
+  }
+}

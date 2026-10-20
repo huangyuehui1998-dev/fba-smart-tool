@@ -1,0 +1,14 @@
+{
+ "_note": "领星 MCP action(erp_listing) 真实响应结构（2026-10-16 实测），已脱敏：去掉店铺/ID/负责人/销量等字段，SKU/ASIN/品名换成示例值，只留 1 行。",
+ "jsonrpc": "2.0",
+ "id": 7,
+ "result": {
+  "content": [
+   {
+    "type": "text",
+    "text": "{\"code\": 1, \"data\": {\"code\": 1, \"msg\": \"success\", \"data\": {\"total\": 1, \"list\": [{\"msku\": \"DEMO-MSKU-001-FBA\", \"local_sku\": \"DEMO-SKU-001\", \"local_name\": \"示例产品\", \"fnsku\": \"X00DEMO001\", \"asin\": \"B0DEMO0001\", \"parent_asin\": \"B0DEMO0000\", \"item_name\": \"Demo Product (sanitized)\", \"marketplace\": \"美国\", \"fulfillment_channel_type\": \"FBA\", \"status\": 1, \"status_text\": \"在售\", \"price\": \"15.99\", \"listing_price\": \"15.99\", \"landed_price\": \"15.99\", \"regular_price\": \"15.99\", \"list_price\": \"38.97\", \"b2b_price\": \"\", \"shipping\": \"0.00\", \"listing_price_currency_code\": \"USD\", \"currency_symbol\": \"USD\", \"history_price\": \"\", \"history_price_source\": \"无划线价\", \"afn_fulfillable_quantity\": 175, \"afn_inbound_shipped_quantity\": 0, \"afn_inbound_receiving_quantity\": 0, \"afn_inbound_working_quantity\": 0, \"afn_reserved_quantity\": 0, \"afn_unsellable_quantity\": 0}]}}, \"msg\": \"操作成功\", \"success\": true}"
+   }
+  ],
+  "isError": false
+ }
+}

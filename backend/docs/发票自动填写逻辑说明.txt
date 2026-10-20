@@ -1,0 +1,246 @@
+================================================================================
+  FBA Smart Tool — Step 4.5 发票自动填写逻辑说明
+  更新日期：2026-05-30
+================================================================================
+【现状说明（s8-docs，2026-10-16）】本文描述的是旧的 /api/invoice/generate 模板填格流程（仍可用）。
+现行主路径是 Step 4.5「按货代模板导出发票」（/api/invoice-export/*）和 T1–T8 识别面板（/api/invoice-templates/*），
+申报价按 D-01/D-12（product_fields.resolve_declared_price：常规价 > 90 天内非促销价，促销低 5% 以上按正常价并提示），
+文中“采购价 ÷ 6.8 = 申报单价”已不再使用。详见《FBA_Smart_Tool_代码架构定位手册.md》§7、§8.7 和《用户使用说明.md》。
+--------------------------------------------------------------------------------
+
+
+一、前端触发流程
+--------------------------------------------------------------------------------
+入口文件：frontend/src/hooks/use-invoice.ts
+
+1. 上传发票模板（.xlsx）
+   - 本地 Fortune Sheet 预览
+   - 保存 template_base64 + template_hash（SHA256）
+
+2. 选择货件
+   - 必须来自 Step 4 校验通过的 CSV/PDF 配对
+
+3. 点击「自动填写」
+   - 调用 POST /api/invoice/generate
+   - 普通填写：不带 DeepSeek 参数
+   - 智能填写：附带 api_key / model / temperature（来自系统 DeepSeek 设置）
+
+4. 后端返回 cells 列表
+   - 前端写入在线表格，按数据来源着色
+
+5. 用户可在表格中手工修改单元格
+
+6. 点击「导出发票」
+   - 调用 POST /api/export_invoice
+   - 下载最终 .xlsx
+
+
+二、后端 API 入口
+--------------------------------------------------------------------------------
+路由文件：backend/routers/invoice.py
+编排层：  backend/services/invoice_service.py
+
+接口                          作用
+----------------------------------------------------------------------
+POST /api/invoice/preview      仅解析模板结构，返回空值字段网格（预览态）
+POST /api/invoice/generate     核心自动填写（CSV+PDF+模板 → cells）
+POST /api/generate_invoice     同上（别名）
+POST /api/invoice/apply_edits  应用用户对网格的手工编辑
+POST /api/export_invoice       将 cells 写回模板 xlsx 并下载
+
+
+三、核心函数：build_invoice_draft()
+--------------------------------------------------------------------------------
+文件：backend/fba_tool/invoice_automation.py
+
+输入：
+  - csv_bytes   亚马逊货件 CSV
+  - pdf_bytes   箱唛 PDF
+  - template_bytes  发票模板 xlsx
+  - api_key / model / temperature（可选，启用 DeepSeek）
+
+预处理：
+  1. parse_csv_shipment(csv) → 货件号、仓库代码、箱明细、箱规
+  2. extract_pdf_address_block(pdf) → 箱唛第一页 Ship To 地址文本
+  3. load_workbook_fast(template) → 识别模板类型
+  4. load_product_catalog() → 加载 templates/产品信息表.csv
+  5. logistics_metrics_from_box_specs() → 计费吨 RT
+
+
+四、两种模板模式
+--------------------------------------------------------------------------------
+
+【模式 A】表格型模板（主流，推荐）
+  检测：backend/fba_tool/invoice_table.py → detect_invoice_table_layout()
+  条件：模板约第 19 行附近同时存在「Shipment ID / FBA单号」和「SKU」表头
+
+  填写流程：
+    1. _customs_by_sku() — 每个 SKU 合并产品信息表 + DeepSeek 报关补全
+    2. build_invoice_line_items() — 按 SKU 聚合生成一行数据
+    3. table_cells_from_line_items() — 映射到 Excel 坐标 (如 B20, C20...)
+    4. _shipment_metric_cells() — 计费吨写入表头区单元格
+
+  每 SKU 一行字段（部分）：
+    shipment_id, reference_id, box_range, box_count, sku,
+    english_name, chinese_name, brand, material, purpose, hs_code,
+    asin, total_qty, purchase_price, declared_price,
+    length, width, height, box_weight, shipping_mark 等
+
+  字段来源优先级：
+    绿色（精准提取）  CSV/PDF：货件号、箱号段、箱数、总数量、SKU、ASIN、箱规尺寸重量
+    绿色（精准提取）  CSV 商品名称 → 英文品名
+    蓝色（产品信息表） 中文品名、海关编码、材料、品牌、采购单价
+    黄色（AI 推理）    DeepSeek 补全仍缺失的报关字段
+    红色（必填待补）  Reference ID、SKU 图片 — 默认留空，需人工填写
+
+  申报单价计算：
+    采购价(RMB) ÷ 6.8 → 美元申报单价
+    或 DeepSeek / 产品信息表提供的「单个货值」
+
+
+【模式 B】标签型模板（旧式）
+  检测：未识别为表格型时，走标签+右侧空单元格模式
+  配置：backend/config/invoice_mapping.json
+
+  步骤 1 — 绿色「精准提取」(deterministic_fields)
+    FBA单号、仓库代码、件数、个数、单件长/宽/高、总实重、计费吨
+    来源：CSV 解析 + 箱规统计
+
+  步骤 2 — 地址字段 (address_fields)
+    邮编、国家代码、省州代码、城市、地址
+    来源：PDF 提取地址 → parse_address_with_ai()（需 DeepSeek API Key）
+    无 Key 时标红待补
+
+  步骤 3 — 报关字段 (ai_only_fields)
+    海关编码、中文品名、英文品名、材料、用途、品牌、单个货值
+    优先：产品信息表（蓝色）
+    其次：DeepSeek infer_customs_fields()（黄色）
+    仍缺：红色待补
+
+  步骤 4 — 必填项
+    ID号：始终留空，source=red，required=true，必须人工填写
+
+
+五、DeepSeek AI 介入时机（第 3 层 🟨 兜底）
+--------------------------------------------------------------------------------
+完整四层「榨取」架构见：backend/docs/DeepSeek智能生成发票逻辑说明.txt
+  第 1 层 🟩 CSV/PDF 物理数据 → 第 2 层 🟦 产品库 → 第 3 层 🟨 DeepSeek → 第 4 层 🟥 人工
+
+文件：backend/fba_tool/invoice_deepseek.py
+
+函数                      用途                          触发条件
+----------------------------------------------------------------------
+parse_address_with_ai     解析 PDF 地址为结构化 JSON     有 API Key + PDF 有地址（表格/标签模式均执行）
+infer_customs_fields      推理报关字段 JSON              有 API Key + 第 2 层仍有缺失报关项
+_customs_by_sku           表格模式按 SKU 批量补报关      有 API Key + 目录缺字段
+_header_option_cells      头部选项规则默认（包税/交货等） header_defaults 配置
+_fill_header_zone_cells   顶部区统一编排               选项 + 地址 + 计费吨
+infer_header_options_with_ai  header_ai_fields AI 推理   有 API Key + 字段在列表中
+
+参考历史：backend/config/invoice_history.json
+计费统计：DeepseekUsageAccumulator → 返回 total_tokens / estimated_cost_rmb
+
+
+六、模板单元格定位
+--------------------------------------------------------------------------------
+标签模式：detect_template_cells()
+  - 扫描模板前 80 行标签文字
+  - 匹配 invoice_mapping.json 中 label_aliases
+  - 取标签右侧（或右两格）空单元格作为写入坐标
+  - cell_overrides 可手工固定坐标
+
+表格模式：InvoiceTableLayout
+  - header_row：表头行号
+  - first_data_row：首行数据行（表头+1）
+  - columns：field_key → 列号（1-based）
+
+
+七、前端单元格着色规则
+--------------------------------------------------------------------------------
+来源标识（InvoiceField.source）→ 前端 CellMeta → 表格背景色
+
+  green   → 精准提取（CSV/PDF）
+  blue    → 产品信息表
+  yellow  → AI 推理（需复核）
+  red     → 必填待补
+  preview → 模板解析（仅 preview 阶段）
+
+
+八、导出逻辑
+--------------------------------------------------------------------------------
+文件：backend/fba_tool/invoice_automation.py → export_invoice_xlsx()
+
+  1. 加载原始模板 workbook
+  2. 遍历 draft.table_cells 或 draft.fields
+  3. 仅写入 value 非空的单元格（空值跳过，方便导出后手工补全）
+  4. safe_write(ws, row, col, value) 按坐标写入
+  5. compact_invoice_workbook() 压缩文件体积
+  6. 返回 .xlsx bytes
+
+模板缓存：backend/fba_tool/invoice_template_cache.py
+  - 首次上传存进程内缓存，返回 template_hash
+  - 后续导出可只传 hash，无需重复上传整份 xlsx
+
+
+九、关键配置文件与数据文件
+--------------------------------------------------------------------------------
+  backend/config/invoice_mapping.json   字段别名、必填项、AI 字段、确定性字段列表
+  backend/config/invoice_history.json   AI 历史申报参考
+  app_data/templates/产品信息表.csv（用户自己的，可选；出厂只带 产品信息表_示例.csv，见 D-2026-10-17-19）  SKU → 报关品名/HS编码/材料/货值
+  backend/templates/待填写的发票模板.xlsx  默认发票模板（可选）
+
+
+十、数据流简图
+--------------------------------------------------------------------------------
+
+  [上传发票模板 xlsx]
+         |
+         v
+  检测模板类型 ──→ 表格模式（Shipment ID + SKU 表头）
+         |              |
+         |              v
+         |         按 SKU 逐行 build_invoice_line_items
+         |
+         └──→ 标签模式（FBA单号/仓库代码 等标签）
+                    |
+                    v
+               扫描标签 → 填 deterministic / address / customs 字段
+
+  [Step4 货件 CSV + PDF]
+         |
+         +──→ parse_csv_shipment（箱明细、箱规、货件号）
+         +──→ extract_pdf_address（Ship To 地址块）
+
+  [产品信息表.csv] ──→ catalog.lookup(sku) ──→ 蓝色字段
+
+  [DeepSeek API]（可选）
+         +──→ 地址 JSON
+         +──→ 报关字段 JSON（参考 invoice_history.json）
+
+         |
+         v
+  返回 cells: [{ cell: "B20", value: "...", source: "精准提取", field_key: "sku" }, ...]
+         |
+         v
+  前端 Fortune Sheet 展示 / 用户编辑
+         |
+         v
+  POST /api/export_invoice → 写回 xlsx 下载
+
+
+十一、相关源码索引
+--------------------------------------------------------------------------------
+  backend/fba_tool/invoice_automation.py    主逻辑、build_invoice_draft、export
+  backend/fba_tool/invoice_table.py         表格型模板检测与逐 SKU 填行
+  backend/fba_tool/invoice_deepseek.py      DeepSeek 地址/报关 API
+  backend/fba_tool/product_catalog.py       产品信息表解析与 lookup
+  backend/fba_tool/shipment_parser.py       CSV 货件解析
+  backend/services/invoice_service.py       API 编排、draft 序列化
+  backend/routers/invoice.py                FastAPI 路由
+  frontend/src/hooks/use-invoice.ts         前端 Step 4.5 交互
+  frontend/src/lib/invoice-spreadsheet.ts   单元格元数据与导出字段构建
+  frontend/src/components/invoice-spreadsheet.tsx  Fortune Sheet 组件
+
+================================================================================
+  说明：Reference ID（ID号）与 SKU 图片 intentionally 留空，需用户在导出前手工填写。
+================================================================================

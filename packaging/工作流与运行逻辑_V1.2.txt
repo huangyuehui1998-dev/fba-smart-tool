@@ -1,0 +1,430 @@
+================================================================================
+  FBA Smart Tool V1.2 — 整体工作流与运行逻辑说明
+  文档版本：2026-06-25
+================================================================================
+【现行补充（s8-docs，2026-10-16，按 tag s8-fix1 代码核对）】
+本文正文写于早期版本，以下几点已变化，以本段和《FBA_Smart_Tool_代码架构定位手册.md》§7（17 个 router 全表）、
+《用户使用说明.md》为准：
+- 端口：开发后端 127.0.0.1:8000–8099、前端 Vite 5173–5199；便携版 127.0.0.1:8002 起（8002–8011、18002–18019），
+  端口写在数据目录的 .server_port。环境变量 FBA_APP_DATA_DIR 换数据目录，FBA_NO_BROWSER=1 不自动开浏览器。
+- Step 2 尾数：/api/tail_pool 只算尾数池，不再回退重排；/api/box/assign_tail 在 SKU 不在清单、无尾数、
+  分配数大于剩余尾数、目标箱号大于最大箱号+1 时返回 400。Step 3 箱单件数超过计划时内部表/亚马逊表导出返回 400。
+- Step 3.5 分仓：仓库代码以货件 CSV 为准（resolve_routing_warehouse），文件名兜底；冲突警告随 /api/routing/preview
+  的响应头 X-Routing-Warnings 返回；导出空数据返回 400「数据为空：请先生成货代表预览」。
+- Step 4：同一货件 CSV 或箱唛 PDF 传两份 → 校验失败「❌ 重复上传」。
+- Step 4.5：按货代模板导出（/api/invoice-export/*：SEND、九方、琪珞 T6/T5、德速 T3；未知货代 422「不支持该货代」）；
+  “识别货代发票模板”面板（/api/invoice-templates/*）识别 T1–T8。德速/琪珞 T6 重量口径：面板选择 > 上传货代原件
+  按货件 CSV 核对 > 配置 invoice_export.weight_basis > 留空并提示 weight_basis_undecided；单件重 = 箱重 ÷ 箱内件数。
+  旧的 /api/invoice/generate（模板填格 + 可选 DeepSeek）仍在。
+- 申报价：D-01 经 D-12 修订（product_fields.resolve_declared_price）：正常价 = 领星 regular_price，没有就用 90 天内
+  最后一次非促销价；领星现价比正常价低 5% 以上视为促销，按正常价申报并提示 promo_price_not_used；不用 list_price。
+  已不再用“采购价 ÷ 6.8”。
+- Step 5 报关：customs_package / customs_export；HS 必须 8 或 10 位数字（hs_code.py），钓具参考编码
+  GET /api/master-data/hs-presets（只做参考）。
+- 主数据：PATCH /api/master-data/sku/{sku} 对不存在的 SKU 返回 404（带 ?create=true 才新建），HS 格式错或数字字段
+  非数字返回 400。领星同步只用只读工具（lingxing_scheduler.READ_ONLY_TOOLS），预览里乱码 SKU/缺 FNSKU/ASIN 的
+  进“需复核”组默认不勾；定时同步在侧栏设置。
+- PDF 标签：尺寸 10–600 mm、非 PDF/坏 PDF/base64 损坏都返回 400。
+- 配置：出厂默认 backend/config/*.default.json，个人设置在 app_data/config；user_settings.json / formulas.json
+  写坏时 GET /api/config/errors 报出，界面顶部黄色横幅提示，改好或删除坏文件后刷新消失。
+--------------------------------------------------------------------------------
+
+
+本文档描述软件的架构、启动流程、五步业务工作流、数据保存机制及便携版
+运行方式，供开发维护与现场使用参考。
+
+
+================================================================================
+一、系统总体架构
+================================================================================
+
+【形态】本地 Web 应用（浏览器 + 本机后端），非纯云端 SaaS。
+
+【技术栈】
+  前端：React + Vite + TanStack Router + WorkflowContext 全局状态
+  后端：Python FastAPI + pandas/openpyxl/pdfplumber 等业务库
+  打包：PyInstaller 目录版（onedir），exe 内嵌前端静态资源
+
+【目录角色】
+  run_app.py              便携版/开发环境统一启动入口
+  backend/main.py         FastAPI 应用工厂，挂载 API + 前端 SPA
+  backend/fba_tool/       核心业务算法（排箱、校验、导出、发票等）
+  backend/routers/        HTTP 路由层（按 Step 拆分）
+  backend/services/       编排层（复杂业务流程）
+  frontend/src/           React 界面与交互
+  packaging/              打包 spec、使用说明、本文档
+  dist/FBA_Smart_Tool/    便携版发布目录（构建产物）
+
+【请求路径】
+  浏览器 → http://127.0.0.1:端口/  → FastAPI 返回 index.html + /assets/*
+  业务操作 → fetch("/api/...")     → 同端口 FastAPI 路由处理
+  开发模式可单独跑 Vite（5173）并代理 /api 到后端；便携版不依赖 Node。
+
+
+================================================================================
+二、便携版启动与运行逻辑（run_app.py）
+================================================================================
+
+【用户操作】
+  双击「启动FBA工具.bat」或 FBA_Smart_Tool.exe
+
+【启动顺序】
+  1. 单实例检测（Windows Mutex）
+     - 若已有实例在跑：自动打开浏览器到已有服务地址，本进程退出
+     - 避免重复占用端口、重复开黑窗口
+
+  2. 初始化数据目录 ensure_app_data_layout()
+     - 在 exe 同目录创建 app_data/
+     - 从旧版路径一次性迁移数据（若存在）
+     - 从 backend/config、backend/templates 补齐出厂默认到 app_data
+
+  3. 加载 FastAPI 应用 main:app
+     - 注册全部 /api/* 路由
+     - 挂载 _internal/dist 下的前端 SPA（index.html + assets）
+
+  4. 端口选择（自动容错）
+     - 优先端口：8002，其次 8003…8011，再 18002…18019
+     - 绑定成功后写入 app_data/.server_port（供二次启动检测）
+     - 控制台打印实际访问地址
+
+  5. 后台线程轮询 /api/health
+     - 服务就绪后自动用系统默认浏览器打开首页
+     - 用户也可手动输入控制台显示的 URL
+
+  6. 关闭黑色控制台窗口 = 停止服务
+
+【路径解析（打包后）】
+  PROJECT_ROOT  = exe 所在目录（可写：app_data、用户工程 .fbox 在别处）
+  BACKEND_DIR   = sys._MEIPASS（只读：代码、内嵌 dist、出厂 templates/config）
+
+
+================================================================================
+三、前端页面结构与步骤路由
+================================================================================
+
+【入口】frontend/src/routes/index.tsx
+
+  WorkflowProvider（全局状态）
+    ├── FboxDropOverlay（全局 .fbox 拖拽层）
+    └── AppShell（顶栏 + 侧栏 + 主工作区）
+          ├── step === 1    → Step1Workspace  录入
+          ├── step === 2    → Step2Workspace  排箱
+          ├── step === 3    → Step3Workspace  导出
+          ├── step === 4    → Step4Workspace  回传校验
+          └── step === 4.5  → Step45Workspace 发票
+
+顶栏可点击步骤名跳转；「新建任务」会存档当前任务并弹出保存 .fbox 对话框。
+
+【全局状态 WorkflowContext 管理的主要字段】
+  - 任务：taskId, taskName, step
+  - Step1：inputRows, fnskuOverrides
+  - Step2：boxEditorApi, metrics, tailPool, hasOverweight, boxLocked
+  - Step3：step3Matrix, step3BoxCount, step3SkuCount
+  - Step4：csvFiles/pdfFiles（内存，不入 .fbox）, step4Ok, shipments,
+            forwarder, shippingSheet, workerPackingPreview 等
+  - Step4.5：invoiceDraft, invoiceTemplateBase64, selectedShipmentId
+  - 工程文件：projectFileName, fboxSaveStatus, fboxWritable, fileHandle(内存)
+
+
+================================================================================
+四、业务工作流（Step 1 → 4.5）
+================================================================================
+
+────────────────────────────────────────────────────────────────────────────
+Step 1 — 录入
+────────────────────────────────────────────────────────────────────────────
+【用户做什么】
+  - 表格录入 SKU、单箱装量、重量、尺寸等
+  - 或粘贴文本 / 上传 Excel / 使用 DeepSeek 解析（侧栏可配 Key）
+  - 校验通过后进入 Step 2
+
+【前端】Step1Workspace → 调用 /api/* 校验与预览
+
+【后端主要 API】
+  POST /api/parse_text              本地规则解析粘贴文本
+  POST /api/parse_text/deepseek     DeepSeek 解析
+  POST /api/parse_excel             上传 Excel 解析
+  POST /api/validate_input          校验录入行
+  POST /api/compute_preview         物流预览（抛比、体积重等）
+  GET  /api/input_template          下载录入样表
+  GET  /api/config/limits           重量上限、抛比等全局参数
+
+【数据流】
+  录入行 + 产品主数据(master DB) 合并 → 后续所有 Step 的输入基础
+
+────────────────────────────────────────────────────────────────────────────
+Step 2 — 自动排箱
+────────────────────────────────────────────────────────────────────────────
+【用户做什么】
+  - 点击计算，获得自动装箱方案
+  - 可在箱编辑表中微调；处理尾数池；锁定箱方案后进入 Step 3
+
+【后端主要 API】
+  POST /api/calculate_boxes         生成装箱方案 editor 表
+  POST /api/box_metrics             每箱重量/体积指标
+  POST /api/tail_pool                尾数池
+  POST /api/box/assign_tail          尾数分配到箱
+
+【核心逻辑】backend/fba_tool/boxing.py
+  - 按 SKU 装量、重量限制自动分箱
+  - FBA 合规检查（超重等）
+
+────────────────────────────────────────────────────────────────────────────
+Step 3 — 前期导出
+────────────────────────────────────────────────────────────────────────────
+【用户做什么】
+  - 预览箱-SKU 矩阵
+  - 导出「内部留档表」与「Send to Amazon」Excel
+
+【后端主要 API】
+  POST /api/export/step3/preview    JSON 矩阵预览
+  POST /api/export/step3/internal   下载内部留档 .xlsx
+  POST /api/export/step3/amazon      下载 STA 模板 .xlsx
+
+【说明】
+  导出依赖 Step2 锁定后的 boxEditorApi + Step1 录入 + FNSKU 覆盖
+
+────────────────────────────────────────────────────────────────────────────
+Step 4 — 回传校验
+────────────────────────────────────────────────────────────────────────────
+【用户做什么】
+  - 上传亚马逊回传的 CSV + PDF（按货件）
+  - 与 Step1/2/3 工作流数据做三维交叉校验
+  - 导出工人装箱单、发货总表、货代报价表等
+
+【后端主要 API】
+  POST /api/shipments/parse          解析上传文件
+  POST /api/shipments/validate       一次性校验
+  POST /api/shipments/validate/stream 流式校验（进度推送）
+  POST /api/export/worker_packing_preview
+  POST /api/export/worker_packing_list
+  POST /api/export/shipping_sheet
+  POST /api/export/forwarder
+
+【说明】
+  CSV/PDF 文件对象仅存于浏览器内存，不写入 .fbox；
+  校验结果、货代表、发货表等结构化结果会进入快照并保存。
+
+────────────────────────────────────────────────────────────────────────────
+Step 4.5 — 发票
+────────────────────────────────────────────────────────────────────────────
+【用户做什么】
+  - 选择货代（如琪珞国际）
+  - 手填 POAnumber
+  - 预览发票表格（工作流自动填行，优先级见下）
+  - 复制带格式表格到 Excel，或导出 xlsx
+
+【数据填充优先级】
+  Step1/2 工作流 → Step4 CSV/PDF 解析 → 产品主数据 → 空白
+  PO 号：Step 4.5 手填，不走 DeepSeek 主链
+
+【后端主要 API】
+  GET  /api/forwarders               货代列表
+  GET  /api/forwarders/{id}/template 货代发票模板下载
+  POST /api/invoice/preview          预览草稿
+  POST /api/export_invoice           导出发票 Excel
+
+【货代模板位置】
+  出厂：backend/templates/forwarders/qiluo.xlsx（打包进 _internal）
+  用户：app_data/templates/forwarders/（可覆盖、可上传）
+
+
+================================================================================
+五、数据持久化（四层机制）
+================================================================================
+
+┌─────────────────┬──────────────────┬────────────────────────────────────┐
+│ 机制            │ 存储位置         │ 用途                               │
+├─────────────────┼──────────────────┼────────────────────────────────────┤
+│ app_data/       │ exe 同目录       │ 主数据、配置、任务历史、会话文件   │
+│ .fbox 工程文件  │ 用户自选路径     │ 完整货件工作流快照（V1.2 核心）    │
+│ localStorage    │ 浏览器           │ Step1 草稿自动恢复（兜底）         │
+│ IndexedDB       │ 浏览器           │ FileSystemFileHandle 句柄缓存      │
+└─────────────────┴──────────────────┴────────────────────────────────────┘
+
+【app_data/ 结构】
+  app_data/fba_master.db                 SQLite 产品主数据
+  app_data/config/                       用户配置（抛比、映射、货代档案等）
+  app_data/templates/forwarders/         用户货代模板
+  app_data/sessions/history/             后端任务历史 JSON（/api/tasks/history）
+  app_data/.server_port                  当前服务端口（运行时）
+  app_data/logs/、cache/                 日志与缓存
+
+【任务历史 API】
+  GET/POST /api/tasks/history            列表与保存
+  GET/DELETE /api/tasks/history/{id}     读取与删除
+  「新建任务」时若有数据会先写入此处再清空界面。
+
+
+================================================================================
+六、.fbox 本地工程文件系统（V1.2）
+================================================================================
+
+【文件格式】
+  扩展名：.fbox
+  本质：UTF-8 JSON，带版本号
+
+  {
+    "version": 1,
+    "task_id": "uuid",
+    "task_name": "Task-20260625-1200",
+    "saved_at": "ISO8601",
+    "grid_data": { ...TaskHistorySnapshot... },
+    "settings": { "step": 2, "throw_ratio": 6000 }
+  }
+
+【版本迁移 migrateProjectData()】
+  - 读取时若 version < 当前软件版本，在内存中补字段、规范化
+  - 保证旧工程文件升级软件后仍可打开
+  - version 高于当前软件则提示升级程序
+
+【新建工程】
+  1. 首次打开页面（Chrome/Edge）→ 自动弹出 showSaveFilePicker
+  2. 用户选择路径与文件名 → 写入空模板 .fbox
+  3. FileSystemFileHandle 保存在内存 + IndexedDB
+  4. 点击顶栏「新建任务」→ 可选先存档到历史 → 再弹保存对话框
+
+【无感自动保存】
+  - 监听 WorkflowContext 全部业务字段变化
+  - lodash 风格 throttle 2000ms
+  - 有写权限的句柄存在时：createWritable() → 覆盖写入 JSON
+  - 顶栏显示：文件名、保存中/已保存/只读
+
+【拖入打开 .fbox】
+  - 拖到哪里：浏览器窗口内任意位置（全局捕获阶段监听）
+  - 拖入时显示半透明提示：「松开鼠标打开 .fbox 工程」
+  - 优先 getAsFileSystemHandle() 保留写权限
+  - 仅 getAsFile() 时为只读（修改不会写回磁盘）
+
+【刷新页面恢复】
+  - IndexedDB 中若有上次句柄且权限仍有效 → 自动读盘恢复工程
+  - 否则再次触发「新建工程」对话框；取消则尝试 localStorage 草稿
+
+【浏览器要求】
+  File System Access API：Chrome、Edge 等 Chromium 内核
+  便携版内置页面通过 127.0.0.1 访问，与本地 exe 同源
+
+
+================================================================================
+七、前端运行逻辑（页面加载 → 可操作）
+================================================================================
+
+  1. 浏览器请求 / → FastAPI 返回 backend/dist/index.html
+  2. index.html 加载 /assets/*.js（TanStack SPA 客户端）
+  3. React 挂载 WorkflowProvider
+  4. hydrated=true 后执行工程初始化：
+       a) 尝试 IndexedDB 恢复 .fbox 句柄并读文件
+       b) 失败则自动 showSaveFilePicker 新建
+       c) 用户取消则 restoreLocalStorageDraft()
+  5. FboxDropOverlay 注册 window 级 drag/drop（.fbox 专用）
+  6. usePreventBrowserFileDrop 阻止非 .fbox 文件在页面乱开，但允许
+     data-file-drop 上传区（Step4 CSV/PDF 等）
+  7. 用户切换 Step → 对应 Workspace 组件渲染
+  8. 各 Step 通过 fetch 调用 /api，结果写回 WorkflowContext
+  9. 状态变化 → 触发 .fbox 节流保存 + localStorage 轻量草稿（Step1 相关）
+
+
+================================================================================
+八、后端运行逻辑（请求处理）
+================================================================================
+
+  1. create_app() 启动时：
+       ensure_app_data_layout()  数据目录
+       init_master_db()          SQLite
+       注册 routers（health, config, step1, boxing, export, shipment,
+                     invoice, forwarders, master_data, tasks, pdf_tools）
+       _mount_frontend_spa()     静态资源 + SPA 回退路由
+
+  2. API 请求典型路径：
+       Router → schemas 校验 → services 编排 → fba_tool 算法 → JSON/文件流
+
+  3. 配置读取 resolve_config_read(name)：
+       优先 app_data/config/{name}
+       否则 backend/config 出厂默认
+
+  4. 大文件导出：StreamingResponse / xlsx_response 直接下载
+
+
+================================================================================
+九、侧栏与其它功能
+================================================================================
+
+【AppSidebar】
+  - DeepSeek API Key / 模型 / 温度（localStorage）
+  - 任务历史列表：加载 / 删除（调用 /api/tasks/history）
+  - 主数据、PDF 标签工具等入口
+
+【PDF 工具】/api/pdf/*
+  - 热敏标签、标签转换（多文件进多出）
+  - 与主五步工作流相对独立，可单独使用
+
+【主数据】/api/master-data/*
+  - 上传产品信息表 → SQLite
+  - Step1 录入时自动合并 SKU 属性
+
+
+================================================================================
+十、便携版构建与发布流程
+================================================================================
+
+  scripts/build_standalone.ps1 一键执行：
+
+  0. generate_qiluo_template.py     生成琪珞货代模板
+  1. frontend npm run build         Vite 生产构建
+  2. sync_frontend_static.py        frontend/dist/client → backend/dist
+  3. verify_release_dist.py         校验 index.html、$_TSR、mapDeps 等
+     verify_bundled_resources.py     校验 qiluo.xlsx、forwarders 配置
+  4. PyInstaller packaging/FBA_Smart_Tool.spec  → dist/FBA_Smart_Tool/
+  5. finish_portable_dist.py        复制使用说明、启动 bat、打 zip
+
+  发布物：
+    dist/FBA_Smart_Tool/                    文件夹（必须整包复制）
+    dist/FBA_Smart_Tool_V1.2_便携版.zip     压缩分发
+
+  升级注意：覆盖程序文件，保留 app_data/；.fbox 工程文件独立于 app_data。
+
+
+================================================================================
+十一、典型用户操作路径（端到端）
+================================================================================
+
+  【路径 A — 新货件（推荐 V1.2）】
+    启动 bat → 浏览器自动打开 → 选择 .fbox 保存位置
+    → Step1 录入 → Step2 排箱锁定 → Step3 导出 STA
+    → Step4 上传回传 CSV/PDF 校验 → Step4.5 发票
+    → 全程自动保存 .fbox，可随时拖入该文件继续
+
+  【路径 B — 继续旧工程】
+    启动 bat → 拖 .fbox 到浏览器窗口 → 恢复到上次 step 与数据
+
+  【路径 C — 仅升级程序】
+    保留 app_data/ 与 .fbox 文件 → 覆盖 FBA_Smart_Tool 文件夹
+    → 首次打开 .fbox 经 migrateProjectData 自动兼容
+
+  【路径 D — 多开防护】
+    第二次双击 exe → 检测到已运行 → 只打开浏览器，不新开端口
+
+
+================================================================================
+十二、常见问题与逻辑说明
+================================================================================
+
+  Q: 为什么必须复制整个文件夹而不能只拷 exe？
+  A: 依赖 _internal/ 内 Python 运行时、依赖库、前端 dist、templates 等。
+
+  Q: Step4 的 CSV/PDF 为什么重新打开 .fbox 后没了？
+  A: 设计如此，大文件不入 JSON；需重新上传，但校验结果字段已保存在 grid_data。
+
+  Q: 端口被占用怎么办？
+  A: 启动器自动尝试 8003、8004…；或关闭其它 FBA Smart Tool 黑窗口。
+
+  Q: 页面空白？
+  A: 检查是否完整目录版；index.html 与 assets 是否在同一 _internal/dist。
+
+  Q: .fbox 只读？
+  A: 拖入时未获得 FileSystemHandle；用「新建任务」另存或从支持句柄的方式打开。
+
+
+================================================================================
+  文档结束 — FBA Smart Tool V1.2
+================================================================================

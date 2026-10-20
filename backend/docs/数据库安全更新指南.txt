@@ -1,0 +1,76 @@
+================================================================================
+  FBA Smart Tool — 数据库安全更新指南（AI / 开发者必读）
+================================================================================
+
+目的：保证在持续用 AI 或人工改代码时，绝不因「重建表结构」而清空用户的
+      product_master 业务数据。
+
+数据库文件位置（与代码隔离）：
+  <项目根>/app_data/fba_master.db
+
+================================================================================
+一、绝对禁止的操作
+================================================================================
+
+  ❌ Base.metadata.drop_all(bind=engine)
+  ❌ DROP TABLE product_master
+  ❌ 删除 fba_master.db 后依赖 create_all 重建
+  ❌ 以「改字段」为名让用户手动删库再启动
+  ❌ 在 init / 迁移逻辑里 IF NOT EXISTS 整表替换为全新 CREATE TABLE 定义
+
+当前项目使用 sqlite3 原生连接 + CREATE TABLE IF NOT EXISTS 初始化空库；
+已有数据的表结构变更只能「追加」，不能「推倒重来」。
+
+================================================================================
+二、新增字段的标准做法（推荐）
+================================================================================
+
+参照 backend/fba_tool/master_db.py 中的 _migrate_schema()：
+
+  1. 启动或 init 时 PRAGMA table_info(product_master) 读取现有列名
+  2. 对缺失列执行：
+       ALTER TABLE product_master ADD COLUMN <列名> <类型>
+  3. 如需从旧列拷贝数据，用 UPDATE … SET 新列 = COALESCE(新列, 旧列)
+  4. 不要删除旧列（SQLite 不支持 DROP COLUMN 的轻量场景可保留废弃列）
+
+新增列示例（给 AI 的模板）：
+
+  def _migrate_schema(conn: sqlite3.Connection) -> None:
+      cols = _table_columns(conn)
+      if not cols:
+          return
+      if "new_field" not in cols:
+          conn.execute("ALTER TABLE product_master ADD COLUMN new_field TEXT")
+
+================================================================================
+三、可选：Alembic 轻量迁移
+================================================================================
+
+若表与迁移次数增多，可引入 Alembic（仍针对 app_data/fba_master.db）：
+
+  1. 在 backend/ 初始化：alembic init alembic
+  2. env.py 中 sqlalchemy.url 指向 app_paths.master_db_path()
+  3. 每次 schema 变更：alembic revision -m "add xxx" → upgrade()
+
+规则与上面相同：revision 脚本里只允许 ADD COLUMN、CREATE INDEX、数据回填；
+禁止 drop_all / drop_table(product_master)。
+
+================================================================================
+四、AI 接到「加一个数据库字段」时的执行清单
+================================================================================
+
+  □ 只改 master_db.py（或 Alembic revision），增加 ADD COLUMN 迁移
+  □ 更新读写 API / 类型定义
+  □ 不修改 app_data/ 路径，不移动或删除 fba_master.db
+  □ 不提交 app_data/ 到 Git（已在 .gitignore）
+  □ 本地用已有 db 文件启动一次，确认旧数据仍在且新列可写
+
+================================================================================
+五、相关文件
+================================================================================
+
+  backend/fba_tool/app_paths.py      业务数据目录 app_data/
+  backend/fba_tool/master_db.py      SQLite 初始化与 _migrate_schema
+  app_data/fba_master.db             用户产品主数据（勿入库）
+
+================================================================================
