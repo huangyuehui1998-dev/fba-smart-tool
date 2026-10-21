@@ -1,0 +1,156 @@
+{
+  "playwright_live": false,
+  "note": "待核实：本环境没有对已启动的应用跑 Playwright。事件条数等于步骤表，不是实跑点击。",
+  "baseline_events": [
+    {
+      "kind": "edit",
+      "name": "SKU"
+    },
+    {
+      "kind": "edit",
+      "name": "发货总数"
+    },
+    {
+      "kind": "edit",
+      "name": "单箱装量"
+    },
+    {
+      "kind": "edit",
+      "name": "箱长"
+    },
+    {
+      "kind": "edit",
+      "name": "箱宽"
+    },
+    {
+      "kind": "edit",
+      "name": "箱高"
+    },
+    {
+      "kind": "edit",
+      "name": "单箱毛重"
+    },
+    {
+      "kind": "click",
+      "name": "解析"
+    },
+    {
+      "kind": "click",
+      "name": "下一步排箱"
+    },
+    {
+      "kind": "click",
+      "name": "自动排箱"
+    },
+    {
+      "kind": "click",
+      "name": "锁定方案"
+    },
+    {
+      "kind": "click",
+      "name": "下一步导出"
+    },
+    {
+      "kind": "click",
+      "name": "下载内部表"
+    },
+    {
+      "kind": "click",
+      "name": "下载 STA"
+    },
+    {
+      "kind": "click",
+      "name": "下载装箱单"
+    },
+    {
+      "kind": "click",
+      "name": "下载实操单"
+    },
+    {
+      "kind": "click",
+      "name": "下一步校验"
+    },
+    {
+      "kind": "click",
+      "name": "选择 CSV"
+    },
+    {
+      "kind": "click",
+      "name": "选择 PDF"
+    },
+    {
+      "kind": "click",
+      "name": "开始校验"
+    },
+    {
+      "kind": "click",
+      "name": "下一步发票"
+    },
+    {
+      "kind": "click",
+      "name": "下一步报关"
+    },
+    {
+      "kind": "edit",
+      "name": "订单号"
+    },
+    {
+      "kind": "click",
+      "name": "生成预览"
+    },
+    {
+      "kind": "click",
+      "name": "确认毛重"
+    },
+    {
+      "kind": "click",
+      "name": "导出报关"
+    }
+  ],
+  "current_events": [
+    {
+      "kind": "edit",
+      "name": "粘贴一批"
+    },
+    {
+      "kind": "click",
+      "name": "解析"
+    },
+    {
+      "kind": "click",
+      "name": "下一步排箱"
+    },
+    {
+      "kind": "click",
+      "name": "锁定方案"
+    },
+    {
+      "kind": "click",
+      "name": "下一步导出"
+    },
+    {
+      "kind": "click",
+      "name": "一键导出全部"
+    },
+    {
+      "kind": "click",
+      "name": "下一步校验"
+    },
+    {
+      "kind": "click",
+      "name": "开始校验"
+    },
+    {
+      "kind": "click",
+      "name": "进入报关"
+    },
+    {
+      "kind": "edit",
+      "name": "订单号"
+    },
+    {
+      "kind": "click",
+      "name": "导出报关"
+    }
+  ]
+}

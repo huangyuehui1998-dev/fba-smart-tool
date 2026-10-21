@@ -209,7 +209,7 @@ export function Step3Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
           </TabsContent>
           <TabsContent value="amazon">
             <p className="mb-2 text-xs text-muted-foreground">
-              导出时将自动转换为 in / lb；下方矩阵为装箱数量分布预览。
+              导出时将自动转换为 in / lb；下方矩阵为装箱数量分布预览。STA 下拉清单仍是 provisional，待核实。空白卖家后台模板到手之前，预处理选项只供参考。
             </p>
             <MatrixTable matrix={step3Matrix} />
             {highlights.length > 0 && (

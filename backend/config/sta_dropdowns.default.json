@@ -1,4 +1,5 @@
 {
+  "status": "provisional",
   "template_filename": "Send to Amazon表格.xlsx",
   "extracted_at": "2026-10-20",
   "template_note": "仓库里的 Send to Amazon表格.xlsx 只有箱数和尺寸的数值验证，没有预处理下拉列表。下列取值来自该模板第 6 行实测单元格，以及卖家后台中文 STA 已知选项。贴标、空、由卖家提供必须在清单内。把新的空白模板放到 app_data/config/sta_template.xlsx 后，用 scripts/extract_sta_dropdowns.py 重新抽取。",

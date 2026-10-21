@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 BASELINE_PATH = ROOT / "docs" / "ux_baseline.json"
+EVENTS_PATH = ROOT / "docs" / "ux_baseline_events.json"
 
 # 改前：四个文件分开下，SKU / 数量 / 装量 / 长宽高 / 毛重 / 订单号都要手改。
 BASELINE_STEPS = [
@@ -73,7 +74,14 @@ def check() -> None:
     assert recorded["current"] == current, (recorded["current"], current)
     assert current["clicks"] <= baseline["clicks"] * 0.5
     assert current["manual_cell_edits"] <= baseline["manual_cell_edits"] * 0.5
-    print(json.dumps({"baseline": baseline, "current": current}, ensure_ascii=False))
+    events = json.loads(EVENTS_PATH.read_text(encoding="utf-8"))
+    assert events.get("playwright_live") is False
+    assert "待核实" in str(events.get("note") or "")
+    assert len(events["baseline_events"]) == baseline["clicks"] + baseline["manual_cell_edits"]
+    assert len(events["current_events"]) == current["clicks"] + current["manual_cell_edits"]
+    assert [item["kind"] for item in events["baseline_events"]] == [step["kind"] for step in BASELINE_STEPS]
+    assert [item["kind"] for item in events["current_events"]] == [step["kind"] for step in CURRENT_STEPS]
+    print(json.dumps({"baseline": baseline, "current": current, "playwright_live": False}, ensure_ascii=False))
 
 
 def main() -> None:
