@@ -92,10 +92,14 @@ def test_rule_profile_seeded_and_editable():
         update_rule_profile({"net_minus_per_box": -1})
 
 
-def test_customs_defaults_follow_rule_profile():
+def test_customs_defaults_follow_rule_profile(monkeypatch):
     from fba_tool.customs_package import build_customs_data
     from test_customs_package import _sample_pair
 
+    monkeypatch.setattr(
+        "fba_tool.customs_package._catalog_hints",
+        lambda sku: {"中文品名": "宠物垫", "单个货值": 10, "申报价来源": "lingxing"},
+    )
     update_rule_profile({"loading_port": "上海"})
     d = build_customs_data([_sample_pair()], [], {"id": "t"}, source="shipment", order_no="T")
     assert d.loading_port == "上海"

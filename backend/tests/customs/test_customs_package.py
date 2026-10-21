@@ -33,7 +33,11 @@ def _sample_pair() -> ShipmentPair:
     return ShipmentPair("FBA19TEST001", "VGT2", ship, PdfShipment("FBA19TEST001", 0, pages=[]))
 
 
-def test_merge_by_chinese_name_and_hs():
+def test_merge_by_chinese_name_and_hs(monkeypatch):
+    monkeypatch.setattr(
+        "fba_tool.customs_package._catalog_hints",
+        lambda sku: {"中文品名": "宠物垫", "单个货值": 10, "申报价来源": "lingxing"},
+    )
     profile = {
         "id": "test",
         "name": "测试公司",

@@ -67,13 +67,21 @@ def test_merge_unit_price_half_up_and_total_is_price_times_qty():
 
 
 def test_unit_from_master_declare_unit(monkeypatch):
-    monkeypatch.setattr(cp, "_catalog_hints", lambda sku: {"中文品名": "宠物垫", "declare_unit": "个"})
+    monkeypatch.setattr(
+        cp,
+        "_catalog_hints",
+        lambda sku: {"中文品名": "宠物垫", "declare_unit": "个", "单个货值": 10, "申报价来源": "lingxing"},
+    )
     data = build_customs_data([_sample_pair()], [], PROFILE, source="shipment", order_no="T1")
     assert {l.unit for l in data.lines} == {"个"}
 
 
 def test_totals_gross_and_net(monkeypatch):
-    monkeypatch.setattr(cp, "_catalog_hints", lambda sku: {"中文品名": "宠物垫"})
+    monkeypatch.setattr(
+        cp,
+        "_catalog_hints",
+        lambda sku: {"中文品名": "宠物垫", "单个货值": 10, "申报价来源": "lingxing"},
+    )
     data = build_customs_data([_sample_pair()], [], PROFILE, source="shipment", order_no="T1")
     # 2 箱：12.5 + 11.0；净重 = 23.5 − 0.2×2
     assert data.total_pieces == 2

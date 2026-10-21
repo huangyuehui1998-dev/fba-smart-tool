@@ -41,13 +41,13 @@ def test_legacy_price_warns(monkeypatch):
 
 
 def test_missing_price_blocks_and_not_zero(monkeypatch):
-    data = _build(monkeypatch, {"中文品名": "宠物垫"})
-    assert "price_missing" in _codes(data)
-    assert data.blocking and "申报价" in data.blocking[0]["message"]
-    assert data.lines[0].price_source == "none"
-    with pytest.raises(CustomsExportBlocked) as ei:
-        export_customs_package(data, TEMPLATE.read_bytes())
-    assert "申报价" in str(ei.value)
+    from fba_tool.declared_value import MissingPrice
+
+    with pytest.raises(MissingPrice) as ei:
+        _build(monkeypatch, {"中文品名": "宠物垫"})
+    assert ei.value.code == "DECLARED_VALUE_MISSING"
+    assert "缺申报价" in ei.value.message
+    assert "0.00" not in ei.value.message
 
 
 def test_export_blocks_line_with_zero_price_from_edited_payload():

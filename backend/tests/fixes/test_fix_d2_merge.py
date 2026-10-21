@@ -32,7 +32,11 @@ def _pairs():
 
 
 def test_d2_merge_unassigned_tickets(monkeypatch):
-    monkeypatch.setattr(cp, "_catalog_hints", lambda sku: {"中文品名": "宠物用品"})
+    monkeypatch.setattr(
+        cp,
+        "_catalog_hints",
+        lambda sku: {"中文品名": "宠物用品", "单个货值": 10, "申报价来源": "lingxing"},
+    )
     data = build_customs_data(_pairs(), [], PROFILE, source="shipment", order_no="T")
     assert data.total_pieces == 145
     assert data.total_gross_kg == 840.9

@@ -400,7 +400,7 @@ def _apply_declared_quote(
     marked = [row for row in rows if row.get("_quote_hints") is not None]
     if not marked:
         return None
-    from fba_tool.declared_value import FxRateRequired, MissingPrice, quote_declared_value
+    from fba_tool.declared_value import FxRateRequired, quote_declared_value
     from fba_tool.fx_rates import snapshot_for_declaration
 
     profile = _rule_profile()
@@ -444,14 +444,6 @@ def _apply_declared_quote(
         })
     try:
         quoted = quote_declared_value(lines, basis, fx, month=month or "0000-00")
-    except MissingPrice:
-        for row in marked:
-            row["unit_price"] = 0.0
-            row["amount"] = 0.0
-            row["price_source"] = "none"
-            row["raw_price"] = None
-            row.pop("_quote_hints", None)
-        return None
     except FxRateRequired:
         for row in marked:
             row.pop("_quote_hints", None)
