@@ -89,6 +89,17 @@ def _apply_style(ws, row: int, styles: List[Any]) -> None:
         ws.cell(row=row, column=i)._style = copy(st)
 
 
+def _drop_shifted_total_merges(ws, min_row: int = 25) -> None:
+    """合计行下移后，正文区残留的 M:N 合并会盖住海关编码。只拆第 min_row 行起的 M:N。"""
+    stale = [
+        str(merged)
+        for merged in list(ws.merged_cells.ranges)
+        if merged.min_col == 13 and merged.max_col == 14 and merged.min_row >= min_row
+    ]
+    for ref in stale:
+        ws.unmerge_cells(ref)
+
+
 def _fmt_dim(v: Any) -> str:
     """尺寸文本固定两位小数，避免 10 和 10.00 在发票里看起来像不同精度。"""
     if v is None:
@@ -194,6 +205,7 @@ def write_jiufang(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, An
     inv["B19"] = code
     inv["B22"] = code
     data_st, total_st = _style_row(inv, 25), _style_row(inv, 26)
+    _drop_shifted_total_merges(inv, 25)
     for c in inv[26]:
         c.value = None
     for i, l in enumerate(model.lines):

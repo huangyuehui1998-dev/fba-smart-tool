@@ -84,6 +84,7 @@ async def _run(forwarder_id, csv_file, reference_id, order_no, channel, invoice_
                weight_basis="", weight_ref_file=None):
     from fba_tool.invoice_export import export_invoice
     from fba_tool.invoice_rules import read_jiufang_box_data
+    from fba_tool.invoice_table import overlay_csv_asin
     from fba_tool.invoice_templates import _ship_to_codes
     from fba_tool.master_db import lookup_by_fnsku
     from fba_tool.shipment_parser import parse_csv_shipment
@@ -109,6 +110,7 @@ async def _run(forwarder_id, csv_file, reference_id, order_no, channel, invoice_
         p = lookup_by_fnsku(f)
         if p:
             products[f] = p
+    products = overlay_csv_asin(products, csv_bytes)
     code, wh_source = resolve_export_warehouse(forwarder_id, warehouse, s.ship_to, s.warehouse_code)
     measured = None
     if measured_file is not None:

@@ -340,17 +340,18 @@ test("desensitized batch 13 fills step 4.5 then exports", async ({ page }) => {
     '"货件编号","FBA13DS01"',
     '"货件名称","B13-DESENS"',
     '"配送地址","STEP45VILLE, ZZ"',
-    '"箱子数量","1"',
+    '"箱子数量","4"',
     "",
-    '"单件商品（1 箱）"',
-    '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量"',
-    '"B13-SKU","rod","B0B13DS001","X00B13E2E1","新品","无","4","4"',
+    '"多件商品（4 箱）"',
+    '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量","箱子 2 的商品数量","箱子 3 的商品数量","箱子 4 的商品数量"',
+    '"B13-AAA","rod","B0B13AAA1","X00TESTAAA","新品","无","4","2","2","",""',
+    '"B13-TANZI","rod","B0B13TNZ1","X00TESTTNZ","新品","无","4","","","2","2"',
     "",
-    '"","","","","","","箱号","FBA13DS01U000001"',
-    '"","","","","","","包装箱重量（磅）：","10"',
-    '"","","","","","","包装箱长度（英寸）：","17.70"',
-    '"","","","","","","包装箱宽度（英寸）：","17.70"',
-    '"","","","","","","包装箱高度（英寸）：","16.10"',
+    '"","","","","","","箱号","FBA13DS01U000001","FBA13DS01U000002","FBA13DS01U000003","FBA13DS01U000004"',
+    '"","","","","","","包装箱重量（磅）：","10","10","10","10"',
+    '"","","","","","","包装箱长度（英寸）：","17.70","17.70","17.70","17.70"',
+    '"","","","","","","包装箱宽度（英寸）：","17.70","17.70","17.70","17.70"',
+    '"","","","","","","包装箱高度（英寸）：","16.10","16.10","16.10","16.10"',
   ].join("\n");
   execFileSync(
     e2ePython(),
@@ -361,20 +362,25 @@ import json
 from fba_tool.master_db import init_master_db, upsert_product
 from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
 init_master_db()
-upsert_product({
-    "sku": "B13-SKU",
-    "fnsku": "X00B13E2E1",
-    "asin": "B0B13DS001",
-    "english_name": "Fishing rod",
-    "chinese_name": "鱼竿",
-    "brand": "Acme",
-    "material": "塑料",
-    "purpose": "户外",
-    "hs_code": "9507100090",
-    "model_name": "型号乙",
-    "extra_data": json.dumps({"invoice": {"unit": "个", "purchase_price": 5, "material_en": "plastic", "purpose_en": "outdoor", "pcs_per_set": 1}}, ensure_ascii=False),
-})
-set_product_fields("B13-SKU", {"listing_price": 12.5, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+for sku, fnsku, asin, price in (
+    ("B13-AAA", "X00TESTAAA", "B0B13AAA1", 10),
+    ("B13-TANZI", "X00TESTTNZ", "B0B13TNZ1", 49.99),
+):
+    upsert_product({
+        "sku": sku,
+        "fnsku": fnsku,
+        "asin": asin,
+        "english_name": "Fishing rod",
+        "chinese_name": "鱼竿",
+        "brand": "Acme",
+        "material": "塑料",
+        "purpose": "户外",
+        "hs_code": "9507100090",
+        "model_name": "共用型号",
+        "declared_value": price,
+        "extra_data": json.dumps({"invoice": {"unit": "个", "purchase_price": 5, "material_en": "plastic", "purpose_en": "outdoor", "pcs_per_set": 1}}, ensure_ascii=False),
+    })
+    set_product_fields(sku, {"listing_price": 12.5, "listing_price_currency": "USD"}, SOURCE_MANUAL)
 `,
     ],
     {
@@ -409,7 +415,7 @@ set_product_fields("B13-SKU", {"listing_price": 12.5, "listing_price_currency": 
         e2ePython(),
         [
           "-c",
-          "import json,sys; from openpyxl import load_workbook; wb=load_workbook(sys.argv[1]); ws=wb.active; print(json.dumps({c: ws[c].value for c in ('C4','K2','H2','I2','E15','A4')}, default=str))",
+          "import json,sys; from openpyxl import load_workbook; wb=load_workbook(sys.argv[1]); ws=wb.active; cols=('C4','A2','A3','F2','F3','G2','G3','K2','K3','H2','I2','E15','E16','A4'); print(json.dumps({c: ws[c].value for c in cols}, default=str))",
           file,
         ],
         { encoding: "utf-8" },
@@ -420,16 +426,39 @@ set_product_fields("B13-SKU", {"listing_price": 12.5, "listing_price_currency": 
   await expect(page.getByTestId("invoice-autofill")).toBeEnabled({ timeout: 20_000 });
   const qiluoGen = page.waitForResponse((response) => response.url().includes("/api/invoice/generate"));
   await page.getByTestId("invoice-autofill").click();
-  expect((await qiluoGen).status()).toBe(200);
+  const qiluoGenerated = await qiluoGen;
+  expect(qiluoGenerated.status()).toBe(200);
+  const qiluoBody = await qiluoGenerated.json();
+  const qiluoByCell = Object.fromEntries(
+    (qiluoBody.cells as { cell: string; value: unknown }[]).map((item) => [item.cell, item.value]),
+  );
+  expect(qiluoByCell.A2).toBe("1-2");
+  expect(qiluoByCell.A3).toBe("3-4");
+  expect(qiluoByCell.K2).toBe("共用型号");
+  expect(qiluoByCell.K3).toBe("共用型号");
+  expect(Number(qiluoByCell.G2)).toBe(10);
+  expect(Number(qiluoByCell.G3)).toBe(49.99);
   await expect(page.getByTestId("invoice-autofill")).toBeEnabled();
   const qiluoFile = join(mkdtempSync(join(tmpdir(), "fba-b13-qiluo-")), "out.xlsx");
   const qiluoExport = await exportWorkbook(page);
   expect(qiluoExport.status).toBe(200);
   writeFileSync(qiluoFile, qiluoExport.body);
   const qiluo = readCells(qiluoFile);
-  expect(qiluo.K2).toBe("型号乙");
+  expect(qiluo.K2).toBe("共用型号");
+  expect(qiluo.K3).toBe("共用型号");
+  expect(qiluo.A2).toBe("1-2");
+  expect(qiluo.A3).toBe("3-4");
   expect(qiluo.H2).toBe("塑料");
   expect(qiluo.I2).toBe("户外");
+  expect(Number(qiluo.G2)).toBe(10);
+  expect(Number(qiluo.G3)).toBe(49.99);
+  const declared = [qiluo.G2, qiluo.G3].reduce((sum, price, index) => {
+    const per = Number(index === 0 ? qiluo.F2 : qiluo.F3);
+    const range = String(index === 0 ? qiluo.A2 : qiluo.A3).split("-").map(Number);
+    const boxes = range.length === 2 ? range[1] - range[0] + 1 : 1;
+    return sum + Number(price) * per * boxes;
+  }, 0);
+  expect(Math.round(declared * 100) / 100).toBe(239.96);
 
   await chooseForwarder(page, "SEND（亚马逊 SEND 渠道）");
   await expect(page.getByTestId("invoice-autofill")).toBeEnabled({ timeout: 20_000 });
@@ -444,5 +473,6 @@ set_product_fields("B13-SKU", {"listing_price": 12.5, "listing_price_currency": 
   const send = readCells(sendFile);
   expect(send.C4).toBe("FBA13DS01");
   expect(String(send.A4)).toContain("FBA Shipment ID");
-  expect(send.E15).toBe("X00B13E2E1");
+  expect(send.E15).toBe("X00TESTAAA");
+  expect(send.E16).toBe("X00TESTTNZ");
 });

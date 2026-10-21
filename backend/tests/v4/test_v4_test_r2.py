@@ -31,7 +31,15 @@ def _csv(shipment: str, sku: str, fnsku: str, asin: str) -> bytes:
     ]).encode("utf-8")
 
 
-def _seed(sku: str, fnsku: str, asin: str, model_name: str, material: str = "塑料", purpose: str = "户外"):
+def _seed(
+    sku: str,
+    fnsku: str,
+    asin: str,
+    model_name: str,
+    material: str = "塑料",
+    purpose: str = "户外",
+    declared_value: float | None = None,
+):
     from fba_tool.master_db import _connect, init_master_db, upsert_product
     from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
 
@@ -60,6 +68,7 @@ def _seed(sku: str, fnsku: str, asin: str, model_name: str, material: str = "塑
             "purpose": purpose,
             "hs_code": "9507100090",
             "model_name": model_name,
+            "declared_value": declared_value,
             "extra_data": json.dumps(
                 {"invoice": {"unit": "个", "purchase_price": 5, "material_en": "plastic", "purpose_en": "outdoor", "pcs_per_set": 1}},
                 ensure_ascii=False,
@@ -81,7 +90,7 @@ def test_desensitized_batch13_fill_then_export(forwarder_id):
     from fba_tool.master_db import delete_product_by_sku
     from main import app
 
-    sku, fnsku, asin = "B13-SKU", "X00B13E2E1", "B0B13DS001"
+    sku, fnsku, asin = "B13-SKU", "X00TESTE2E", "B0B13DS001"
     _seed(sku, fnsku, asin, "型号乙")
     raw = _csv("FBA13DS01", sku, fnsku, asin)
     client = TestClient(app)
@@ -152,8 +161,8 @@ def test_qiluo_empty_model_name_does_not_fall_back_to_sku():
     from main import app
 
     sku = "B13-NOMODEL"
-    _seed(sku, "X00B13NONE", "B0B13NONE1", "")
-    raw = _csv("FBA13NONE", sku, "X00B13NONE", "B0B13NONE1")
+    _seed(sku, "X00TESTNON", "B0B13NONE1", "")
+    raw = _csv("FBA13NONE", sku, "X00TESTNON", "B0B13NONE1")
     client = TestClient(app)
     try:
         generated = client.post(
@@ -220,8 +229,8 @@ def test_export_field_edit_overrides_rendered_qiluo_model():
     from main import app
 
     sku = "B13-EDIT"
-    _seed(sku, "X00B13EDIT", "B0B13EDIT1", "型号乙")
-    raw = _csv("FBA13EDIT", sku, "X00B13EDIT", "B0B13EDIT1")
+    _seed(sku, "X00TESTEDT", "B0B13EDIT1", "型号乙")
+    raw = _csv("FBA13EDIT", sku, "X00TESTEDT", "B0B13EDIT1")
     client = TestClient(app)
     try:
         generated = client.post(
@@ -326,3 +335,301 @@ def test_rollback_restores_sql_null_not_empty_text(monkeypatch, tmp_path):
         ).fetchone()
     assert list(restored) == [None, None, None, None, None]
     delete_product_by_sku(sku)
+
+
+def _range_boxes(label: str) -> int:
+    text = str(label)
+    if "-" not in text:
+        return 1
+    start, end = text.split("-", 1)
+    return int(end) - int(start) + 1
+
+
+def _multi_sku_csv() -> bytes:
+    return "\n".join([
+        '"货件编号","FBA13DS01"',
+        '"货件名称","B13-DESENS"',
+        '"配送地址","STEP45VILLE, ZZ"',
+        '"箱子数量","4"',
+        "",
+        '"多件商品（4 箱）"',
+        '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量","箱子 2 的商品数量","箱子 3 的商品数量","箱子 4 的商品数量"',
+        '"B13-AAA","rod","B0B13AAA1","X00TESTAAA","新品","无","4","2","2","",""',
+        '"B13-TANZI","rod","B0B13TNZ1","X00TESTTNZ","新品","无","4","","","2","2"',
+        "",
+        '"","","","","","","箱号","FBA13DS01U000001","FBA13DS01U000002","FBA13DS01U000003","FBA13DS01U000004"',
+        '"","","","","","","包装箱重量（磅）：","10","10","10","10"',
+        '"","","","","","","包装箱长度（英寸）：","17.70","17.70","17.70","17.70"',
+        '"","","","","","","包装箱宽度（英寸）：","17.70","17.70","17.70","17.70"',
+        '"","","","","","","包装箱高度（英寸）：","16.10","16.10","16.10","16.10"',
+    ]).encode("utf-8")
+
+
+def test_qiluo_multi_sku_rows_and_declared_total():
+    """同一型号的两个 SKU 各占一行，申报总额含 TANZI 的 49.99。"""
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import delete_product_by_sku
+    from main import app
+
+    skus = (
+        ("B13-AAA", "X00TESTAAA", "B0B13AAA1", 10),
+        ("B13-TANZI", "X00TESTTNZ", "B0B13TNZ1", 49.99),
+    )
+    for sku, fnsku, asin, price in skus:
+        delete_product_by_sku(sku)
+        _seed(sku, fnsku, asin, "共用型号", declared_value=price)
+    raw = _multi_sku_csv()
+    client = TestClient(app)
+    try:
+        generated = client.post(
+            "/api/invoice/generate",
+            json={
+                "shipment_id": "FBA13DS01",
+                "forwarder_id": "qiluo",
+                "csv_base64": base64.b64encode(raw).decode(),
+            },
+        )
+        assert generated.status_code == 200, generated.text
+        cells = generated.json()["cells"]
+        by_field: dict[str, list] = {}
+        for item in cells:
+            by_field.setdefault(item.get("field_key"), []).append(item.get("value"))
+        assert by_field.get("box_range") == ["1-2", "3-4"]
+        assert by_field.get("model") == ["共用型号", "共用型号"]
+        prices = [float(value) for value in by_field.get("declared_price") or []]
+        qty = [float(value) for value in by_field.get("qty_per_box") or []]
+        assert prices == [10.0, 49.99]
+        assert qty == [2.0, 2.0]
+        total = sum(price * per * _range_boxes(label) for price, per, label in zip(prices, qty, by_field["box_range"]))
+        assert round(total, 2) == 239.96
+        located = {item["cell"]: item.get("value") for item in cells}
+        assert located.get("K2") == "共用型号"
+        assert located.get("K3") == "共用型号"
+        assert located.get("G2") == 10 or located.get("G2") == 10.0
+        assert float(located.get("G3")) == 49.99
+    finally:
+        for sku, *_rest in skus:
+            delete_product_by_sku(sku)
+
+
+def test_send_and_jiufang_take_asin_from_csv_when_product_asin_is_empty():
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import delete_product_by_sku, get_product_by_sku
+    from main import app
+
+    sku, fnsku, asin = "B13-NOASIN", "X00TESTNAS", "B0CSVASIN1"
+    delete_product_by_sku(sku)
+    _seed(sku, fnsku, "", "型号乙")
+    raw = _csv("FBA13DS01", sku, fnsku, asin)
+    client = TestClient(app)
+    try:
+        for forwarder_id in ("send", "jiufang"):
+            generated = client.post(
+                "/api/invoice/generate",
+                json={
+                    "shipment_id": "FBA13DS01",
+                    "forwarder_id": forwarder_id,
+                    "csv_base64": base64.b64encode(raw).decode(),
+                },
+            )
+            assert generated.status_code == 200, f"{forwarder_id} {generated.text}"
+            assert "缺发票必填字段" not in generated.text
+        exported = client.post(
+            "/api/invoice-export/export",
+            data={"forwarder_id": "send", "reference_id": "R"},
+            files={"csv_file": ("ship.csv", raw, "text/csv")},
+        )
+        assert exported.status_code == 200, exported.text[:400]
+        wb = _book(exported.content)
+        try:
+            sheet = next(ws for ws in wb.worksheets if "Invoice" in ws.title)
+            assert sheet["N15"].value == asin
+        finally:
+            wb.close()
+        jiufang = client.post(
+            "/api/invoice-export/export",
+            data={"forwarder_id": "jiufang", "reference_id": "R", "warehouse": "TST1", "order_no": "LCLX"},
+            files={"csv_file": ("ship.csv", raw, "text/csv")},
+        )
+        assert jiufang.status_code == 200, jiufang.text[:400]
+        book = _book(jiufang.content)
+        try:
+            assert book["Invoice"]["U25"].value == asin
+        finally:
+            book.close()
+        stored = get_product_by_sku(sku) or {}
+        assert not str(stored.get("asin") or "").strip()
+    finally:
+        delete_product_by_sku(sku)
+
+
+def _dim_csv() -> bytes:
+    return "\n".join([
+        '"货件编号","FBA13DIM1"',
+        '"货件名称","B13-DIM"',
+        '"配送地址","STEP45VILLE, ZZ"',
+        '"箱子数量","1"',
+        "",
+        '"单件商品（1 箱）"',
+        '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量"',
+        '"B13-DIM","rod","B0B13DIM1","X00TESTDIM","新品","无","4","4"',
+        "",
+        '"","","","","","","箱号","FBA13DIM1U000001"',
+        '"","","","","","","包装箱重量（磅）：","10"',
+        '"","","","","","","包装箱长度（英寸）：","17.72"',
+        '"","","","","","","包装箱宽度（英寸）：","17.72"',
+        '"","","","","","","包装箱高度（英寸）：","16.14"',
+    ]).encode("utf-8")
+
+
+def test_send_dimension_text_uses_two_decimals():
+    import re
+
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import delete_product_by_sku
+    from main import app
+
+    sku = "B13-DIM"
+    delete_product_by_sku(sku)
+    _seed(sku, "X00TESTDIM", "B0B13DIM1", "型号乙")
+    client = TestClient(app)
+    try:
+        exported = client.post(
+            "/api/invoice-export/export",
+            data={"forwarder_id": "send"},
+            files={"csv_file": ("dim.csv", _dim_csv(), "text/csv")},
+        )
+        assert exported.status_code == 200, exported.text[:400]
+        wb = _book(exported.content)
+        try:
+            sheet = next(ws for ws in wb.worksheets if "Invoice" in ws.title)
+            text = str(sheet["B15"].value)
+        finally:
+            wb.close()
+    finally:
+        delete_product_by_sku(sku)
+    assert text == "45.01*45.01*41.00"
+    assert re.fullmatch(r"\d+\.\d{2}(\*\d+\.\d{2}){2}", text)
+
+
+def _lines_csv(count: int) -> bytes:
+    headers = ["SKU", "商品名称", "ASIN", "FNSKU", "状况", "预处理类型", "商品总数"]
+    headers += [f"箱子 {i} 的商品数量" for i in range(1, count + 1)]
+    body = [",".join(f'"{cell}"' for cell in headers)]
+    for index in range(1, count + 1):
+        qty = ["4" if col == index else "" for col in range(1, count + 1)]
+        row = [f"B13-L{index}", "rod", f"B0LINE{index:02d}", f"X00TESTL{index}", "新品", "无", "4", *qty]
+        body.append(",".join(f'"{cell}"' for cell in row))
+    marks = ["", "", "", "", "", "", "箱号"] + [f"FBA13LINEU{index:06d}" for index in range(1, count + 1)]
+    weight = ["", "", "", "", "", "", "包装箱重量（磅）："] + ["10"] * count
+    length = ["", "", "", "", "", "", "包装箱长度（英寸）："] + ["10"] * count
+    width = ["", "", "", "", "", "", "包装箱宽度（英寸）："] + ["10"] * count
+    height = ["", "", "", "", "", "", "包装箱高度（英寸）："] + ["10"] * count
+    return "\n".join([
+        '"货件编号","FBA13LINE"',
+        '"货件名称","B13-LINE"',
+        '"配送地址","STEP45VILLE, ZZ"',
+        f'"箱子数量","{count}"',
+        "",
+        f'"多件商品（{count} 箱）"' if count > 1 else '"单件商品（1 箱）"',
+        *body,
+        "",
+        ",".join(f'"{cell}"' for cell in marks),
+        ",".join(f'"{cell}"' for cell in weight),
+        ",".join(f'"{cell}"' for cell in length),
+        ",".join(f'"{cell}"' for cell in width),
+        ",".join(f'"{cell}"' for cell in height),
+    ]).encode("utf-8")
+
+
+def _poison_jiufang(raw: bytes) -> bytes:
+    wb = _book(raw)
+    inv = wb["Invoice"]
+    for ref in ("M26:N26", "M27:N27"):
+        if ref not in {str(merged) for merged in inv.merged_cells.ranges}:
+            inv.merge_cells(ref)
+    buf = io.BytesIO()
+    wb.save(buf)
+    wb.close()
+    return buf.getvalue()
+
+
+def _body_mn(ws) -> list[str]:
+    return sorted(
+        str(merged)
+        for merged in ws.merged_cells.ranges
+        if merged.min_col == 13 and merged.max_col == 14 and merged.min_row >= 25
+    )
+
+
+def test_jiufang_total_merge_follows_the_total_row(monkeypatch):
+    from openpyxl.cell.cell import MergedCell
+
+    from fba_tool.invoice_export import _template_bytes, export_invoice, get_export_forwarder
+    from fba_tool.shipment_parser import parse_csv_shipment
+
+    fw = get_export_forwarder("jiufang")
+    poisoned = _poison_jiufang(_template_bytes(fw))
+    header_before = _book(poisoned)["Invoice"]
+    kept = sorted(
+        str(merged)
+        for merged in header_before.merged_cells.ranges
+        if merged.min_row < 25
+    )
+    header_before.parent.close()
+    monkeypatch.setattr("fba_tool.invoice_export._template_bytes", lambda _fw: poisoned)
+
+    def products(count: int) -> dict:
+        out = {}
+        for index in range(1, count + 1):
+            fnsku = f"X00TESTL{index}"
+            out[fnsku] = {
+                "sku": f"B13-L{index}",
+                "fnsku": fnsku,
+                "asin": f"B0LINE{index:02d}",
+                "listing_price": 10.0,
+                "english_name": "Item",
+                "chinese_name": "物品",
+                "brand": "B",
+                "material": "铁",
+                "purpose": "用",
+                "hs_code": "7326909000",
+                "model_name": "无",
+                "invoice": {
+                    "unit": "个",
+                    "purchase_price": 5,
+                    "material_en": "iron",
+                    "purpose_en": "use",
+                    "pcs_per_set": 1,
+                },
+            }
+        return out
+
+    warehouse = {"address1": "1 Test Road", "city": "STEP45VILLE", "state": "ZZ", "zip": "00000"}
+    expected = {1: ["M26:N26"], 2: ["M27:N27"], 3: ["M28:N28"]}
+    for count, merges in expected.items():
+        ship = parse_csv_shipment(_lines_csv(count), file_name="lines.csv")
+        result = export_invoice(
+            "jiufang",
+            shipment=ship,
+            products=products(count),
+            reference_id="R",
+            warehouse="TST1",
+            warehouse_info=warehouse,
+            order_no="LCLX",
+        )
+        wb = _book(result["bytes"])
+        try:
+            inv = wb["Invoice"]
+            assert _body_mn(inv) == merges
+            assert "M27:N27" not in _body_mn(inv) or count == 2
+            data_row = 24 + count
+            assert not isinstance(inv[f"N{data_row}"], MergedCell)
+            assert str(inv[f"N{data_row}"].value) == "7326909000"
+            header_now = sorted(str(merged) for merged in inv.merged_cells.ranges if merged.min_row < 25)
+            assert header_now == kept
+        finally:
+            wb.close()

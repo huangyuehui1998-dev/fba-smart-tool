@@ -58,6 +58,7 @@ def render_adapter_invoice(
 ) -> Dict[str, Any]:
     """和 /api/invoice-export/export 同一套解析、产品、仓库和适配器。"""
     from fba_tool.invoice_export import export_invoice
+    from fba_tool.invoice_table import overlay_csv_asin
     from fba_tool.master_db import lookup_by_fnsku
     from fba_tool.shipment_parser import parse_csv_shipment
     from fba_tool.shipment_serialize import resolve_csv_shipment
@@ -76,6 +77,7 @@ def render_adapter_invoice(
         product = lookup_by_fnsku(fnsku)
         if product:
             products[fnsku] = product
+    products = overlay_csv_asin(products, csv_bytes)
     code, _source = resolve_export_warehouse(forwarder_id, "", ship.ship_to, ship.warehouse_code)
     result = export_invoice(
         forwarder_id,

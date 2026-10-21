@@ -7,7 +7,7 @@ import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 import pdfplumber
@@ -70,6 +70,34 @@ def format_box_u_label(box_no: int) -> str:
 
 def normalize_fba_box_id(value: str) -> str:
     return re.sub(r"\s+", "", str(value or "").strip().upper())
+
+
+def snapshot_box_id(spec: Any, ids: Optional[Dict[Any, str]] = None) -> str:
+    """快照用的箱唛。真正的 FBA…U 优先于包装箱名称（如 P1 - B1）。"""
+    from fba_tool.carton_math import is_fba_box_id
+
+    mapping = ids or {}
+    box_no = spec.get("箱号") if hasattr(spec, "get") else None
+    try:
+        numeric: Any = int(box_no)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        numeric = box_no
+    raw_values = [
+        spec.get("FBA箱号") if hasattr(spec, "get") else None,
+        mapping.get(box_no) if hasattr(mapping, "get") else None,
+        mapping.get(numeric) if hasattr(mapping, "get") else None,
+    ]
+    fallback = ""
+    for raw in raw_values:
+        text = str(raw if raw is not None else "").strip()
+        if not text or text.lower() == "nan":
+            continue
+        normalized = normalize_fba_box_id(text)
+        if is_fba_box_id(normalized):
+            return normalized
+        if not fallback:
+            fallback = text
+    return fallback
 
 
 @dataclass
@@ -435,8 +463,20 @@ def _extract_box_specs(
             weight_vals = _row_values_by_col(row, sorted_cols)
             weight_unit = detect_weight_unit(label)
         elif _is_box_id_label(label):
+            from fba_tool.carton_math import is_fba_box_id
+
             for col_idx in sorted_cols:
-                fba_ids[col_idx] = str(row[col_idx]).strip() if col_idx < len(row) else ""
+                cell = str(row[col_idx]).strip() if col_idx < len(row) else ""
+                if not cell or cell.lower() == "nan":
+                    continue
+                existing = str(fba_ids.get(col_idx) or "").strip()
+                if (
+                    existing
+                    and is_fba_box_id(normalize_fba_box_id(existing))
+                    and not is_fba_box_id(normalize_fba_box_id(cell))
+                ):
+                    continue
+                fba_ids[col_idx] = cell
 
     records: List[Dict] = []
     for col_idx, true_box in column_to_box.items():

@@ -8,6 +8,7 @@ from typing import Dict, List, Tuple
 import pandas as pd
 
 from fba_tool.fba_parser import simplify_sku
+from fba_tool.shipment_parser import snapshot_box_id
 from fba_tool.shipment_validator import ShipmentPair
 
 
@@ -72,7 +73,7 @@ def collect_amazon_boxes(pairs: List[ShipmentPair]) -> List[AmazonBox]:
         if csv.box_specs is not None and not csv.box_specs.empty and "FBA箱号" in csv.box_specs.columns:
             for _, spec in csv.box_specs.iterrows():
                 box_no = int(spec["箱号"])
-                fba_id = str(spec.get("FBA箱号") or "").strip()
+                fba_id = snapshot_box_id(spec, csv.box_fba_ids)
                 if fba_id:
                     fba_by_box[box_no] = fba_id
 

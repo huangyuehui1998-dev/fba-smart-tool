@@ -310,7 +310,10 @@ def _resolve_box_num(series: pd.Series) -> pd.Series:
 
 
 def _group_by_box_range(df: pd.DataFrame) -> pd.DataFrame:
-    """按 FBAID + 型号 + 单箱量 + 尺寸分组，并在组内合并连续箱号（如 1-5）。"""
+    """按 FBAID + SKU + 型号 + 单箱量 + 尺寸分组，并在组内合并连续箱号（如 1-5）。
+
+    型号相同、单箱量和尺寸也相同的两个 SKU 仍各占一行。空型号不写进型号列。
+    """
     if df.empty:
         return df
 
@@ -321,17 +324,19 @@ def _group_by_box_range(df: pd.DataFrame) -> pd.DataFrame:
         return df.iloc[0:0].copy()
 
     work["fba_id"] = work["shipment_id"].astype(str).str.strip()
+    if "sku" not in work.columns:
+        work["sku"] = ""
+    work["sku"] = work["sku"].fillna("").astype(str).str.strip()
     if "model" not in work.columns:
         work["model"] = ""
-    # 型号只来自 model_name。空型号用 SKU 做分组键，避免不同 SKU 被并成一行，但不把 SKU 写进型号列。
     work["model"] = work["model"].fillna("").astype(str).str.strip().replace({"nan": ""})
-    work["_model_group"] = work["model"].where(work["model"] != "", work["sku"].astype(str))
+    work["_model_group"] = work["model"].where(work["model"] != "", work["sku"])
     work["_gk_qty"] = work["qty_per_box"].map(lambda v: round(_to_float(v) or 0, 3))
     work["_gk_len"] = work["length_cm"].map(lambda v: round(_to_float(v) or 0, 3))
     work["_gk_wid"] = work["width_cm"].map(lambda v: round(_to_float(v) or 0, 3))
     work["_gk_hei"] = work["height_cm"].map(lambda v: round(_to_float(v) or 0, 3))
 
-    group_keys = ["fba_id", "_model_group", "_gk_qty", "_gk_len", "_gk_wid", "_gk_hei"]
+    group_keys = ["fba_id", "sku", "_model_group", "_gk_qty", "_gk_len", "_gk_wid", "_gk_hei"]
     work = work.sort_values(group_keys + ["_box_num"], kind="mergesort")
 
     prev_box = work.groupby(group_keys, sort=False)["_box_num"].shift(1)

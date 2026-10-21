@@ -252,6 +252,33 @@ def extract_csv_sku_meta(csv_bytes: bytes) -> Dict[str, Dict[str, str]]:
     return meta
 
 
+def overlay_csv_asin(products: Dict[str, Dict[str, Any]], csv_bytes: bytes | None) -> Dict[str, Dict[str, Any]]:
+    """产品库缺 ASIN 时，用这份 CSV 的 ASIN 填到副本上。不写回产品库。"""
+    meta = extract_csv_sku_meta(csv_bytes or b"")
+    by_fnsku: Dict[str, str] = {}
+    for entry in meta.values():
+        fnsku = str(entry.get("fnsku") or "").strip().upper()
+        asin = str(entry.get("asin") or "").strip()
+        if fnsku and asin:
+            by_fnsku[fnsku] = asin
+    filled: Dict[str, Dict[str, Any]] = {}
+    for key, product in (products or {}).items():
+        item = dict(product or {})
+        if str(item.get("asin") or "").strip():
+            filled[key] = item
+            continue
+        fnsku = str(item.get("fnsku") or key or "").strip().upper()
+        asin = by_fnsku.get(fnsku, "")
+        if not asin:
+            hit = lookup_sku(meta, item.get("sku"))
+            if isinstance(hit, dict):
+                asin = str(hit.get("asin") or "").strip()
+        if asin:
+            item["asin"] = asin
+        filled[key] = item
+    return filled
+
+
 def _pcs_from_sku(sku: str) -> Optional[int]:
     m = PCS_IN_SKU_RE.search(sku)
     if m:

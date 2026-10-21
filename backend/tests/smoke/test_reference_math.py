@@ -161,6 +161,61 @@ def test_comma_box_numbers_and_csv_count_both_can_reach_254_4(tmp_path):
     assert "箱子数量" in from_csv["detail"]
 
 
+def test_packaging_name_does_not_zero_box_total(monkeypatch, tmp_path):
+    """箱号行后面的包装箱名称不能把真 FBA 箱唛盖掉，否则申报对不上、box_total 变成 0。"""
+    root = tmp_path / "real"
+    measure = root / "batches" / "第13批" / "九方确认账单文件"
+    measure.mkdir(parents=True)
+    _book(measure / "九方.xlsx", [
+        ["外箱号", "运单号", "单箱实重", "长", "宽", "高"],
+        ["FBATEST01U000001", "WBTEST1", 20, 40, 40, 40],
+        ["入库计费重", 20],
+    ])
+    csv_path = root / "batches" / "第13批" / "ship.csv"
+    csv_path.write_text(
+        "\n".join([
+            '"货件编号","FBATEST01"',
+            '"货件名称","S01"',
+            '"配送地址","STEP45VILLE, ZZ"',
+            '"箱子数量","1"',
+            "",
+            '"单件商品（1 箱）"',
+            '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量"',
+            '"S01-SKU","rod","B0S01TEST1","X00TESTS01","新品","无","1","1"',
+            "",
+            '"","","","","","","箱号","FBATEST01U000001"',
+            '"","","","","","","包装箱名称","P1 - B1"',
+            '"","","","","","","包装箱重量（kg）：","10"',
+            '"","","","","","","包装箱长度（cm）：","10"',
+            '"","","","","","","包装箱宽度（cm）：","10"',
+            '"","","","","","","包装箱高度（cm）：","10"',
+        ]),
+        encoding="utf-8",
+    )
+    from fba_tool.shipment_parser import parse_csv_shipment, snapshot_box_id
+
+    ship = parse_csv_shipment(csv_path.read_bytes(), file_name=csv_path.name)
+    assert list(ship.box_specs["FBA箱号"]) == ["FBATEST01U000001"]
+    assert ship.box_fba_ids[1] == "FBATEST01U000001"
+    spec = ship.box_specs.iloc[0]
+    assert snapshot_box_id(spec, ship.box_fba_ids) == "FBATEST01U000001"
+    # 规格列若仍被包装箱名称盖住，选择函数也要回退到真箱唛。
+    poisoned = dict(spec)
+    poisoned["FBA箱号"] = "P1 - B1"
+    assert snapshot_box_id(poisoned, ship.box_fba_ids) == "FBATEST01U000001"
+    assert snapshot_box_id({"箱号": 1, "FBA箱号": "P1 - B1"}, {}) == "P1 - B1"
+
+    summary = summarize_batch13(root)
+    assert summary["matched_rows"] == 1
+    assert summary["box_total"] == Decimal("10.00")
+    from tests.smoke.test_box_realdata_smoke import _product_compare
+
+    product = _product_compare(monkeypatch, tmp_path, summary)
+    assert product["rows"] == 1
+    assert product["box_total"] == summary["box_total"]
+    assert product["box_total"] != Decimal("0.00")
+
+
 def test_entry_sheet_sku_cl2_is_not_a_net_source(tmp_path):
     batch = tmp_path / "batches" / "第13批" / "发给工厂"
     _book_path = batch / "发货录入样表.xlsx"

@@ -158,3 +158,79 @@ def test_run_invoice_etl_qiluo_merges_box_range():
     assert all(it.values.get("chinese_name") for it in items)
     assert all(it.values.get("hs_code") for it in items)
     assert not any("主数据缺少 SKU" in w for w in warnings)
+
+
+def test_same_model_keeps_one_row_per_sku():
+    """型号、单箱量、尺寸都相同的两个 SKU 不能并成 1-32 一行。"""
+    rows = []
+    for box in range(1, 33):
+        for sku, price in (("SKU-A", 10.0), ("TANZI", 49.99)):
+            rows.append(
+                {
+                    "box_id": box,
+                    "shipment_id": "FBA13",
+                    "sku": sku,
+                    "model": "共用型号",
+                    "qty": 2,
+                    "qty_per_box": 2,
+                    "length_cm": 30.0,
+                    "width_cm": 20.0,
+                    "height_cm": 10.0,
+                    "declared_price": price,
+                    "fba_box_id": f"FBA13U{box:06d}",
+                }
+            )
+    grouped = _group_by_box_range(pd.DataFrame(rows))
+    assert len(grouped) == 2
+    assert set(grouped["box_range"]) == {"1-32"}
+    assert set(grouped["sku"]) == {"SKU-A", "TANZI"}
+    assert set(grouped["model"]) == {"共用型号"}
+    by_sku = {row.sku: row.declared_price for row in grouped.itertuples()}
+    assert by_sku["SKU-A"] == 10.0
+    assert by_sku["TANZI"] == 49.99
+
+
+def test_qiluo_etl_declared_total_keeps_every_sku():
+    from fba_tool.master_db import init_master_db, upsert_product
+
+    init_master_db()
+    upsert_product({"sku": "SKU-A", "chinese_name": "品名A", "hs_code": "1111111111", "model_name": "共用型号", "declared_value": 10})
+    upsert_product({"sku": "TANZI", "chinese_name": "品名T", "hs_code": "2222222222", "model_name": "共用型号", "declared_value": 49.99})
+    box_items = pd.DataFrame(
+        [
+            {"箱号": 1, "SKU": "SKU-A", "数量": 2},
+            {"箱号": 2, "SKU": "SKU-A", "数量": 2},
+            {"箱号": 1, "SKU": "TANZI", "数量": 2},
+            {"箱号": 2, "SKU": "TANZI", "数量": 2},
+        ]
+    )
+    box_specs = pd.DataFrame(
+        [
+            {"箱号": 1, "长(cm)": 30, "宽(cm)": 20, "高(cm)": 10, "实重(kg)": 2.0},
+            {"箱号": 2, "长(cm)": 30, "宽(cm)": 20, "高(cm)": 10, "实重(kg)": 2.0},
+        ]
+    )
+    ship = CsvShipment(
+        shipment_id="FBA13SAME",
+        warehouse_code="ONT8",
+        box_count=2,
+        box_items=box_items,
+        box_specs=box_specs,
+        box_fba_ids={1: "FBA13SAMEU000001", 2: "FBA13SAMEU000002"},
+    )
+    items, _warnings = run_invoice_etl(
+        forwarder_id="qiluo",
+        ship=ship,
+        csv_bytes=b"",
+        workflow_json=None,
+        po_number="",
+        catalog=None,
+    )
+    assert len(items) == 2
+    assert {it.values["sku"] for it in items} == {"SKU-A", "TANZI"}
+    assert {it.values["box_range"] for it in items} == {"1-2"}
+    assert {it.values["model"] for it in items} == {"共用型号"}
+    prices = sorted(float(it.values["declared_price"]) for it in items)
+    assert prices == [10.0, 49.99]
+    total = round(sum(float(it.values["total_declared_value_usd"]) for it in items), 2)
+    assert total == 239.96
