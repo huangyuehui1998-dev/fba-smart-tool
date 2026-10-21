@@ -42,4 +42,9 @@ def test_box_realdata_smoke():
     client = TestClient(app, raise_server_exceptions=False)
     response = client.get("/api/fx-rates")
     assert response.status_code < 500
-    _write([{"id": case, "status": "present", "http": response.status_code} for case in CASES])
+    reason = "目录在，但没有按第 13/14/15 批文件复算 S-01..S-07。不把未跑的项写成通过。"
+    _write([
+        {"id": case, "status": "skipped", "reason": reason, "health_http": response.status_code}
+        for case in CASES
+    ])
+    pytest.skip("需要 box realdata：" + reason)
