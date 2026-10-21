@@ -64,3 +64,10 @@ def test_history_routes_still_work_and_download_names_are_checked():
         blocked = client.get("/api/history/files/download", params={"kind": "csv", "name": name})
         assert blocked.status_code == 400, (name, blocked.status_code, blocked.text)
         assert _detail(blocked).get("code") == "INVALID_FILE_NAME"
+    for name in ("../x", "..%2Fx"):
+        blocked = client.get("/api/history/files/download", params={"name": name})
+        assert blocked.status_code == 400, (name, blocked.status_code, blocked.text)
+        assert _detail(blocked).get("code") == "INVALID_FILE_NAME"
+    missing_kind = client.get("/api/history/files/download", params={"name": "测试装箱单_A.csv"})
+    assert missing_kind.status_code == 400
+    assert missing_kind.json()["detail"] == "kind 须为 csv 或 pdf"

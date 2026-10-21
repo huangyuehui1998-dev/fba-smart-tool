@@ -147,20 +147,23 @@ def api_history_files():
 
 
 @router.get("/api/history/files/download")
-def api_history_file_download(kind: str, name: str):
-    """下载单个历史测试文件，供前端构造 File 对象。"""
+def api_history_file_download(name: str | None = None, kind: str | None = None):
+    """下载单个历史测试文件，供前端构造 File 对象。
+
+    文件名先校验。缺 kind 或路径穿越都在进业务之前返回 400，不再让 FastAPI 报 422。
+    """
     from fba_tool.history_guard import safe_history_filename
 
-    kind_norm = kind.lower().strip()
-    if kind_norm not in ("csv", "pdf"):
-        raise HTTPException(status_code=400, detail="kind 须为 csv 或 pdf")
     try:
-        safe_name = safe_history_filename(name)
+        safe_name = safe_history_filename(name or "")
     except ValueError as exc:
         raise HTTPException(
             status_code=400,
             detail={"code": "INVALID_FILE_NAME", "message": "文件名不合法"},
         ) from exc
+    kind_norm = (kind or "").lower().strip()
+    if kind_norm not in ("csv", "pdf"):
+        raise HTTPException(status_code=400, detail="kind 须为 csv 或 pdf")
     media = "text/csv" if kind_norm == "csv" else "application/pdf"
     path = resolve_history_file(kind_norm, safe_name)
     if path is not None:
