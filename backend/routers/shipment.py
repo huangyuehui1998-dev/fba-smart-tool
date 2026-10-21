@@ -36,6 +36,8 @@ from services.shipment_service import (
 
     run_shipment_validation,
 
+    with_batch,
+
 )
 
 from utils.responses import xlsx_response
@@ -96,6 +98,8 @@ async def api_shipments_validate(
 
     workflow_json: Optional[str] = Form(None),
 
+    batch: Optional[str] = Form(None),
+
 ):
 
     """CSV/PDF 货件配对 + 三维交叉校验，返回工人装箱实操单/货代表预览数据。"""
@@ -114,7 +118,7 @@ async def api_shipments_validate(
 
 
 
-    wf = parse_workflow_json(workflow_json)
+    wf = with_batch(parse_workflow_json(workflow_json), batch)
 
     ctx = run_shipment_validation(csv_payload, pdf_payload, wf)
 
@@ -144,6 +148,8 @@ async def api_shipments_validate_stream(
 
     workflow_json: Optional[str] = Form(None),
 
+    batch: Optional[str] = Form(None),
+
 ):
 
     """与 /validate 相同，但以 NDJSON 流推送实时进度（event: progress | result）。"""
@@ -162,7 +168,7 @@ async def api_shipments_validate_stream(
 
 
 
-    wf = parse_workflow_json(workflow_json)
+    wf = with_batch(parse_workflow_json(workflow_json), batch)
 
     ratio = float(throw_ratio_val if throw_ratio_val is not None else throw_ratio())
 

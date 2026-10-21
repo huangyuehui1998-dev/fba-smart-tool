@@ -28,9 +28,16 @@ export interface CustomsSessionSnapshot {
   activeTab: string;
 }
 
+export function batchFromTaskName(name: string): string {
+  const found = /第\s*(\d+)\s*批/.exec(name || "");
+  return found?.[1] ?? "";
+}
+
 export interface TaskHistorySnapshot {
   task_id: string;
   task_name: string;
+  /** 任务名里的「第N批」。文件名没有批次时，校验仍用这个值。 */
+  batch?: string;
   step: number;
   saved_at?: string;
   input_df: ReturnType<typeof rowsToApi>;
@@ -175,6 +182,7 @@ export function buildTaskHistorySnapshot(source: WorkflowSnapshotSource): TaskHi
   return {
     task_id: source.taskId,
     task_name: source.taskName,
+    batch: batchFromTaskName(source.taskName),
     step: source.step,
     saved_at: new Date().toISOString(),
     input_df: rowsToApi(source.inputRows).filter((r) => String(r.SKU简称 || "").trim()),

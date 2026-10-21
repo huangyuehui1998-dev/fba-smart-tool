@@ -37,6 +37,8 @@ export function useShipmentValidation() {
   const {
     csvFiles,
     pdfFiles,
+    taskId,
+    taskName,
     throwRatio,
     setThrowRatio,
     boxEditorApi,
@@ -168,6 +170,7 @@ export function useShipmentValidation() {
             return next.length > 12 ? next.slice(-12) : next;
           });
         },
+        { taskId, taskName },
       );
       setProgress(85);
       setStep4StatusLines(res.status_lines);

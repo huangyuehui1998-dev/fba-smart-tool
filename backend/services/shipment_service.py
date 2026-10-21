@@ -35,6 +35,15 @@ from fba_tool.worker_packing_export import (
 from utils.serialization import df_to_records, editor_to_df, rows_to_df
 
 
+def with_batch(wf: Dict[str, Any], batch: str | None) -> Dict[str, Any]:
+    """表单里的批次只在 workflow 自己没写批次时补上。"""
+    merged = dict(wf or {})
+    text = str(batch or "").strip()
+    if text and not str(merged.get("batch") or "").strip():
+        merged["batch"] = text
+    return merged
+
+
 def parse_workflow_json(workflow_json: str | None) -> Dict[str, Any]:
     if not workflow_json:
         return {}
@@ -84,6 +93,7 @@ def run_shipment_validation(
         "parsed": parsed,
         "result": result,
         "hard_fail": hard_fail,
+        "wf": wf,
     }
 
 

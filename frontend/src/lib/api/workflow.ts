@@ -87,6 +87,22 @@ export function fetchStaPrecheck(body: WorkflowPayload) {
   );
 }
 
+export interface ValidateWorkflowContext {
+  taskId?: string;
+  taskName?: string;
+  batch?: string;
+}
+
+function batchFromLabel(text: string): string {
+  const found = /第\s*(\d+)\s*批/.exec(text || "");
+  return found?.[1] ?? "";
+}
+
+function sourcePath(file: File): string {
+  const relative = file.webkitRelativePath || "";
+  return relative || file.name;
+}
+
 export function validateShipments(
   csvFiles: File[],
   pdfFiles: File[],
@@ -94,18 +110,16 @@ export function validateShipments(
   boxEditor?: BoxEditorApiRow[],
   inputRows?: ApiSkuRow[],
   packingMode: PackingMode = "amazon_led",
+  context?: ValidateWorkflowContext,
 ) {
-  const form = new FormData();
-  for (const f of csvFiles) form.append("csv_files", f);
-  for (const f of pdfFiles) form.append("pdf_files", f);
-  if (throwRatio != null) form.append("throw_ratio", String(throwRatio));
-  form.append(
-    "workflow_json",
-    JSON.stringify({
-      box_editor: boxEditor ?? [],
-      rows: inputRows ?? [],
-      packing_mode: packingMode,
-    }),
+  const form = buildValidateFormData(
+    csvFiles,
+    pdfFiles,
+    throwRatio,
+    boxEditor,
+    inputRows,
+    packingMode,
+    context,
   );
   return apiUpload<ShipmentValidateResponse>("/api/shipments/validate", form);
 }
@@ -117,19 +131,28 @@ function buildValidateFormData(
   boxEditor?: BoxEditorApiRow[],
   inputRows?: ApiSkuRow[],
   packingMode: PackingMode = "amazon_led",
+  context?: ValidateWorkflowContext,
 ) {
   const form = new FormData();
   for (const f of csvFiles) form.append("csv_files", f);
   for (const f of pdfFiles) form.append("pdf_files", f);
   if (throwRatio != null) form.append("throw_ratio", String(throwRatio));
+  const paths = [...csvFiles, ...pdfFiles].map(sourcePath);
+  const taskName = context?.taskName ?? "";
+  const batch = context?.batch || batchFromLabel(taskName) || batchFromLabel(paths.join(" "));
   form.append(
     "workflow_json",
     JSON.stringify({
       box_editor: boxEditor ?? [],
       rows: inputRows ?? [],
       packing_mode: packingMode,
+      task_id: context?.taskId ?? "",
+      task_name: taskName,
+      ...(batch ? { batch } : {}),
+      source_paths: paths,
     }),
   );
+  if (batch) form.append("batch", batch);
   return form;
 }
 
@@ -142,6 +165,7 @@ export function validateShipmentsWithProgress(
   inputRows: ApiSkuRow[] | undefined,
   packingMode: PackingMode,
   onProgress: (percent: number, message: string) => void,
+  context?: ValidateWorkflowContext,
 ): Promise<ShipmentValidateResponse> {
   const form = buildValidateFormData(
     csvFiles,
@@ -150,6 +174,7 @@ export function validateShipmentsWithProgress(
     boxEditor,
     inputRows,
     packingMode,
+    context,
   );
 
   return new Promise((resolve, reject) => {
