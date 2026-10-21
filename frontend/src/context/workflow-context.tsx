@@ -58,12 +58,14 @@ import {
   loadStoredProjectHandle,
   storeProjectHandle,
 } from "@/lib/fbox-handle-store";
+import { canonicalInputRows, sha256HexOfText } from "@/lib/stage-input-hash";
 import {
   clearStaleFrom,
   createEmptyStaleness,
   effectiveStaleness,
   invalidateFrom,
   clearStageStale,
+  stalenessFromInputHash,
   type WorkflowStage,
   type WorkflowStaleness,
 } from "@/lib/workflow-invalidation";
@@ -265,6 +267,12 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [invoiceSyncLinkedEdits, setInvoiceSyncLinkedEdits] = useState(true);
   const [customsSession, setCustomsSession] = useState<WorkflowContextValue["customsSession"]>(null);
   const [staleness, setStaleness] = useState<WorkflowStaleness>(() => createEmptyStaleness());
+  const [recordedInputHashes, setRecordedInputHashes] = useState<Partial<Record<WorkflowStage, string>>>({});
+  const [currentInputHash, setCurrentInputHash] = useState<string | null>(null);
+  const currentInputHashRef = useRef<string | null>(null);
+  const inputHashSeed = useRef(0);
+  const appliedInputHashSeed = useRef(-1);
+  const step4HashBaselined = useRef(false);
   const [routingSnapshotCount, setRoutingSnapshotCountState] = useState(0);
   const [highestReachedStep, setHighestReachedStep] = useState(1);
   const setRoutingSnapshotCount = useCallback((count: number) => {
@@ -281,6 +289,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 
   const clearStageStaleFn = useCallback((stage: WorkflowStage) => {
     setStaleness((prev) => clearStageStale(stage, prev));
+    const hex = currentInputHashRef.current;
+    if (hex) setRecordedInputHashes((prev) => ({ ...prev, [stage]: hex }));
   }, []);
 
   const resetStaleness = useCallback(() => {
@@ -316,6 +326,9 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setInvoicePoByShipment({});
     setCustomsSession(null);
     setStaleness(createEmptyStaleness());
+    setRecordedInputHashes({});
+    inputHashSeed.current += 1;
+    step4HashBaselined.current = false;
     setRoutingSnapshotCountState(0);
     setHighestReachedStep(1);
   }, []);
@@ -340,6 +353,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const dismissArchivedToast = useCallback(() => setShowArchivedToast(false), []);
 
   const restoreLocalStorageDraft = useCallback(() => {
+    inputHashSeed.current += 1;
+    step4HashBaselined.current = false;
     const snapshot = loadWorkflowSnapshot();
     if (!snapshot || !snapshotHasData(snapshot)) return;
     const { step: resolvedStep, clamped } = resolveRestorableStep(snapshot);
@@ -494,6 +509,9 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setInvoiceSyncLinkedEdits(true);
     setCustomsSession(null);
     setStaleness(createEmptyStaleness());
+    setRecordedInputHashes({});
+    inputHashSeed.current += 1;
+    step4HashBaselined.current = false;
     setRoutingSnapshotCountState(0);
     setHighestReachedStep(1);
     },
@@ -501,6 +519,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   );
 
   const applyWorkflowSnapshot = useCallback((applied: ReturnType<typeof applyTaskHistorySnapshot>) => {
+    inputHashSeed.current += 1;
+    step4HashBaselined.current = false;
     setTaskId(applied.taskId);
     setTaskName(applied.taskName || autoTaskName());
     setStep(applied.step);
@@ -871,30 +891,72 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       staleness,
   ]);
 
-  const visibleStaleness = useMemo(
-    () =>
-      effectiveStaleness(staleness, {
-        boxEditorCount: boxEditorApi.length,
-        step3MatrixCount: step3Matrix.length,
-        routingSnapshotCount,
-        step4Ok,
-        step4StatusLineCount: step4StatusLines.length,
-        hasInvoiceDraft: invoiceDraft != null,
-        invoiceSessionCount: Object.keys(invoiceSessionsByShipment).length,
-        hasCustomsSession: customsSession != null,
-      }),
-    [
-      staleness,
-      boxEditorApi.length,
-      step3Matrix.length,
+  useEffect(() => {
+    let cancel = false;
+    void sha256HexOfText(canonicalInputRows(inputRows)).then((hex) => {
+      if (cancel) return;
+      currentInputHashRef.current = hex;
+      setCurrentInputHash(hex);
+      if (appliedInputHashSeed.current !== inputHashSeed.current) {
+        setRecordedInputHashes({
+          export: hex,
+          routing: hex,
+          validation: hex,
+          invoice: hex,
+          customs: hex,
+        });
+        appliedInputHashSeed.current = inputHashSeed.current;
+        step4HashBaselined.current = false;
+      }
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [inputRows]);
+
+  useEffect(() => {
+    if (!step4Ok || !currentInputHash || step4HashBaselined.current) return;
+    setRecordedInputHashes({
+      export: currentInputHash,
+      routing: currentInputHash,
+      validation: currentInputHash,
+      invoice: currentInputHash,
+      customs: currentInputHash,
+    });
+    step4HashBaselined.current = true;
+  }, [step4Ok, currentInputHash]);
+
+  const visibleStaleness = useMemo(() => {
+    const outputs = {
+      boxEditorCount: boxEditorApi.length,
+      step3MatrixCount: step3Matrix.length,
       routingSnapshotCount,
       step4Ok,
-      step4StatusLines.length,
-      invoiceDraft,
-      invoiceSessionsByShipment,
-      customsSession,
-    ],
-  );
+      step4StatusLineCount: step4StatusLines.length,
+      hasInvoiceDraft: invoiceDraft != null,
+      invoiceSessionCount: Object.keys(invoiceSessionsByShipment).length,
+      hasCustomsSession: customsSession != null,
+    };
+    return stalenessFromInputHash(
+      effectiveStaleness(staleness, outputs),
+      recordedInputHashes,
+      currentInputHash,
+      outputs,
+      step4Ok,
+    );
+  }, [
+    staleness,
+    recordedInputHashes,
+    currentInputHash,
+    boxEditorApi.length,
+    step3Matrix.length,
+    routingSnapshotCount,
+    step4Ok,
+    step4StatusLines.length,
+    invoiceDraft,
+    invoiceSessionsByShipment,
+    customsSession,
+  ]);
 
   const value = useMemo(
     () => ({

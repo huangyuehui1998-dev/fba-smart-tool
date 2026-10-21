@@ -126,6 +126,36 @@ export function stageHasOutput(stage: WorkflowStage, outputs: WorkflowOutputPres
  * 对外暴露的过期 = 原始标记且该阶段已有产物。
  * 快照里仍保存原始标记；首次进入尚无发票/报关结果时不应显示「已过期」。
  */
+/** 这些阶段的过期以录入输入的 sha256 为准，不因“上一步重新生成过”单独点亮。 */
+const INPUT_HASH_STAGES: readonly WorkflowStage[] = [
+  "export",
+  "routing",
+  "validation",
+  "invoice",
+  "customs",
+];
+
+export function stalenessFromInputHash(
+  visible: WorkflowStaleness,
+  recorded: Partial<Record<WorkflowStage, string>>,
+  current: string | null,
+  outputs: WorkflowOutputPresence,
+  step4Ok: boolean,
+): WorkflowStaleness {
+  if (!current) return visible;
+  const next = { ...visible };
+  for (const stage of INPUT_HASH_STAGES) {
+    const saved = recorded[stage];
+    if (!saved) continue;
+    if (saved === current) {
+      next[stage] = false;
+    } else if (step4Ok || stageHasOutput(stage, outputs)) {
+      next[stage] = true;
+    }
+  }
+  return next;
+}
+
 export function effectiveStaleness(
   staleness: WorkflowStaleness,
   outputs: WorkflowOutputPresence,

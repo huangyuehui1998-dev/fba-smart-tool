@@ -7,6 +7,7 @@ import {
   createEmptyStaleness,
   effectiveStaleness,
   getOfficialFilesForStage,
+  stalenessFromInputHash,
   getStaleOfficialFileLabels,
   getStaleStageLabels,
   hasAnyStale,
@@ -234,5 +235,45 @@ describe("effectiveStaleness", () => {
     expect(visible.validation).toBe(true);
     expect(visible.invoice).toBe(true);
     expect(visible.customs).toBe(false);
+  });
+});
+
+describe("stalenessFromInputHash", () => {
+  const afterStep4 = (): WorkflowOutputPresence => ({
+    ...emptyOutputs(),
+    boxEditorCount: 2,
+    step3MatrixCount: 2,
+    step4Ok: true,
+    step4StatusLineCount: 3,
+    hasCustomsSession: true,
+  });
+
+  it("does not show 当前结果已过期 inputs when the hash still matches", () => {
+    const raw = invalidateFrom("boxing");
+    const visible = effectiveStaleness(raw, afterStep4());
+    const quiet = stalenessFromInputHash(
+      visible,
+      { invoice: "same", customs: "same", validation: "same" },
+      "same",
+      afterStep4(),
+      true,
+    );
+    expect(quiet.invoice).toBe(false);
+    expect(quiet.customs).toBe(false);
+    expect(isStepStale(4.5, quiet)).toBe(false);
+    expect(isStepStale(5, quiet)).toBe(false);
+  });
+
+  it("marks invoice and customs stale after a step1 input change and lists them", () => {
+    const drifted = stalenessFromInputHash(
+      createEmptyStaleness(),
+      { invoice: "before", customs: "before", validation: "before" },
+      "after",
+      afterStep4(),
+      true,
+    );
+    expect(isStepStale(5, drifted)).toBe(true);
+    expect(isStepStale(4.5, drifted)).toBe(true);
+    expect(getStaleStageLabels(drifted).join("、")).toContain("报关");
   });
 });

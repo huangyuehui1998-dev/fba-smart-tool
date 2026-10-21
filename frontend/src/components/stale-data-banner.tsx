@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import {
   STAGE_LABELS,
   getOfficialFilesForStage,
+  getStaleStageLabels,
   type WorkflowStage,
   type WorkflowStaleness,
 } from "@/lib/workflow-invalidation";
@@ -45,6 +46,7 @@ export function StaleDataBanner({
       : STAGE_ORDER_UPSTREAM[stage] ?? "上游步骤";
 
   const files = getOfficialFilesForStage(stage);
+  const affected = getStaleStageLabels(staleness);
 
   return (
     <Alert variant="destructive" className="border-amber-300 bg-amber-50 text-amber-950">
@@ -53,6 +55,7 @@ export function StaleDataBanner({
       <AlertDescription className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs">
         <span>
           {STAGE_LABELS[stage]} 的数据基于旧版 {upstreamHint}，请重新计算或校验后再继续。
+          {affected.length > 0 ? ` 受影响的步骤：${affected.join("、")}。` : ""}
           {files.length > 0 ? ` 正式文件请勿再发送：${files.join("、")}。` : ""}
         </span>
         {onRefresh && (
