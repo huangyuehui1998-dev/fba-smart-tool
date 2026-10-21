@@ -157,11 +157,7 @@ def assert_collected(datas, root: Path = None) -> None:
 
 
 FORBIDDEN_REAL_NAMES = ("lingxing_listing_prices.xlsx",)
-# 真实领星在售导出不得进仓库，合成用例不落这个文件名。
-# 只放行这一份回归夹具：默认勾选确认必须能在 CI 里跑到。便携包白名单不含 review/。
-ALLOWED_LISTING_FIXTURES = (
-    "review/lingxing_listing_export_2026-10-21.xlsx",
-)
+# 真实领星在售导出不得进仓库。合成用例只用内存里的 xlsx，不落这个文件名。
 FORBIDDEN_REAL_GLOBS = ("*listing*.xlsx",)
 
 
@@ -174,10 +170,7 @@ def forbidden_real_hits(root: Path = None) -> List[str]:
             continue
         if not path.is_file():
             continue
-        rel = path.relative_to(base).as_posix()
-        if rel in ALLOWED_LISTING_FIXTURES:
-            continue
         name = path.name.lower()
         if name in FORBIDDEN_REAL_NAMES or ("listing" in name and name.endswith(".xlsx")):
-            hits.append(rel)
+            hits.append(str(path.relative_to(base)))
     return hits
