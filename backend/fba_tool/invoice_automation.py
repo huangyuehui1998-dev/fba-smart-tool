@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Literal, Tuple
 
 import pdfplumber
 from openpyxl.utils import get_column_letter
-from openpyxl.utils.cell import coordinate_to_tuple
 
 from fba_tool.invoice_deepseek import (
     infer_customs_fields,
@@ -31,9 +30,8 @@ from fba_tool.product_catalog import extract_csv_skus
 from fba_tool.sku_keys import case_conflict_message, case_conflicts, lookup_sku, sku_key as _norm_key, sku_text
 from fba_tool.shipment_parser import CsvShipment, parse_csv_shipment
 from fba_tool.shipment_serialize import resolve_csv_shipment
-from fba_tool.template_layout import safe_write
 from fba_tool.app_paths import invoice_history_path, resolve_config_read
-from fba_tool.xlsx_io import compact_invoice_workbook, load_workbook_fast, save_workbook_compact
+from fba_tool.xlsx_io import load_workbook_fast
 from fba_tool.shipment_parser import decode_csv_bytes
 
 FieldSource = Literal["green", "yellow", "red", "blue", "preview"]
@@ -896,22 +894,17 @@ def export_invoice_xlsx(
         if layout:
             clear_invoice_table_data_zone(ws, layout)
 
-    cell_refs: List[str] = []
-    for item in cell_writes:
-        cell = item.get("cell")
-        value = item.get("value")
-        if not cell or value in (None, ""):
-            continue
-        cell_ref = str(cell).strip()
-        cell_refs.append(cell_ref)
-        try:
-            row, col = coordinate_to_tuple(cell_ref)
-            safe_write(ws, row, col, value)
-        except ValueError:
-            continue
+    # 表头下的脏数据先清掉，再整本写回。不删其它工作表、图片、数据验证或隐藏表。
+    sheet_name = ws.title
+    if draft.is_table_mode or draft.table_cells:
+        bio = io.BytesIO()
+        wb.save(bio)
+        template_bytes = bio.getvalue()
+    wb.close()
 
-    compact_invoice_workbook(wb, draft.template_sheet, cell_refs)
-    return save_workbook_compact(wb)
+    from fba_tool.univer_apply import apply_cell_writes
+
+    return apply_cell_writes(template_bytes, cell_writes, sheet_name)
 
 
 def styled_grid(df):

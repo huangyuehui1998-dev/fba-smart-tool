@@ -456,6 +456,22 @@ def _ensure_lingxing_tables(conn: sqlite3.Connection) -> None:
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_lingxing_preview_field_run ON lingxing_sync_preview_field(run_id, sku)"
     )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lingxing_import_change (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            sku TEXT NOT NULL,
+            field TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT,
+            created_row INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lingxing_import_change_run ON lingxing_import_change(run_id, sku)"
+    )
 
 
 def upsert_product(record: Dict[str, Any], overwrite: bool = False) -> None:

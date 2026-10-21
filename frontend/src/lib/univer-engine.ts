@@ -30,6 +30,7 @@ export interface UniverMount {
 }
 
 interface UniverSheet {
+  getSheetName?: () => string;
   getRange: (a1: string) => {
     getValue: () => unknown;
     setValue: (value: unknown) => void;
@@ -89,7 +90,16 @@ export function publishUniverDebug(api: UniverMount["univerAPI"]): void {
     getDataValidations: () => activeSheet(api)?.getDataValidations?.() ?? [],
     getCell: (a1: string) => activeSheet(api)?.getRange(a1).getValue() ?? null,
     setCell: (a1: string, value: unknown) => {
-      activeSheet(api)?.getRange(a1).setValue(value);
+      // 合并从属格可能被 Univer 归一到主格。命令回调可能晚于 setValue 返回，所以延后清掉。
+      const cell = String(a1 || "").replace(/\$/g, "").toUpperCase();
+      window.__fbaPendingCell = cell;
+      try {
+        activeSheet(api)?.getRange(a1).setValue(value);
+      } finally {
+        window.setTimeout(() => {
+          if (window.__fbaPendingCell === cell) window.__fbaPendingCell = undefined;
+        }, 0);
+      }
     },
   };
 }
@@ -98,6 +108,7 @@ declare global {
   interface Window {
     __fbaUniverPreloaded?: boolean;
     __fbaSnapshotReadyAt?: number;
+    __fbaPendingCell?: string;
     __fbaUniver?: {
       getDataValidations: () => unknown;
       getCell: (a1: string) => unknown;

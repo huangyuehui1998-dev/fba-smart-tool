@@ -170,14 +170,26 @@ def api_lingxing_error_csv(run_id: int):
     run = get_lingxing_sync_run(int(run_id))
     if not run:
         raise HTTPException(status_code=404, detail="找不到该次拉取记录")
+    from fba_tool.lingxing_preview import review_reasons
+    from fba_tool.master_db_lingxing import list_lingxing_preview_skus
+
     diffs = list_lingxing_sync_diffs(int(run_id))
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["kind", "sku", "message"])
     for item in diffs:
-        if item.get("kind") not in {"anomaly", "error"}:
+        if item.get("kind") not in {"anomaly", "error", "needs_review"}:
             continue
         writer.writerow([item.get("kind") or "", item.get("sku") or "", item.get("message") or ""])
+    for row in list_lingxing_preview_skus(int(run_id)):
+        if row.get("group_kind") != "needs_review":
+            continue
+        try:
+            remote = json.loads(row.get("remote_json") or "{}")
+        except json.JSONDecodeError:
+            remote = {}
+        reasons = review_reasons(remote if isinstance(remote, dict) else {})
+        writer.writerow(["needs_review", row.get("sku") or "", "；".join(reasons) or "待人工确认"])
     return Response(
         content=buf.getvalue(),
         media_type="text/csv; charset=utf-8",

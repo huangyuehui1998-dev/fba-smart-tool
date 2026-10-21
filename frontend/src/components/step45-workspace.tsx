@@ -188,6 +188,11 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
                 · Excel 原样排版已就绪
               </p>
             )}
+            {hasTemplate && !parsing && (
+              <p className="text-[11px] text-muted-foreground" data-testid="export-scope-note">
+                导出按当前表格整本回填，未映射单元格的修改也会写入。公式格和合并单元格的从属格不能改成纯值。
+              </p>
+            )}
           </CardContent>
         </Card>
 
@@ -421,8 +426,13 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
             )}
             <Button
               size="lg"
-              disabled={sheetPhase !== "filled" || !hasTemplate || exporting || staleness.invoice}
-              title={staleness.invoice ? "结果已过期，不能作为正式文件下载" : undefined}
+              data-testid="export-invoice"
+              disabled={(sheetPhase !== "filled" && sheetPhase !== "preview") || !hasTemplate || exporting || staleness.invoice}
+              title={
+                staleness.invoice
+                  ? "结果已过期，不能作为正式文件下载"
+                  : "按当前表格整本回填。未映射的改动也会写入；公式格和合并从属格不能改成纯值。"
+              }
               className="gap-2 px-8 text-base font-semibold shadow-md"
               onClick={() => void handleExport()}
             >

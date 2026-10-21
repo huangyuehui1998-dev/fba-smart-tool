@@ -14,6 +14,7 @@ import {
   buildClipboardHtmlTable,
   cellMetaFromFills,
   formatCellRef,
+  parseCellRef,
   type CellMeta,
   type InvoiceCellFill,
   type Sheet,
@@ -28,6 +29,7 @@ export interface InvoiceSpreadsheetHandle {
   resetTemplate: () => void;
   resetAndApplyCells: (fills: InvoiceCellFill[]) => void;
   getCellValue: (cell: string) => string;
+  getSnapshot: () => unknown;
   isReady: () => boolean;
   copyToClipboard: () => Promise<void>;
 }
@@ -47,6 +49,53 @@ interface JobBody {
   error?: string;
   result?: { snapshot?: unknown };
   snapshot?: unknown;
+}
+
+interface WorkbookSnapshot {
+  sheets?: Record<string, SnapshotSheet>;
+}
+
+interface SnapshotSheet {
+  name?: string;
+  cellData?: Record<string, Record<string, Record<string, unknown>>>;
+}
+
+interface CellEdit {
+  sheet: string;
+  cell: string;
+  value: string;
+}
+
+function normFormula(value: string): string {
+  const text = value.trim();
+  return text.startsWith("=") ? text.slice(1) : text;
+}
+
+function activeSheetName(api: UniverMount["univerAPI"] | null | undefined): string {
+  return api?.getActiveWorkbook()?.getActiveSheet()?.getSheetName?.() || "";
+}
+
+function overlayEdits(snapshot: WorkbookSnapshot, edits: CellEdit[]): WorkbookSnapshot {
+  const sheets = Object.values(snapshot.sheets || {});
+  for (const edit of edits) {
+    const sheet = sheets.find((item) => item.name === edit.sheet) || sheets[0];
+    if (!sheet) continue;
+    let pos: { row: number; col: number };
+    try {
+      pos = parseCellRef(edit.cell);
+    } catch {
+      continue;
+    }
+    const cellData = (sheet.cellData ||= {});
+    const row = (cellData[String(pos.row)] ||= {});
+    const prev = { ...(row[String(pos.col)] || {}) };
+    const formula = typeof prev.f === "string" ? prev.f : "";
+    if (formula && normFormula(formula) === normFormula(edit.value)) continue;
+    delete prev.f;
+    prev.v = edit.value;
+    row[String(pos.col)] = prev;
+  }
+  return snapshot;
 }
 
 function displayValue(value: unknown): string {
@@ -75,6 +124,7 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
     const mountRef = useRef<UniverMount | null>(null);
     const snapshotRef = useRef<unknown>(null);
     const valuesRef = useRef<Record<string, string>>({});
+    const editsRef = useRef<Record<string, CellEdit>>({});
     const cellMetaRef = useRef<Record<string, CellMeta>>({});
     const loadSeq = useRef(0);
     const [ready, setReady] = useState(false);
@@ -129,9 +179,12 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
           const row = params?.range?.startRow;
           const col = params?.range?.startColumn;
           if (row == null || col == null) return;
-          const cell = formatCellRef(row, col);
+          const pending = window.__fbaPendingCell;
+          const cell = pending || formatCellRef(row, col);
           const text = displayValue(params?.value);
           valuesRef.current[cell] = text;
+          const sheet = activeSheetName(mount.univerAPI);
+          editsRef.current[`${sheet}!${cell}`] = { sheet, cell, value: text };
           const meta = cellMetaRef.current[cell];
           if (meta?.source === "missing" && text.trim()) {
             cellMetaRef.current = { ...cellMetaRef.current, [cell]: { ...meta, source: "exact" } };
@@ -173,6 +226,7 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
         setJobId(null);
         onReadyChange?.(false);
         valuesRef.current = {};
+        editsRef.current = {};
         cellMetaRef.current = {};
         try {
           const body = new FormData();
@@ -229,6 +283,8 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
       const text = fill.value == null ? "" : String(fill.value);
       valuesRef.current[upper] = text;
       const api = mountRef.current?.univerAPI;
+      const sheetName = activeSheetName(api);
+      editsRef.current[`${sheetName}!${upper}`] = { sheet: sheetName, cell: upper, value: text };
       const sheet = api?.getActiveWorkbook()?.getActiveSheet();
       if (!sheet) return;
       const source = cellMetaRef.current[upper]?.source ?? "preview";
@@ -258,12 +314,15 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
     const resetTemplate = useCallback(() => {
       cellMetaRef.current = {};
       valuesRef.current = {};
+      editsRef.current = {};
       if (snapshotRef.current) void paint(snapshotRef.current).then(() => markReady());
     }, [markReady, paint]);
 
     const resetAndApplyCells = useCallback(
       (fills: InvoiceCellFill[]) => {
         cellMetaRef.current = cellMetaFromFills(fills);
+        valuesRef.current = {};
+        editsRef.current = {};
         const apply = () => applyCells(fills);
         if (snapshotRef.current) {
           void paint(snapshotRef.current).then(() => {
@@ -313,6 +372,13 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
       }
     }, [readCell]);
 
+    const getSnapshot = useCallback(() => {
+      const base = snapshotRef.current;
+      if (!base || typeof base !== "object") return null;
+      const cloned = structuredClone(base) as WorkbookSnapshot;
+      return overlayEdits(cloned, Object.values(editsRef.current));
+    }, []);
+
     const cancelJob = useCallback(() => {
       cancelRef.current = true;
       if (jobId) void fetch(`/api/jobs/${jobId}/cancel`, { method: "POST" });
@@ -327,10 +393,11 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
         resetTemplate,
         resetAndApplyCells,
         getCellValue: readCell,
+        getSnapshot,
         isReady: () => ready,
         copyToClipboard,
       }),
-      [applyCells, applyCellsAndSyncSheets, copyToClipboard, loadFile, readCell, ready, resetAndApplyCells, resetTemplate],
+      [applyCells, applyCellsAndSyncSheets, copyToClipboard, getSnapshot, loadFile, readCell, ready, resetAndApplyCells, resetTemplate],
     );
 
     return (

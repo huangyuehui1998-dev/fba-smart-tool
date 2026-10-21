@@ -72,8 +72,18 @@ def api_export_invoice(body: InvoiceExportRequest):
 
     draft = draft_from_payload(body)
 
+    from fba_tool.univer_apply import ApplyRejected, apply_snapshot_values
+
     try:
-        out = export_invoice_xlsx(template_bytes, draft, forwarder_id=body.forwarder_id)
+        if body.snapshot:
+            out = apply_snapshot_values(template_bytes, body.snapshot)
+        else:
+            out = export_invoice_xlsx(template_bytes, draft, forwarder_id=body.forwarder_id)
+    except ApplyRejected as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": exc.code, "cells": exc.cells, "message": exc.message},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:

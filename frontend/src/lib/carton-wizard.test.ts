@@ -34,6 +34,22 @@ describe("carton wizard", () => {
     expect(review.warnings.some((item) => item.includes("23"))).toBe(true);
   });
 
+  it("blocks gross weight above the 70kg API limit", () => {
+    const review = cartonWizardReview({
+      sku: "BOX-1",
+      unit: "cm",
+      length: "40",
+      width: "40",
+      height: "40",
+      qty: "1",
+      gross: "80",
+      tare: "",
+      unitWeight: "",
+    });
+    expect(review.blockers.some((item) => item.includes("70"))).toBe(true);
+    expect(review.warnings.some((item) => item.includes("23"))).toBe(false);
+  });
+
   it("converts inches to centimeters", () => {
     expect(toCm("10", "in")).toBeCloseTo(25.4);
     const payload = cartonWizardPayload({

@@ -41,6 +41,8 @@ LISTING_EXTRA_FIELDS = (
     "product_cost_cny",
     "product_cost_currency",
 )
+# 费用为 0 或空表示「领星没给估算」，不写入。0 不能走进 product_fields 的「必须大于 0」。
+FEE_FIELDS = ("fee_fba_est", "fee_referral_rate")
 CONFIRM_FIELDS = (
     AMAZON_IDENTITY_FIELDS + CUSTOMS_SENSITIVE_FIELDS + PRICE_FIELDS + NAME_FIELDS + CATEGORY_FIELDS + LISTING_EXTRA_FIELDS
 )
@@ -90,11 +92,29 @@ class LingxingPreviewError(Exception):
         self.message = message
 
 
+def _fee_importable(value: Any) -> Optional[float]:
+    """费用只导入正数。0、空、非数字都跳过，避免 confirm 因「必须大于 0」整批失败。"""
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip().replace(",", "").replace("%", "")
+    if not text:
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    if number != number or number <= 0 or number in (float("inf"), float("-inf")):
+        return None
+    return number
+
+
 def _has_value(field: str, value: Any) -> bool:
     if value is None:
         return False
     if field in PRICE_FIELDS:
         return _num_or_none(value) is not None  # A3：无效价格（abc、NaN、inf、≤0）不算有值，不进可写字段
+    if field in FEE_FIELDS:
+        return _fee_importable(value) is not None
     if field == "sid":
         try:
             return int(float(value)) > 0
@@ -251,6 +271,19 @@ def build_listing_preview(
         local_sources = (existing or {}).get("field_sources") or {}
         for field in CONFIRM_FIELDS:
             remote_val = rec.get(field)
+            if field in FEE_FIELDS and _fee_importable(remote_val) is None:
+                if remote_val not in (None, ""):
+                    local_val = None if is_new else (existing or {}).get(field)
+                    sku_fields.append(
+                        {
+                            "sku": sku,
+                            "field": field,
+                            "local_value": _display(local_val),
+                            "remote_value": _display(remote_val),
+                            "default_checked": False,
+                        }
+                    )
+                continue
             if not _has_value(field, remote_val):
                 continue
             local_val = None if is_new else (existing or {}).get(field)
@@ -629,6 +662,13 @@ def apply_lingxing_field_patch(sku: str, fields: Iterable[str], remote: Dict[str
             else:
                 own_vals[field] = num
             continue
+        if field in FEE_FIELDS:
+            fee = _fee_importable(remote.get(field))
+            if fee is None:
+                result["skipped_invalid"].append(field)
+                continue
+            own_vals[field] = fee
+            continue
         if field in OWN_FIELDS:
             if remote.get(field) not in (None, ""):
                 own_vals[field] = remote.get(field)
@@ -677,34 +717,44 @@ def confirm_lingxing_preview(run_id: int, items: List[Dict[str, Any]]) -> Dict[s
     field_count = 0
     skipped = 0
     locked = 0
-    for item in items or []:
-        sku = str(item.get("sku") or "").strip()
-        fields = [str(f).strip() for f in (item.get("fields") or []) if str(f).strip() in CONFIRM_FIELDS]
-        if not sku or not fields:
-            skipped += 1
-            continue
-        row = sku_map.get(sku)
-        if not row:
-            skipped += 1
-            continue
-        try:
-            remote = json.loads(row.get("remote_json") or "{}")
-        except json.JSONDecodeError:
-            skipped += 1
-            continue
-        if not isinstance(remote, dict):
-            skipped += 1
-            continue
-        try:
-            res = apply_lingxing_field_patch(sku, fields, remote)
-        except SkuCaseConflict:  # S9-step3：只差大小写的多条，不任选一条写
-            skipped += 1
-            continue
-        patched += 1
-        field_count += len(res["written"])
-        locked += len(res["skipped_locked"])
+    from fba_tool.master_db import batch_transaction
 
-    mark_lingxing_sync_run_status(int(run_id), "confirmed")
+    # 整次确认共用一个事务：任一行校验失败则产品库和「已确认」状态一起回滚。
+    with batch_transaction():
+        for item in items or []:
+            sku = str(item.get("sku") or "").strip()
+            fields = [str(f).strip() for f in (item.get("fields") or []) if str(f).strip() in CONFIRM_FIELDS]
+            if not sku or not fields:
+                skipped += 1
+                continue
+            row = sku_map.get(sku)
+            if not row:
+                skipped += 1
+                continue
+            try:
+                remote = json.loads(row.get("remote_json") or "{}")
+            except json.JSONDecodeError:
+                skipped += 1
+                continue
+            if not isinstance(remote, dict):
+                skipped += 1
+                continue
+            from fba_tool.lingxing_rollback import record_import_changes
+
+            before = get_product_by_sku(sku)
+            try:
+                res = apply_lingxing_field_patch(sku, fields, remote)
+            except SkuCaseConflict:  # S9-step3：只差大小写的多条，不任选一条写
+                skipped += 1
+                continue
+            except ValueError as exc:
+                raise LingxingPreviewError(str(exc), 409) from exc
+            record_import_changes(int(run_id), sku, before, get_product_by_sku(sku))
+            patched += 1
+            field_count += len(res["written"])
+            locked += len(res["skipped_locked"])
+
+        mark_lingxing_sync_run_status(int(run_id), "confirmed")
     return {
         "ok": True,
         "run_id": int(run_id),

@@ -1,6 +1,7 @@
 """V4 Phase A/B：快照、回写、任务、报关币种、领星表格、箱规与打包约束。"""
 from __future__ import annotations
 
+import base64
 import io
 import os
 import sys
@@ -410,11 +411,13 @@ def _wipe_listing(skus: list[str], run_ids: list[int]) -> None:
 
     with _connect() as conn:
         for run_id in run_ids:
+            conn.execute("DELETE FROM lingxing_import_change WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM lingxing_sync_diff WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM lingxing_sync_preview_field WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM lingxing_sync_preview_sku WHERE run_id = ?", (run_id,))
             conn.execute("DELETE FROM lingxing_sync_run WHERE id = ?", (run_id,))
         for sku in skus:
+            conn.execute("DELETE FROM lingxing_import_change WHERE sku = ?", (sku,))
             conn.execute("DELETE FROM product_field_history WHERE sku = ?", (sku,))
             conn.execute("DELETE FROM product_master WHERE sku = ?", (sku,))
         conn.commit()
@@ -535,22 +538,284 @@ def test_v4_d1_listing_preview_confirm_rollback():
         _wipe_listing(skus, run_ids)
 
 
-def test_v4_d1_owner_listing_shape_when_present():
-    """本机上传的美国站导出只在文件还在时核对形状，不把货号写进仓库。"""
-    from fba_tool.lingxing_listing_xlsx import parse_listing_xlsx
+def _owner_listing_path() -> Path:
+    """真实美国站导出。默认用仓库里的回归表，也可用 FBA_LINGXING_OWNER_XLSX 指向另一份。"""
+    override = os.environ.get("FBA_LINGXING_OWNER_XLSX", "").strip()
+    path = Path(override) if override else ROOT / "review" / "lingxing_listing_export_2026-10-21.xlsx"
+    if not path.is_file():
+        pytest.fail(f"领星回归表不存在：{path}")
+    return path
 
-    upload = Path("/home/ubuntu/.cursor/projects/workspace/uploads/lingxing_listing_export_2026-10-21_4126.xlsx")
-    if not upload.is_file():
-        pytest.skip("owner listing export is not on this machine")
+
+def _default_confirm_items(preview: dict) -> list[dict]:
+    items = []
+    for rows in preview["groups"].values():
+        for row in rows:
+            fields = [field["field"] for field in row.get("fields") or [] if field.get("default_checked")]
+            if fields:
+                items.append({"sku": row["sku"], "fields": fields})
+    return items
+
+
+def test_v4_d1_owner_listing_default_confirm():
+    """真实表按预览默认勾选确认：0 费用不导致 500，手填六要素/箱规/0 价保护还在，失败时不留半写入。"""
+    from fastapi.testclient import TestClient
+
+    from fba_tool.lingxing_listing_xlsx import parse_listing_xlsx
+    from fba_tool.master_db import get_product_by_sku, upsert_product
+    from fba_tool.product_fields import SOURCE_MANUAL, mark_field_sources, set_product_fields
+    from main import app
+
+    upload = _owner_listing_path()
     parsed = parse_listing_xlsx(upload.read_bytes(), upload.name)
+    products = parsed["products"]
     assert parsed["export_at"] == "2026-10-21"
-    assert len(parsed["products"]) == 44
+    assert len(products) == 44
     assert parsed["warnings"]
-    assert {item.get("listing_price_currency") for item in parsed["products"]} == {"USD"}
-    assert {item.get("listing_price_site") for item in parsed["products"]} == {"US"}
-    assert all("chinese_name" not in item and "brand" not in item and "english_name" not in item for item in parsed["products"])
-    assert any(item.get("fee_fba_est") for item in parsed["products"])
-    assert any(item.get("fee_referral_rate") == pytest.approx(0.15) for item in parsed["products"])
+    assert {item.get("listing_price_currency") for item in products} == {"USD"}
+    assert {item.get("listing_price_site") for item in products} == {"US"}
+    assert all("chinese_name" not in item and "brand" not in item and "english_name" not in item for item in products)
+    assert any(item.get("fee_fba_est") == 0 for item in products)
+    assert any(isinstance(item.get("fee_fba_est"), (int, float)) and item["fee_fba_est"] > 0 for item in products)
+    assert any(item.get("fee_referral_rate") == pytest.approx(0.15) for item in products)
+
+    priced = [item for item in products if isinstance(item.get("listing_price"), (int, float)) and item["listing_price"] > 0]
+    unpriced = [item for item in products if item.get("listing_price") in (0, 0.0, None, "")]
+    manual = priced[0]
+    protected = unpriced[0]
+    regular_host = next(item for item in priced if item["sku"] != manual["sku"] and not item.get("regular_price"))
+    customs = {
+        "chinese_name": "手填品名",
+        "material": "手填材质",
+        "purpose": "手填用途",
+        "brand": "手填品牌",
+        "model_name": "手填型号",
+        "hs_code": "3926909090",
+    }
+    carton = {"carton_length": 40, "carton_width": 30, "carton_height": 20, "carton_weight": 5}
+    skus = [item["sku"] for item in products]
+    run_ids: list[int] = []
+    try:
+        upsert_product({"sku": manual["sku"], **customs, **carton})
+        mark_field_sources(manual["sku"], [*customs, *carton], SOURCE_MANUAL)
+        set_product_fields(manual["sku"], {"listing_price": 1, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+        upsert_product({"sku": protected["sku"]})
+        set_product_fields(protected["sku"], {"listing_price": 45, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+        upsert_product({"sku": regular_host["sku"]})
+        set_product_fields(regular_host["sku"], {"regular_price": 42}, SOURCE_MANUAL)
+        client = TestClient(app)
+        response = client.post(
+            "/api/lingxing/import-xlsx",
+            files={"file": (upload.name, upload.read_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        run_ids.append(body["run_id"])
+        assert body["wrote_product_master"] is False
+        assert get_product_by_sku(manual["sku"])["chinese_name"] == "手填品名"
+        preview = client.get("/api/lingxing/sync/preview", params={"run_id": body["run_id"]}).json()
+        zero_fee_seen = False
+        for rows in preview["groups"].values():
+            for row in rows:
+                for field in row.get("fields") or []:
+                    if field["field"] == "fee_fba_est" and field["remote_value"] in {"0", "0.0"}:
+                        zero_fee_seen = True
+                        assert field["default_checked"] is False
+                    if field["field"] in {"chinese_name", "material", "purpose", "brand", "model_name", "hs_code", "carton_length"}:
+                        raise AssertionError(field["field"])
+        assert zero_fee_seen
+        confirmed = client.post(
+            "/api/lingxing/sync/confirm",
+            json={"run_id": body["run_id"], "items": _default_confirm_items(preview)},
+        )
+        assert confirmed.status_code == 200, confirmed.text
+        saved = get_product_by_sku(manual["sku"])
+        for key, value in {**customs, **carton}.items():
+            assert saved[key] == value
+        assert saved["listing_price"] == pytest.approx(manual["listing_price"])
+        assert get_product_by_sku(protected["sku"])["listing_price"] == 45
+        assert get_product_by_sku(regular_host["sku"])["regular_price"] == 42
+        for item in _default_confirm_items(preview):
+            row = get_product_by_sku(item["sku"])
+            assert row is not None
+            remote = next(product for product in products if product["sku"] == item["sku"])
+            if remote.get("fee_fba_est") in (0, 0.0):
+                assert row.get("fee_fba_est") in (None, "")
+        rolled = client.post(f"/api/lingxing/runs/{body['run_id']}/rollback")
+        assert rolled.status_code == 200, rolled.text
+        restored = get_product_by_sku(manual["sku"])
+        assert restored["listing_price"] == 1
+        assert restored["chinese_name"] == "手填品名"
+        assert restored["carton_length"] == 40
+        assert get_product_by_sku(protected["sku"])["listing_price"] == 45
+    finally:
+        _wipe_listing(skus, run_ids)
+
+
+def test_v4_d1_zero_fee_checked_does_not_fail_confirm():
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import get_product_by_sku
+    from main import app
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "sheet1"
+    ws.append(["MSKU", "FNSKU", "ASIN", "国家", "币种", "价格", "预估FBA费（API）", "平台费率"])
+    ws.append(["FEE-OK", "X00TESTFEE", "B0TESTFEE1", "美国", "USD", 10, 1.25, "15%"])
+    ws.append(["FEE-ZERO", "X00TESTFE0", "B0TESTFEE0", "美国", "USD", 11, 0, "15%"])
+    buf = io.BytesIO()
+    wb.save(buf)
+    payload = buf.getvalue()
+    skus = ["FEE-OK", "FEE-ZERO"]
+    client = TestClient(app)
+    response = client.post(
+        "/api/lingxing/import-xlsx",
+        files={"file": ("synthetic-fee.xlsx", payload, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert response.status_code == 200, response.text
+    run_id = response.json()["run_id"]
+    try:
+        preview = client.get("/api/lingxing/sync/preview", params={"run_id": run_id}).json()
+        items = []
+        for rows in preview["groups"].values():
+            for row in rows:
+                fields = [field["field"] for field in row.get("fields") or [] if field.get("default_checked")]
+                if row["sku"] == "FEE-ZERO":
+                    assert any(
+                        field["field"] == "fee_fba_est" and field["default_checked"] is False
+                        for field in row.get("fields") or []
+                    )
+                if row["sku"] in {"FEE-ZERO", "FEE-OK"}:
+                    for name in ("listing_price", "fee_fba_est"):
+                        if name not in fields:
+                            fields.append(name)
+                if fields:
+                    items.append({"sku": row["sku"], "fields": fields})
+        confirmed = client.post("/api/lingxing/sync/confirm", json={"run_id": run_id, "items": items})
+        assert confirmed.status_code == 200, confirmed.text
+        assert get_product_by_sku("FEE-ZERO")["fee_fba_est"] in (None, "")
+        assert get_product_by_sku("FEE-ZERO")["listing_price"] == 11
+        assert get_product_by_sku("FEE-OK")["fee_fba_est"] == pytest.approx(1.25)
+    finally:
+        _wipe_listing(skus, [run_id])
+
+
+def _tiny_listing(rows: list[list]) -> bytes:
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "sheet1"
+    ws.append(["MSKU", "FNSKU", "ASIN", "国家", "币种", "价格"])
+    for row in rows:
+        ws.append(row)
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def test_v4_d1_rollback_run1_keeps_later_import_and_manual_edits():
+    """回滚只撤销这一次写入。之后的导入和手改还在。"""
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import get_product_by_sku, upsert_product
+    from fba_tool.master_db_lingxing import get_lingxing_sync_run
+    from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
+    from main import app
+
+    file1 = _tiny_listing([["RUN1-SKU", "X00TESTR01", "B0RUN1SKU1", "美国", "USD", 21]])
+    file2 = _tiny_listing([["RUN2-SKU", "X00TESTR02", "B0RUN2SKU2", "美国", "USD", 33]])
+    skus = ["RUN1-SKU", "RUN2-SKU", "KEEP-HAND"]
+    run_ids: list[int] = []
+    client = TestClient(app)
+    try:
+        upsert_product({"sku": "KEEP-HAND", "chinese_name": "旁路品名"})
+        set_product_fields("KEEP-HAND", {"listing_price": 9, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+        first = client.post(
+            "/api/lingxing/import-xlsx",
+            files={"file": ("run1.xlsx", file1, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        assert first.status_code == 200, first.text
+        run1 = first.json()["run_id"]
+        run_ids.append(run1)
+        preview1 = client.get("/api/lingxing/sync/preview", params={"run_id": run1}).json()
+        confirmed1 = client.post(
+            "/api/lingxing/sync/confirm",
+            json={"run_id": run1, "items": _default_confirm_items(preview1)},
+        )
+        assert confirmed1.status_code == 200, confirmed1.text
+        assert get_product_by_sku("RUN1-SKU")["listing_price"] == 21
+        set_product_fields("RUN1-SKU", {"local_name": "手改品名"}, SOURCE_MANUAL)
+        second = client.post(
+            "/api/lingxing/import-xlsx",
+            files={"file": ("run2.xlsx", file2, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        )
+        assert second.status_code == 200, second.text
+        run2 = second.json()["run_id"]
+        run_ids.append(run2)
+        preview2 = client.get("/api/lingxing/sync/preview", params={"run_id": run2}).json()
+        confirmed2 = client.post(
+            "/api/lingxing/sync/confirm",
+            json={"run_id": run2, "items": _default_confirm_items(preview2)},
+        )
+        assert confirmed2.status_code == 200, confirmed2.text
+        assert get_product_by_sku("RUN2-SKU")["listing_price"] == 33
+        rolled = client.post(f"/api/lingxing/runs/{run1}/rollback")
+        assert rolled.status_code == 200, rolled.text
+        body = rolled.json()
+        assert run2 in body["later_runs"]
+        kept = get_product_by_sku("RUN1-SKU")
+        assert kept["local_name"] == "手改品名"
+        assert kept.get("listing_price") in (None, "")
+        assert get_product_by_sku("RUN2-SKU")["listing_price"] == 33
+        assert get_product_by_sku("KEEP-HAND")["chinese_name"] == "旁路品名"
+        assert get_product_by_sku("KEEP-HAND")["listing_price"] == 9
+        assert get_lingxing_sync_run(run2)["status"] == "confirmed"
+        again = client.post(f"/api/lingxing/runs/{run1}/rollback")
+        assert again.status_code == 409
+    finally:
+        _wipe_listing(skus, run_ids)
+
+
+def test_v4_d1_confirm_failure_leaves_no_partial_write(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from fba_tool import product_fields
+    from fba_tool.master_db import get_product_by_sku
+    from fba_tool.master_db_lingxing import get_lingxing_sync_run
+    from main import app
+
+    real = product_fields.set_product_fields
+    state = {"n": 0}
+
+    def wrapped(sku, values, source):
+        state["n"] += 1
+        if state["n"] >= 2:
+            raise ValueError("「fee_fba_est」必须大于 0：0.0")
+        return real(sku, values, source)
+
+    monkeypatch.setattr(product_fields, "set_product_fields", wrapped)
+    data = _synthetic_listing_xlsx()
+    skus = ["SYN-MAT-1", "SYN-MAT-2"]
+    client = TestClient(app)
+    response = client.post(
+        "/api/lingxing/import-xlsx",
+        files={"file": ("synthetic-us-listing-2026-10-21.xlsx", data, "application/octet-stream")},
+    )
+    assert response.status_code == 200, response.text
+    run_id = response.json()["run_id"]
+    try:
+        preview = client.get("/api/lingxing/sync/preview", params={"run_id": run_id}).json()
+        confirmed = client.post(
+            "/api/lingxing/sync/confirm",
+            json={"run_id": run_id, "items": _default_confirm_items(preview)},
+        )
+        assert confirmed.status_code == 409, confirmed.text
+        assert "fee_fba_est" in confirmed.text
+        for sku in skus:
+            assert get_product_by_sku(sku) is None
+        assert get_lingxing_sync_run(run_id)["status"] != "confirmed"
+    finally:
+        _wipe_listing(skus, [run_id])
 
 
 def test_v4_d1_currency_anomaly_keeps_other_rows_and_exports_errors():
@@ -653,6 +918,132 @@ def test_forwarder_dropdown_includes_invoice_templates():
     for forwarder_id in ("qiluo_t5", "qiluo_t6", "deshu", "send"):
         assert forwarder_id in ids
         assert get_template_bytes(forwarder_id)
+
+
+def _structure(data: bytes) -> dict:
+    full = _semantic(data)
+    return {
+        name: {key: sheet[key] for key in ("state", "merges", "dv", "images", "cf")}
+        for name, sheet in full.items()
+    }
+
+
+def _export(client, filename: str, forwarder_id: str, sheet: str, fields: list, snapshot=None):
+    raw = _bytes(filename)
+    body = {
+        "forwarder_id": forwarder_id,
+        "template_base64": base64.b64encode(raw).decode(),
+        "template_sheet": sheet,
+        "shipment_id": "FBAE2E",
+        "warehouse_code": "ONT8",
+        "fields": fields,
+    }
+    if snapshot is not None:
+        body["snapshot"] = snapshot
+    return client.post("/api/export_invoice", json=body), raw
+
+
+def test_v4_export_invoice_keeps_workbook_and_rejects_conflicts():
+    """发出件保留原模板的表、隐藏状态、图片、数据验证；合并从属格和公式格返回 400。"""
+    from fastapi.testclient import TestClient
+
+    from main import app
+
+    client = TestClient(app)
+    saved, raw = _export(
+        client,
+        "deshu_t3.xlsx",
+        "deshu",
+        "发票填写模板",
+        [{"cell": "Z40", "value": "TEST_V", "key": "Z40", "label": "Z40"}],
+    )
+    assert saved.status_code == 200, saved.text[:400]
+    assert _structure(saved.content) == _structure(raw)
+    book = openpyxl.load_workbook(io.BytesIO(saved.content))
+    try:
+        assert book["发票填写模板"]["Z40"].value == "TEST_V"
+        assert book["渠道"].sheet_state == "hidden"
+    finally:
+        book.close()
+
+    saved, raw = _export(
+        client,
+        "qiluo_t6.xlsx",
+        "qiluo_t6",
+        "发票",
+        [{"cell": "E3", "value": "TEST_V", "key": "E3", "label": "E3"}],
+    )
+    assert saved.status_code == 200, saved.text[:400]
+    assert _structure(saved.content) == _structure(raw)
+    book = openpyxl.load_workbook(io.BytesIO(saved.content))
+    try:
+        assert "！" in book.sheetnames
+        assert str(book["发票"]["E4"].value).startswith("=VLOOKUP")
+        assert book["发票"]["E3"].value == "TEST_V"
+    finally:
+        book.close()
+
+    saved, raw = _export(client, "send.xlsx", "send", "Sheet1", [])
+    assert saved.status_code == 200, saved.text[:400]
+    assert _structure(saved.content) == _structure(raw)
+
+    slave, _raw = _export(
+        client,
+        "send.xlsx",
+        "send",
+        "Sheet1",
+        [{"cell": "B4", "value": "TEST_SLAVE", "key": "B4", "label": "B4"}],
+    )
+    assert slave.status_code == 400
+    assert slave.json()["detail"]["code"] == "MERGED_SLAVE"
+
+    formula, _raw = _export(
+        client,
+        "qiluo_t6.xlsx",
+        "qiluo_t6",
+        "发票",
+        [{"cell": "E4", "value": "TEST_PURE_123", "key": "E4", "label": "E4"}],
+    )
+    assert formula.status_code == 400
+    assert formula.json()["detail"]["code"] == "FORMULA_OVERWRITE"
+
+    snap = _snapshot("send.xlsx")["snapshot"]
+    sheet = next(iter(snap["sheets"].values()))
+    sheet.setdefault("cellData", {}).setdefault("3", {})["1"] = {"v": "TEST_SLAVE"}
+    rejected, _raw = _export(client, "send.xlsx", "send", "Sheet1", [], snap)
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"]["code"] == "MERGED_SLAVE"
+
+    snap = _snapshot("qiluo_t6.xlsx")["snapshot"]
+    sheet = next(item for item in snap["sheets"].values() if item["name"] == "发票")
+    cell = sheet["cellData"]["3"]["4"]
+    cell.pop("f", None)
+    cell["v"] = "TEST_PURE_123"
+    rejected, _raw = _export(client, "qiluo_t6.xlsx", "qiluo_t6", "发票", [], snap)
+    assert rejected.status_code == 400
+    assert rejected.json()["detail"]["code"] == "FORMULA_OVERWRITE"
+
+    snap = _snapshot("deshu_t3.xlsx")["snapshot"]
+    kept, raw = _export(client, "deshu_t3.xlsx", "deshu", "发票填写模板", [], snap)
+    assert kept.status_code == 200, kept.text[:400]
+    assert _structure(kept.content) == _structure(raw)
+
+
+def test_v4_a7_flags_injected_workbook_parser(tmp_path):
+    import importlib.util
+
+    token = "excel" + "js"
+    probe = tmp_path / "injected.ts"
+    probe.write_text(f'import Parser from "{token}";\nParser.load(buf);\n', encoding="utf-8")
+    spec = importlib.util.spec_from_file_location(
+        "check_spreadsheet_deps",
+        ROOT / "scripts" / "check_spreadsheet_deps.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+    assert module.scan_paths([tmp_path])
+    assert module.scan_paths([tmp_path / "missing"]) == []
 
 
 def test_deshu_currency_dropdown_survives_snapshot_apply():

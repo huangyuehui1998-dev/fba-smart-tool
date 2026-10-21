@@ -25,6 +25,7 @@ export const EMPTY_CARTON_DRAFT: CartonWizardDraft = {
 const IN_TO_CM = 2.54;
 const OVERSIZE_CM = 63.5;
 const OVERWEIGHT_KG = 23;
+const API_GROSS_MAX_KG = 70;
 
 export function toCm(value: string, unit: "cm" | "in"): number | null {
   const parsed = Number(String(value).trim());
@@ -50,7 +51,11 @@ export function cartonWizardReview(draft: CartonWizardDraft): { blockers: string
 
   const longest = Math.max(length ?? 0, width ?? 0, height ?? 0);
   if (longest > OVERSIZE_CM) warnings.push(`最长边 ${longest.toFixed(1)} cm，超过 63.5 cm，请核对是否超尺寸`);
-  if (gross > OVERWEIGHT_KG) warnings.push(`单箱毛重 ${gross} kg，超过 23 kg，请核对是否超重`);
+  if (gross > API_GROSS_MAX_KG) {
+    blockers.push(`单箱毛重 ${gross} kg，超过系统上限 ${API_GROSS_MAX_KG} kg，无法保存`);
+  } else if (gross > OVERWEIGHT_KG) {
+    warnings.push(`单箱毛重 ${gross} kg，超过 23 kg，请核对是否超重`);
+  }
   const tare = Number(draft.tare);
   const unitWeight = Number(draft.unitWeight);
   if (Number.isFinite(tare) && tare > 0 && Number.isFinite(unitWeight) && unitWeight > 0 && qty > 0) {

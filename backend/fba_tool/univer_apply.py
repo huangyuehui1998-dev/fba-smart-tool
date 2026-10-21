@@ -23,6 +23,53 @@ class ApplyRejected(Exception):
         self.message = message
 
 
+def apply_cell_writes(data: bytes, writes: List[Dict[str, Any]], sheet_name: Optional[str] = None) -> bytes:
+    """把导出字段写回原始 xlsx。不删工作表、图片、数据验证或隐藏表。
+
+    合并从属格和公式格改成纯值时拒绝，与 apply_snapshot_values 同一套规则。
+    """
+    wb = openpyxl.load_workbook(io.BytesIO(data))
+    formula_cells: List[str] = []
+    slave_cells: List[str] = []
+    try:
+        if sheet_name and sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+        else:
+            ws = wb.active
+        slaves = _slave_map(ws)
+        for item in writes or []:
+            ref = str(item.get("cell") or "").replace("$", "").strip().upper()
+            if not ref or item.get("value") in (None, ""):
+                continue
+            from openpyxl.utils.cell import coordinate_to_tuple
+
+            row, col = coordinate_to_tuple(ref)
+            value = item.get("value")
+            if (row, col) in slaves:
+                master = ws.cell(*slaves[(row, col)])
+                if not _values_equal(master.value, value):
+                    slave_cells.append(ref)
+                continue
+            cell = ws.cell(row, col)
+            if _is_formula(cell):
+                if _norm_formula(value) != _norm_formula(cell.value):
+                    formula_cells.append(ref)
+                continue
+            if _values_equal(cell.value, value):
+                continue
+            _write(cell, {"v": value})
+        if formula_cells or slave_cells:
+            code = "FORMULA_OVERWRITE" if formula_cells else "MERGED_SLAVE"
+            cells = formula_cells or slave_cells
+            label = "公式单元格不能改成纯值" if code == "FORMULA_OVERWRITE" else "不能写入合并单元格的从属格"
+            raise ApplyRejected(code, cells, f"{label}：{', '.join(cells[:30])}")
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+    finally:
+        wb.close()
+
+
 def apply_snapshot_values(data: bytes, snapshot: Dict[str, Any]) -> bytes:
     wb = openpyxl.load_workbook(io.BytesIO(data))
     formula_cells: List[str] = []

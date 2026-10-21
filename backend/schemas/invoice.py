@@ -40,4 +40,5 @@ class InvoiceExportRequest(BaseModel):
     shipment_id: str
     warehouse_code: str
     template_sheet: str = "Sheet1"
-    fields: List[Dict[str, Any]] = Field(..., description="发票字段列表，含 key/label/value/source/cell/required")
+    fields: List[Dict[str, Any]] = Field(default_factory=list, description="发票字段列表，含 key/label/value/source/cell/required")
+    snapshot: Optional[Dict[str, Any]] = Field(None, description="当前 Univer 工作簿。有快照时整本回填，保留未映射的修改。")

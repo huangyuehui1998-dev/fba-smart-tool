@@ -517,8 +517,13 @@ export function useInvoice() {
       setError(STALE_DOWNLOAD_HINT);
       return;
     }
-    if (!invoiceDraft || (!invoiceTemplateHash && !invoiceTemplateBase64) || sheetPhase !== "filled") {
-      setError("请先完成自动填写后再导出");
+    if ((!invoiceTemplateHash && !invoiceTemplateBase64) || (sheetPhase !== "filled" && sheetPhase !== "preview")) {
+      setError("请先加载货代模板后再导出");
+      return;
+    }
+    const snapshot = spreadsheetRef.current?.getSnapshot();
+    if (!snapshot) {
+      setError("表格还没准备好，请等模板显示后再导出");
       return;
     }
     setExporting(true);
@@ -529,10 +534,11 @@ export function useInvoice() {
         template_hash: invoiceTemplateHash ?? undefined,
         template_base64: invoiceTemplateHash ? undefined : (invoiceTemplateBase64 ?? undefined),
         forwarder_id: selectedForwarderId || undefined,
-        shipment_id: invoiceDraft.shipment_id,
-        warehouse_code: invoiceDraft.warehouse_code,
-        template_sheet: invoiceDraft.template_sheet || templateSheetName,
-        fields: buildExportFieldsForInvoiceExport(invoiceDraft.cells, cellMeta, getValue),
+        shipment_id: invoiceDraft?.shipment_id || selectedShipmentId || "preview",
+        warehouse_code: invoiceDraft?.warehouse_code || selected?.warehouse || "",
+        template_sheet: invoiceDraft?.template_sheet || templateSheetName,
+        fields: invoiceDraft ? buildExportFieldsForInvoiceExport(invoiceDraft.cells, cellMeta, getValue) : [],
+        snapshot,
       });
     } catch (err) {
       setError(formatApiError(err));
@@ -547,6 +553,8 @@ export function useInvoice() {
     templateSheetName,
     cellMeta,
     selectedForwarderId,
+    selectedShipmentId,
+    selected,
     staleness,
   ]);
 

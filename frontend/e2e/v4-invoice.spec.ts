@@ -1,3 +1,8 @@
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { expect, test, type Page } from "@playwright/test";
 
 const FBOX = {
@@ -39,6 +44,7 @@ async function installObservers(page: Page) {
     window.localStorage.setItem("fba_carton_wizard_seen", "1");
     window.localStorage.setItem("fba_sidebar_layout_v2", "1");
     window.localStorage.setItem("fba_sidebar_open", "1");
+    delete (window as unknown as { showSaveFilePicker?: unknown }).showSaveFilePicker;
   });
   const external: string[] = [];
   await page.route("**/*", (route) => {
@@ -156,4 +162,87 @@ test("V4-T1 T2 T5 T6 B1 wheel and no external requests", async ({ page }) => {
   expect(await longestTaskAfterSnapshot(page)).toBeLessThan(200);
   await wheelInsideGrid(page);
   expect(external).toEqual([]);
+});
+
+function workbookShape(file: string) {
+  const python = process.env.FBA_E2E_PYTHON || "/tmp/fba-venv/bin/python";
+  const script = `
+import json, sys
+from openpyxl import load_workbook
+wb = load_workbook(sys.argv[1])
+sheets = []
+for ws in wb.worksheets:
+    dvs = list(ws.data_validations.dataValidation) if ws.data_validations else []
+    sheets.append({
+        "name": ws.title,
+        "state": ws.sheet_state,
+        "images": len(getattr(ws, "_images", []) or []),
+        "dv": len(dvs),
+        "merges": sorted(str(item) for item in ws.merged_cells.ranges),
+    })
+formulas = {}
+if "发票" in wb.sheetnames:
+    formulas["E4"] = wb["发票"]["E4"].value
+print(json.dumps({"sheets": sheets, "formulas": formulas}, ensure_ascii=False))
+`;
+  return JSON.parse(execFileSync(python, ["-c", script, file], { encoding: "utf-8" }));
+}
+
+async function exportWorkbook(page: Page): Promise<{ status: number; body: Buffer }> {
+  const captured: { status: number; body: Buffer }[] = [];
+  await page.route("**/api/export_invoice", async (route) => {
+    const upstream = await route.fetch();
+    const body = Buffer.from(await upstream.body());
+    captured.push({ status: upstream.status(), body });
+    await route.fulfill({ response: upstream, body });
+  });
+  await page.getByTestId("export-invoice").click();
+  await expect.poll(() => captured.length, { timeout: 60_000 }).toBeGreaterThan(0);
+  await page.unroute("**/api/export_invoice");
+  const result = captured[0];
+  if (result.body.length < 32 && result.status === 200) {
+    throw new Error(`export body too small: ${result.body.length}`);
+  }
+  return result;
+}
+
+test("V4 UI export keeps sheets and images and rejects merge or formula edits", async ({ page }) => {
+  await installObservers(page);
+  await openInvoice(page);
+  const cases = [
+    ["德速·Commercial Invoice 9810（T3）", "deshu_t3.xlsx"],
+    ["琪珞·FBA专线导入模版（T6）", "qiluo_t6.xlsx"],
+    ["SEND（亚马逊 SEND 渠道）", "send.xlsx"],
+  ] as const;
+  for (const [label, filename] of cases) {
+    await chooseForwarder(page, label);
+    await expect(page.getByTestId("export-scope-note")).toBeVisible();
+    await expect(page.getByTestId("export-invoice")).toBeEnabled();
+    const response = await exportWorkbook(page);
+    expect(response.status).toBe(200);
+    const dir = mkdtempSync(join(tmpdir(), "fba-ui-export-"));
+    const out = join(dir, "out.xlsx");
+    writeFileSync(out, response.body);
+    const original = join("..", "backend", "templates", "forwarders", filename);
+    expect(workbookShape(out)).toEqual(workbookShape(original));
+    if (filename === "qiluo_t6.xlsx") {
+      expect(String(workbookShape(out).formulas.E4)).toContain("VLOOKUP");
+      await page.evaluate(async () => {
+        window.__fbaUniver?.setCell("E4", "TEST_PURE_123");
+        await new Promise((resolve) => window.setTimeout(resolve, 30));
+      });
+      const formula = await exportWorkbook(page);
+      expect(formula.status).toBe(400);
+      expect(JSON.parse(formula.body.toString("utf8")).detail.code).toBe("FORMULA_OVERWRITE");
+    }
+    if (filename === "send.xlsx") {
+      await page.evaluate(async () => {
+        window.__fbaUniver?.setCell("B4", "TEST_SLAVE");
+        await new Promise((resolve) => window.setTimeout(resolve, 30));
+      });
+      const slave = await exportWorkbook(page);
+      expect(slave.status).toBe(400);
+      expect(JSON.parse(slave.body.toString("utf8")).detail.code).toBe("MERGED_SLAVE");
+    }
+  }
 });

@@ -373,6 +373,7 @@ export function exportInvoice(body: {
   warehouse_code: string;
   template_sheet: string;
   fields: Record<string, unknown>[];
+  snapshot?: unknown;
 }) {
   return downloadPostBlob("/api/export_invoice", body, `货代发票_${body.shipment_id}.xlsx`);
 }

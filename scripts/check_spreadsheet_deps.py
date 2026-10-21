@@ -17,30 +17,16 @@ FORBIDDEN = (
     "LuckyExcel",
     "transformExcelToFortune",
     "transformExcelToLucky",
+    "exceljs",
+    "ExcelJS",
 )
 SCAN_ROOTS = (ROOT / "frontend" / "src", ROOT / "backend", ROOT / "scripts")
 SKIP_NAMES = {"check_spreadsheet_deps.py"}
 
 
-def problems() -> list[str]:
+def scan_paths(paths: list[Path]) -> list[str]:
     found: list[str] = []
-    package = json.loads((ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
-    deps = {**package.get("dependencies", {}), **package.get("devDependencies", {})}
-    for name in deps:
-        if name.startswith("@fortune-sheet") or name in {"@corbe30/fortune-excel", "@zwight/luckyexcel", "luckyexcel"}:
-            found.append(f"package.json 仍依赖 {name}")
-    xlsx = deps.get("xlsx", "")
-    if "0.18.5" in str(xlsx):
-        found.append("package.json 的 xlsx 仍指向 0.18.5")
-    lock = ROOT / "frontend" / "package-lock.json"
-    if lock.is_file() and '"xlsx"' in lock.read_text(encoding="utf-8") and "0.18.5" in lock.read_text(encoding="utf-8"):
-        # 只在 xlsx 包自己的版本字段上失败，避免别的包碰巧写到这个号。
-        data = json.loads(lock.read_text(encoding="utf-8"))
-        packages = data.get("packages") or {}
-        entry = packages.get("node_modules/xlsx") or {}
-        if str(entry.get("version") or "") == "0.18.5":
-            found.append("package-lock 解析到 xlsx 0.18.5")
-    for folder in SCAN_ROOTS:
+    for folder in paths:
         if not folder.is_dir():
             continue
         for path in folder.rglob("*"):
@@ -53,8 +39,39 @@ def problems() -> list[str]:
             text = path.read_text(encoding="utf-8", errors="ignore")
             for token in FORBIDDEN:
                 if token in text:
-                    found.append(f"{path.relative_to(ROOT)} 含有 {token}")
+                    try:
+                        label = str(path.relative_to(ROOT))
+                    except ValueError:
+                        label = str(path)
+                    found.append(f"{label} 含有 {token}")
                     break
+    return found
+
+
+def problems() -> list[str]:
+    found: list[str] = []
+    package = json.loads((ROOT / "frontend" / "package.json").read_text(encoding="utf-8"))
+    deps = {**package.get("dependencies", {}), **package.get("devDependencies", {})}
+    for name in deps:
+        if name.startswith("@fortune-sheet") or name in {
+            "@corbe30/fortune-excel",
+            "@zwight/luckyexcel",
+            "luckyexcel",
+            "exceljs",
+        }:
+            found.append(f"package.json 仍依赖 {name}")
+    xlsx = deps.get("xlsx", "")
+    if "0.18.5" in str(xlsx):
+        found.append("package.json 的 xlsx 仍指向 0.18.5")
+    lock = ROOT / "frontend" / "package-lock.json"
+    if lock.is_file() and '"xlsx"' in lock.read_text(encoding="utf-8") and "0.18.5" in lock.read_text(encoding="utf-8"):
+        # 只在 xlsx 包自己的版本字段上失败，避免别的包碰巧写到这个号。
+        data = json.loads(lock.read_text(encoding="utf-8"))
+        packages = data.get("packages") or {}
+        entry = packages.get("node_modules/xlsx") or {}
+        if str(entry.get("version") or "") == "0.18.5":
+            found.append("package-lock 解析到 xlsx 0.18.5")
+    found.extend(scan_paths(list(SCAN_ROOTS)))
     return found
 
 
