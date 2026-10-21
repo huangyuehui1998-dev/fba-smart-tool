@@ -186,3 +186,6 @@ def test_windows_workflow_uploads_artifact_and_does_not_publish():
     assert "Run workflow" in doc
     assert "不要在 Linux 上解压再重新压缩" in doc
     assert "不会创建或发布 GitHub Release" in doc
+    assert "首次启动崩溃根因与防再发" in doc
+    assert "test_factory_policy_defaults_are_in_whitelist_and_datas" in doc
+    assert "39569887016" in doc

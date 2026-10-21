@@ -6,6 +6,26 @@
 
 它只上传 workflow artifact，**不会创建或发布 GitHub Release**。人工模拟测试通过之后，再由 Marco / bots 把 zip 挂到 Release 上。
 
+## 首次启动崩溃根因与防再发
+
+人工模拟 [Actions run 39569887016](https://github.com/huangyuehui1998-dev/fba-smart-tool/actions/runs/39569887016) 的包时：控制台在「正在启动…」之后报 `FileNotFoundError`，找不到 `_internal\config\policy.json`，然后停在「按 Enter 键关闭…」。端口 8002 上的界面没有打开。
+
+根因：`packaging/release_manifest.py` 的 `CONFIG_WHITELIST` 当时没有 `policy.default.json`。启动 import `placement_fee` 时会调用 `load_policy()` → `resolve_config_read("policy.json")` → `bundled_default("policy.json")`。这个函数只在包里已经有 `config/policy.default.json` 时才读它；没有就去读 `config/policy.json`。PyInstaller 没把出厂文件收进 `_MEIPASS/config/`，所以报错路径是不存在的 `policy.json`。
+
+必须随包发布的出厂规则（仓库里的 `backend/config/`，不是客户数据）：
+
+- `policy.default.json`（缺了就无法启动）
+- `category_map.default.json`（品类映射，读文件时没有缺失保护）
+- `item_size_policy.default.json`（商品分段）
+- `forwarder_registry.default.json`（渠道体积重除数）
+- `sta_dropdowns.default.json`（STA 预检下拉）
+
+不要打进包：`invoice_history.default.json`、`lingxing.json`、`app_data`、`realdata`。
+
+防再发：`backend/tests/release/test_portable_package.py` 的 `test_factory_policy_defaults_are_in_whitelist_and_datas`。上面五个文件不在白名单里，或不在 PyInstaller 收集的 datas 里，测试失败。`scripts/finish_portable_dist.py` 打 zip 之前还会按白名单核对 zip 条目，缺了这次打包就失败，不会上传。
+
+不要用 run 39569887016 的 artifact 做人工模拟，也不要把它挂到 GitHub Release。那一版没有 `policy.default.json`。已核对、含上述五个出厂文件的是 [run 39575543299](https://github.com/huangyuehui1998-dev/fba-smart-tool/actions/runs/39575543299)：内层 `FBA_Smart_Tool_V3.3_便携版.zip`，138,430,173 字节，SHA256 `30df4d3a02fbad43f3afb37bb96ba596e8f9f4aefec0180c08c6c5d4547f31a2`。
+
 ## 包里有什么
 
 文件名：`dist/FBA_Smart_Tool_V3.3_便携版.zip`
