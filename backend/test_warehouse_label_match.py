@@ -60,7 +60,7 @@ def test_dowd_pages_do_not_outvote_csv_clt2():
     page = PdfBoxPage(0, "FBATEST0001", "FBATEST0001U000001", 1, warehouse_code="DOWD")
     code, warnings = resolve_warehouse_with_warnings("CLT2", "x.pdf", [page] * 32)
     assert code == "CLT2"
-    assert any("DOWD" in item for item in warnings)
+    assert all("DOWD" not in item for item in warnings)
 
 
 def _csv():

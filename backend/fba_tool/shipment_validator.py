@@ -125,7 +125,7 @@ def parse_uploads(
 
     for sid, csv_ship in csv_map.items():
         if sid not in pdf_map:
-            errors.append(f"⚠️ CSV **{sid}**（{csv_ship.warehouse_code}）未找到货件编号匹配的 PDF")
+            errors.append(f"❌ CSV **{sid}**（{csv_ship.warehouse_code}）未找到货件编号匹配的 PDF")
 
     for sid in pdf_map:
         if sid not in csv_map:
@@ -240,6 +240,9 @@ def validate_shipments(
         on_progress=on_progress,
     )
     status.extend(cross.status_lines)
+    missing_pdf = [line for line in errors if "未找到货件编号匹配的 PDF" in line]
+    if missing_pdf:
+        status.extend(missing_pdf)
     compare_errors = cross.errors
 
     hard_errors = [e for e in compare_errors if e.startswith("❌")]

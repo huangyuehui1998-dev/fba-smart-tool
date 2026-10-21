@@ -12,6 +12,7 @@ from fba_tool.shipment_parser import (
     CsvShipment,
     PdfBoxPage,
     format_box_u_label,
+    join_wrapped_sku,
     normalize_fba_box_id,
 )
 
@@ -221,12 +222,25 @@ def cross_validate_pair(
             continue
 
         pdf_sku = str(pdf_page.sku or "").strip()
+        if not pdf_sku:
+            pdf_sku = join_wrapped_sku(pdf_page.raw_text or "", list(csv_skus))
         try:
             pdf_qty = int(pdf_page.qty or 0)
         except (TypeError, ValueError):
             pdf_qty = 0
-        if not pdf_sku or pdf_qty <= 0:
-            unlabeled += 1
+        fnsku = str(pdf_page.fnsku or "").strip().upper()
+        csv_fnskus = {str(value).strip().upper() for value in (csv.sku_fnsku or {}).values() if str(value).strip()}
+        if not pdf_sku:
+            recognized_fnsku = bool(fnsku) and (not csv_fnskus or fnsku in csv_fnskus)
+            recognized_qty = pdf_qty > 0 and (
+                sku_count != 1 or pdf_qty == int(next(iter(csv_skus.values())))
+            )
+            if not pdf_sku and not fnsku and pdf_qty <= 0:
+                errors.append(f"❌ 【箱唛未识别】箱号 {label} 的 SKU、FNSKU、数量都识别不出")
+            elif recognized_fnsku or recognized_qty:
+                errors.append(f"⚠️ 箱号 {label} 箱唛 SKU 未识别，已按 FNSKU/数量核对")
+            else:
+                errors.append(f"❌ 【箱唛未识别】箱号 {label} 的 SKU、FNSKU、数量都对不上")
             continue
 
         if sku_count == 1:

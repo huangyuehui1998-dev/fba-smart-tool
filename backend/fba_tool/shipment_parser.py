@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -23,6 +24,9 @@ from fba_tool.warehouse_codes import (
     is_valid_warehouse_code,
     normalize_code as normalize_warehouse_code,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class PdfTextError(Exception):
@@ -54,6 +58,7 @@ class PdfBoxPage:
     is_mixed: bool = False
     raw_text: str = ""
     warehouse_code: str = ""
+    ignored_tokens: List[str] = field(default_factory=list)
 
 
 def format_box_u_label(box_no: int) -> str:
@@ -233,6 +238,7 @@ def _parse_pdf_page_text(text: str, page_index: int) -> Optional[PdfBoxPage]:
     fnsku = fnsku_m.group(1).upper() if fnsku_m else ""
 
     warehouse_code, _wh_warnings = warehouse_from_label_text(text)
+    ignored = _ignored_warehouse_tokens(text)
 
     return PdfBoxPage(
         page_index=page_index,
@@ -245,6 +251,7 @@ def _parse_pdf_page_text(text: str, page_index: int) -> Optional[PdfBoxPage]:
         is_mixed=is_mixed,
         raw_text=text,
         warehouse_code=warehouse_code,
+        ignored_tokens=ignored,
     )
 
 
@@ -486,28 +493,39 @@ def _fba_suffix_to_box_no(cell: str) -> int:
     return int(m2.group(1)) if m2 else 0
 
 
-def _extract_pdf_sku(text: str) -> str:
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    sku_lines: List[str] = []
+def join_wrapped_sku(text: str, known_skus: Optional[List[str]] = None) -> str:
+    """Single SKU 下一行以 - 结尾时和后一行拼接，也能对上 CSV 里的 SKU。"""
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
     capture = False
+    parts: List[str] = []
     for ln in lines:
         upper = ln.upper()
         if "SINGLE SKU" in upper or upper.startswith("SKU"):
             capture = True
+            parts = []
             continue
-        if capture:
-            if re.search(r"(?:QTY|数量|P1\s*-)", ln, flags=re.I):
-                break
-            if re.match(r"^J-[A-Z0-9\-]+$", ln, flags=re.I) or re.match(r"^\d+PCS-FBA$", ln, flags=re.I):
-                sku_lines.append(ln)
-            elif sku_lines:
-                break
-    if sku_lines:
-        joined = "".join(sku_lines).replace(" ", "")
-        if joined.endswith("-FBA") or "PCS" in joined.upper():
-            return joined
-    m = re.search(r"(J-[A-Z0-9\-]+(?:\d+PCS-FBA))", text.replace("\n", ""), flags=re.I)
-    return m.group(1) if m else ""
+        if not capture:
+            continue
+        if re.search(r"(?:QTY|数量|P1\s*-)", ln, flags=re.I):
+            break
+        parts.append(ln.replace(" ", ""))
+        joined = "".join(parts)
+        if known_skus:
+            for sku in known_skus:
+                if joined.upper() == str(sku).upper():
+                    return str(sku)
+        if not ln.endswith("-"):
+            break
+    joined = "".join(parts)
+    if joined.endswith("-FBA") or "PCS" in joined.upper():
+        return joined
+    flat = re.sub(r"\s+", "", text or "")
+    match = re.search(r"(J-[A-Z0-9\-]+(?:\d+PCS-FBA))", flat, flags=re.I)
+    return match.group(1) if match else ""
+
+
+def _extract_pdf_sku(text: str) -> str:
+    return join_wrapped_sku(text)
 
 
 def _extract_pdf_qty(text: str) -> int:
@@ -564,6 +582,22 @@ def _is_known_warehouse(code: str) -> bool:
 
 _ADDRESS_HINT_RE = re.compile(r"\b(?:RD|ROAD|ST|STREET|AVE|AVENUE|BLVD|DR|DRIVE|LN|LANE|PKWY|HWY)\b", re.I)
 _STREET_NOISE = {"ROAD", "STREET", "AVENUE", "SUITE", "DRIVE", "LANE", "BLVD", "PARKWAY", "FLOOR", "UNIT", "CHARLOTTE"}
+
+
+def _ignored_warehouse_tokens(text: str) -> List[str]:
+    """不在白名单里的 4 字母片段只记调试日志，不写进仓码，也不进接口文案。"""
+    ignored: List[str] = []
+    for match in WAREHOUSE_STRICT_RE.finditer(str(text or "").upper()):
+        cand = match.group(1)
+        if len(cand) != 4 or not cand.isalpha() or cand in WAREHOUSE_BLACKLIST:
+            continue
+        if cand.startswith("FBA") or _is_known_warehouse(cand):
+            continue
+        if cand not in ignored:
+            ignored.append(cand)
+    if ignored:
+        logger.debug("箱唛忽略非仓码 %s", ",".join(ignored))
+    return ignored
 
 
 def warehouse_from_label_text(text: str) -> Tuple[str, List[str]]:
@@ -629,7 +663,7 @@ def resolve_warehouse_with_warnings(
             continue
         if not _is_known_warehouse(cand):
             if cand not in ignored:
-                warnings.append(f"忽略箱唛上的非仓码 {cand}")
+                logger.debug("箱唛忽略非仓码 %s", cand)
                 ignored.add(cand)
             continue
         pdf_text_cands[cand] = pdf_text_cands.get(cand, 0) + 1
