@@ -59,9 +59,66 @@ function localeBundle(): Record<string, unknown> {
   return locales;
 }
 
+let warmTask: Promise<UniverMount> | null = null;
+let warmMount: UniverMount | null = null;
+let warmNode: HTMLElement | null = null;
+
+function resetWarmSlot(): void {
+  warmTask = null;
+  warmMount = null;
+  warmNode = null;
+}
+
+function startWarm(): Promise<UniverMount> {
+  if (warmTask) return warmTask;
+  warmTask = (async () => {
+    // 先把 promise 挂上，失败时才能清掉并允许重试。createUniver 本身是同步的。
+    await Promise.resolve();
+    localeBundle();
+    if (typeof document === "undefined" || !document.body) {
+      throw new Error("univer warmup needs a document");
+    }
+    const node = document.createElement("div");
+    node.setAttribute("data-fba-univer-warm", "1");
+    // 不用 display:none。离屏但有尺寸，createUniver 才会在进第 5 步之前把引擎建完。
+    node.style.cssText = "position:fixed;left:0;top:0;width:1440px;height:70vh;opacity:0;pointer-events:none;z-index:-1;overflow:hidden;";
+    document.body.appendChild(node);
+    try {
+      const mount = mountUniverShell(node);
+      warmMount = mount;
+      warmNode = node;
+      window.__fbaUniverWarmed = true;
+      return mount;
+    } catch (error) {
+      node.remove();
+      resetWarmSlot();
+      throw error;
+    }
+  })();
+  return warmTask;
+}
+
 export function preloadUniverEngine(): void {
-  localeBundle();
-  window.__fbaUniverPreloaded = true;
+  // 测量脚本的裸启动会关掉预热。平时这里真正 createUniver，而不只是合并语言包。
+  if (window.__fbaSkipUniverWarm) return;
+  void startWarm().catch(() => undefined);
+}
+
+export async function claimWarmedShell(host: HTMLElement): Promise<UniverMount | null> {
+  if (window.__fbaSkipUniverWarm) return null;
+  let mount: UniverMount;
+  try {
+    mount = await startWarm();
+  } catch {
+    return null;
+  }
+  if (warmMount !== mount || !warmNode) return null;
+  const node = warmNode;
+  resetWarmSlot();
+  node.style.cssText = "width:100%;height:100%;";
+  host.replaceChildren(node);
+  window.dispatchEvent(new Event("resize"));
+  return mount;
 }
 
 export function mountUniverShell(container: HTMLElement): UniverMount {
@@ -126,6 +183,8 @@ export function publishUniverDebug(api: UniverMount["univerAPI"]): void {
 declare global {
   interface Window {
     __fbaUniverPreloaded?: boolean;
+    __fbaUniverWarmed?: boolean;
+    __fbaSkipUniverWarm?: boolean;
     __fbaUniverShell?: boolean;
     __fbaSnapshotReadyAt?: number;
     __fbaPendingCell?: string;

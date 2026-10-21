@@ -310,8 +310,13 @@ def _is_box_id_label(cell: object) -> bool:
     return text.startswith("包装箱名称")
 
 
+def _is_classic_box_label(cell: object) -> bool:
+    """5457ff7 写 FBA 箱号的行：箱号 / 编号。箱子名称、包装箱名称不是。"""
+    return _label_key(cell) in {"箱号", "编号", "boxid"}
+
+
 def _is_fba_mark_label(cell: object) -> bool:
-    """箱号行。包装箱名称不是箱号，不能写进 FBA 箱号。"""
+    """箱号或箱子名称。包装箱名称不是箱号。箱子名称里的 P1 - Bxx 只当箱名。"""
     return _label_key(cell) in {"箱号", "编号", "boxid", "箱子名称"}
 
 
@@ -383,9 +388,12 @@ def _find_box_id_row(rows: List[List[str]], box_start: int) -> List[str] | None:
         start = _box_value_start(row, box_start)
         if len(row) <= start and not any(_is_box_id_label(cell) for cell in row):
             continue
+        classic = any(_is_classic_box_label(cell) for cell in row)
         label_hit = any(_is_box_id_label(cell) for cell in row)
-        hits = sum(1 for cell in row[start:] if _cell_box_no(cell) > 0)
-        score = (10 if label_hit else 0) + hits
+        fba_hits = sum(1 for cell in row[start:] if _fba_id_text(cell))
+        named_hits = sum(1 for cell in row[start:] if _cell_box_no(cell) > 0)
+        # 真箱唛优先。065ffde 起包装箱名称和箱号行同分，先出现的包装箱名称会抢走列，S-01 对不上。
+        score = fba_hits * 100 + (10 if classic else 0) + (1 if label_hit else 0) + named_hits
         if score > best_score:
             best_score = score
             best_row = row
@@ -459,22 +467,33 @@ def _extract_fba_box_ids(
 ) -> Dict[int, str]:
     """FBA 箱号只从真箱唛来。箱号列里的 P1 - B34 是箱名，写进 box_names。
 
-    箱子列上的 FBA…U 优先。真箱唛在另一列或另一段时：U 后缀对得上已知箱号就按后缀，
-    对不上且条数和还没对上的箱子列一样多，就按箱子列从左到右对上。
+    先认「箱号/编号」行上的 FBA…U（5457ff7 的口径）。后面的箱子名称、包装箱名称不能覆盖。
+    这一行不是真箱唛时，再在同一箱子列里找；还没有，才按 U 后缀或从左到右对上。
     """
     del box_start
     found: Dict[int, str] = {}
+    for row in rows:
+        if not row or not any(_is_classic_box_label(cell) for cell in row):
+            continue
+        for col_idx, cell in enumerate(row):
+            if col_idx not in column_to_box:
+                continue
+            token = _fba_id_text(cell)
+            if token:
+                found.setdefault(column_to_box[col_idx], token)
     loose: List[str] = []
     known = set(column_to_box.values())
+    taken = set(found.values())
     for row in rows:
         for col_idx, cell in enumerate(row):
             token = _fba_id_text(cell)
-            if not token:
+            if not token or token in taken:
                 continue
             if col_idx in column_to_box:
                 box_no = column_to_box[col_idx]
                 if box_no not in found:
                     found[box_no] = token
+                    taken.add(token)
             elif token not in loose:
                 loose.append(token)
     used = set(found.values())
@@ -492,15 +511,31 @@ def _extract_fba_box_ids(
 
 
 def _extract_box_names(rows: List[List[str]], column_to_box: Dict[int, int]) -> Dict[int, str]:
-    """包装箱名称，以及箱号/箱子名称列里不是 FBA 箱唛的原文（第 13 批把箱名写在箱号列）。"""
+    """包装箱名称，以及箱号/箱子名称列里不是 FBA 箱唛的原文（第 13 批把箱名写在箱号列）。
+
+    箱子名称可能写在箱号行前面。后面的真箱唛不能把已经记下的箱名擦掉。
+    """
     names: Dict[int, str] = {}
-    for predicate in (_is_packaging_name_label, _is_fba_mark_label):
-        for col, text in _labeled_cells(rows, column_to_box, predicate).items():
-            if _fba_id_text(text):
+    for col, text in _labeled_cells(rows, column_to_box, _is_packaging_name_label).items():
+        if _fba_id_text(text):
+            continue
+        box_no = column_to_box.get(col)
+        if box_no:
+            names[box_no] = text
+    sorted_cols = sorted(column_to_box)
+    for row in rows:
+        if not row or not sorted_cols or len(row) <= min(sorted_cols):
+            continue
+        if not _is_fba_mark_label(_row_packaging_label(row)):
+            continue
+        for col_idx in sorted_cols:
+            box_no = column_to_box[col_idx]
+            if box_no in names:
                 continue
-            box_no = column_to_box.get(col)
-            if box_no and box_no not in names:
-                names[box_no] = text
+            cell = str(row[col_idx]).strip() if col_idx < len(row) else ""
+            if not cell or cell.lower() == "nan" or _fba_id_text(cell):
+                continue
+            names[box_no] = cell
     return names
 
 

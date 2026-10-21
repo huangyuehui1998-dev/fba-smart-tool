@@ -121,24 +121,29 @@ def test_batch14_packaging_name_row_maps_p1_boxes_and_keeps_inches():
 
 
 def test_send_quantity_is_sku_total_not_per_box():
-    """8 箱各 4 件。重量差 0.003 kg 仍合并。SEND 的 SKU个数是 32，不是单箱 4。"""
+    """同一 SKU 的 SEND 数量是各箱数量加总，不是单箱数量。重量差 0.003 kg 仍合并成一行。"""
     import io
 
     from openpyxl import load_workbook
 
     from fba_tool.invoice_export import SEND_SHEET, export_invoice
-    from fba_tool.invoice_rules import Box, box_ranges
+    from fba_tool.invoice_rules import Box, box_ranges, sku_totals
     from fba_tool.shipment_parser import parse_csv_shipment
 
+    per_box = 4
+    box_count = 8
     dims = (45.0, 45.0, 41.0)
     near = [
-        Box(i, f"FBATEST8QU{i:06d}", [("X00TEST8Q", 4)], 10.004 if i % 2 else 10.001, dims)
-        for i in range(1, 9)
+        Box(i, f"FBATEST8QU{i:06d}", [("X00TEST8Q", per_box)], 10.004 if i % 2 else 10.001, dims)
+        for i in range(1, box_count + 1)
     ]
-    assert [(row.label, row.qty) for row in box_ranges(near)] == [("1-8", 32)]
+    sku_total = sum(qty for _sku, qty in sku_totals(near))
+    assert sku_total == per_box * box_count
+    assert sku_total != per_box
+    assert [(row.label, row.qty) for row in box_ranges(near)] == [(f"1-{box_count}", sku_total)]
     apart = box_ranges([
-        Box(1, "", [("A", 4)], 7.5, dims),
-        Box(2, "", [("A", 4)], 7.6, dims),
+        Box(1, "", [("A", per_box)], 7.5, dims),
+        Box(2, "", [("A", per_box)], 7.6, dims),
     ])
     assert [(row.label, row.weight) for row in apart] == [("1", 7.5), ("2", 7.6)]
 
@@ -146,13 +151,13 @@ def test_send_quantity_is_sku_total_not_per_box():
         return ",".join(f'"{cell}"' for cell in cells)
 
     headers = ["SKU", "商品名称", "ASIN", "FNSKU", "状况", "预处理类型", "商品总数"]
-    headers += [f"箱子 {i} 的商品数量" for i in range(1, 9)]
-    line = ["QTY-SKU", "rod", "B0QTY00001", "X00TEST8Q", "新品", "无", "32", *["4"] * 8]
-    marks = ["", "", "", "", "", "", "箱号"] + [f"FBATEST8QU{i:06d}" for i in range(1, 9)]
-    weight = ["", "", "", "", "", "", "包装箱重量（kg）："] + ["10"] * 8
-    length = ["", "", "", "", "", "", "包装箱长度（cm）："] + ["40"] * 8
-    width = ["", "", "", "", "", "", "包装箱宽度（cm）："] + ["40"] * 8
-    height = ["", "", "", "", "", "", "包装箱高度（cm）："] + ["40"] * 8
+    headers += [f"箱子 {i} 的商品数量" for i in range(1, box_count + 1)]
+    line = ["QTY-SKU", "rod", "B0QTY00001", "X00TEST8Q", "新品", "无", str(sku_total), *[str(per_box)] * box_count]
+    marks = ["", "", "", "", "", "", "箱号"] + [f"FBATEST8QU{i:06d}" for i in range(1, box_count + 1)]
+    weight = ["", "", "", "", "", "", "包装箱重量（kg）："] + ["10"] * box_count
+    length = ["", "", "", "", "", "", "包装箱长度（cm）："] + ["40"] * box_count
+    width = ["", "", "", "", "", "", "包装箱宽度（cm）："] + ["40"] * box_count
+    height = ["", "", "", "", "", "", "包装箱高度（cm）："] + ["40"] * box_count
     raw = "\n".join([
         '"货件编号","FBATEST8Q"',
         '"货件名称","QTY"',
@@ -170,6 +175,8 @@ def test_send_quantity_is_sku_total_not_per_box():
         quoted(height),
     ]).encode()
     ship = parse_csv_shipment(raw, allow_unassigned_fba=True)
+    parsed_total = int(ship.box_items["数量"].sum())
+    assert parsed_total == sku_total
     result = export_invoice(
         "send",
         shipment=ship,
@@ -200,8 +207,9 @@ def test_send_quantity_is_sku_total_not_per_box():
     wb = load_workbook(io.BytesIO(result["bytes"]))
     try:
         ws = wb[SEND_SHEET]
-        assert ws["A15"].value == "1-8"
-        assert ws["F15"].value == 32
+        assert ws["A15"].value == f"1-{box_count}"
+        assert ws["F15"].value == parsed_total
+        assert ws["F15"].value != per_box
         assert ws["F16"].value in (None, "")
     finally:
         wb.close()
@@ -511,6 +519,7 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
                 upsert_product(seed)
                 set_product_fields(seed["sku"], {"listing_price": 10, "listing_price_currency": "USD"}, SOURCE_MANUAL)
             qty_tokens = {str(int(value)) for value in ship.box_items["数量"] if int(value) > 0}
+            # SEND 数量是每个 SKU 的装箱数量之和，从 CSV 算，不写死。评审样本加总后与原发票一致。
             sku_qty: dict[str, int] = {}
             for _, rec in ship.box_items.iterrows():
                 sku_name = str(rec.get("SKU") or "")
@@ -545,7 +554,8 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
                 if forwarder_id == "send":
                     missing_totals = {qty for qty in sku_qty_tokens if not _text_has_qty(texts, qty)}
                     assert not missing_totals, (
-                        f"send 数量应按 SKU 汇总 {sku_qty_tokens}，不是单箱 {qty_tokens}，缺 {missing_totals}"
+                        f"send 数量应是 CSV 按 SKU 加总的 {sorted(sku_qty_tokens)}，"
+                        f"与原发票一致，不能用单箱数量 {sorted(qty_tokens)} 代替，缺 {sorted(missing_totals)}"
                     )
                 else:
                     assert qty_tokens & texts, f"{forwarder_id} 导出没有 CSV 数量 {qty_tokens}"
@@ -556,7 +566,10 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
                         assert ship.shipment_id in invoice_texts
                         if forwarder_id == "send":
                             shared = {qty for qty in sku_qty_tokens if _text_has_qty(invoice_texts, qty)}
-                            assert shared, f"{invoice.name} 和 SEND 的 SKU 汇总数对不上 {sku_qty_tokens}"
+                            assert shared, (
+                                f"{invoice.name} 应包含 CSV 按 SKU 加总的数量 {sorted(sku_qty_tokens)}，"
+                                "这就是 SEND 要写出的数量"
+                            )
                             missing_in_export = {qty for qty in shared if not _text_has_qty(texts, qty)}
                         else:
                             shared = (qty_tokens & invoice_texts) or ({str(int(ship.box_items["数量"].sum()))} & invoice_texts)

@@ -252,6 +252,12 @@ def _csv_text(path: Path) -> str:
     return data.decode("utf-8", errors="replace")
 
 
+def _classic_box_id(value: Any) -> str:
+    """5457ff7 的箱唛：整格就是 FBA…U，不从更长的文字里抠。"""
+    text = re.sub(r"\s+", "", _text_id(value).upper())
+    return text if _FBA_BOX.match(text) else ""
+
+
 def _fba_token(value: Any) -> str:
     text = re.sub(r"\s+", "", str(value or "").strip().upper())
     found = _FBA_TOKEN.search(text)
@@ -276,7 +282,8 @@ def _label_index(row: list[str]) -> tuple[int, str] | None:
         text = _compact(cell)
         if any(text.startswith(_compact(name)) for name in ("包装箱长度", "包装箱宽度", "包装箱高度", "包装箱重量")):
             return index, text
-        if text in {"箱号", "编号", "箱子名称"} or text.startswith("包装箱名称"):
+        # 5457ff7：只有箱号/编号是箱唛行。包装箱名称、箱子名称盖上去会让 S-01 对不上。
+        if text in {"箱号", "编号"}:
             return index, text
     return None
 
@@ -313,34 +320,49 @@ def parse_amazon_csv(path: Path) -> list[dict[str, Any]]:
                 number = _box_no_from_label(row[col])
                 if number:
                     box_of_col[col] = number
+    # 5457ff7：箱号/编号整格是 FBA…U 就用这一格。箱子名称、包装箱名称不能改它，也不能多报空列。
     id_by_col: dict[int, str] = {}
+    for col, slot in slots.items():
+        token = _classic_box_id(slot.get("id"))
+        if token:
+            id_by_col[col] = token
     loose: list[str] = []
+    taken = set(id_by_col.values())
+    # 箱号格有字但不是箱唛（P1 - B34）时，才到别的格子里找。空的箱号列维持 5457，不补。
+    open_cols = [
+        col
+        for col, slot in slots.items()
+        if col not in id_by_col and str(slot.get("id") or "").strip() and not _classic_box_id(slot.get("id"))
+    ]
     for row in rows:
         for col, cell in enumerate(row):
             token = _fba_token(cell)
-            if not token:
+            if not token or token in taken:
                 continue
-            if col in slots:
-                id_by_col.setdefault(col, token)
-            elif token not in loose:
+            if col in open_cols:
+                id_by_col[col] = token
+                taken.add(token)
+                open_cols.remove(col)
+            elif col not in slots and token not in loose:
                 loose.append(token)
     used = set(id_by_col.values())
     for token in loose:
         suffix = re.search(r"U0*(\d+)$", token)
         box_no = int(suffix.group(1)) if suffix else 0
-        for col, known in box_of_col.items():
-            if known == box_no and col not in id_by_col and token not in used:
+        for col in list(open_cols):
+            if box_of_col.get(col) == box_no and col not in id_by_col and token not in used:
                 id_by_col[col] = token
                 used.add(token)
+                open_cols.remove(col)
                 break
-    missing = [col for col in sorted(slots) if col not in id_by_col and _slot_has_measure(slots[col])]
+    missing = [col for col in open_cols if col not in id_by_col and _slot_has_measure(slots[col])]
     leftover = [token for token in loose if token not in used]
     if leftover and len(leftover) == len(missing):
         for col, token in zip(missing, leftover):
             id_by_col[col] = token
     declared = []
     for col, slot in slots.items():
-        ident = id_by_col.get(col) or _fba_token(slot.get("id"))
+        ident = id_by_col.get(col) or _classic_box_id(slot.get("id"))
         if not _FBA_BOX.match(ident):
             continue
         try:

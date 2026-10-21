@@ -13,6 +13,7 @@ from tests.smoke.reference import (
     assemble,
     chargeable,
     cl2_net,
+    parse_amazon_csv,
     parse_measure_file,
     round_up_half_kg,
     summarize_batch13,
@@ -293,6 +294,95 @@ def _sta_named_box_csv(name_before_id: bool) -> bytes:
         '"","","","","","","包装箱宽度（cm）：","10"',
         '"","","","","","","包装箱高度（cm）：","10"',
     ]).encode("utf-8")
+
+
+def _named_after_classic_csv(name_after: bool) -> bytes:
+    """065ffde 的覆盖：箱子名称在箱号后面时，原文会盖掉真箱唛。两种先后都要保住箱唛。"""
+    mark = '"","","","","","","箱号","FBATEST01U000001"'
+    name = '"","","","","","","箱子名称","P1 - B1"'
+    labels = [mark, name] if name_after else [name, mark]
+    return "\n".join([
+        '"货件编号","FBATEST01"',
+        '"货件名称","S01"',
+        '"配送地址","STEP45VILLE, ZZ"',
+        '"箱子数量","1"',
+        "",
+        '"单件商品（1 箱）"',
+        '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量"',
+        '"S01-SKU","rod","B0S01TEST1","X00TESTS01","新品","无","1","1"',
+        "",
+        *labels,
+        '"","","","","","","包装箱重量（kg）：","10"',
+        '"","","","","","","包装箱长度（cm）：","10"',
+        '"","","","","","","包装箱宽度（cm）：","10"',
+        '"","","","","","","包装箱高度（cm）：","10"',
+    ]).encode("utf-8")
+
+
+@pytest.mark.parametrize("name_after", [True, False])
+def test_box_name_row_cannot_replace_classic_fba_id(name_after):
+    """5457ff7 只从箱号行取 FBA 箱号。065ffde 把后面的「箱子名称」原文写进了 FBA箱号。"""
+    from fba_tool.shipment_parser import parse_csv_shipment, snapshot_box_id
+
+    mark, name = "FBATEST01U000001", "P1 - B1"
+    ship = parse_csv_shipment(_named_after_classic_csv(name_after), file_name="s01-name.csv")
+    assert list(ship.box_specs["FBA箱号"]) == [mark]
+    assert list(ship.box_specs["箱名"]) == [name]
+    assert ship.box_fba_ids == {1: mark}
+    assert ship.box_names == {1: name}
+    assert name not in ship.box_fba_ids.values()
+    assert snapshot_box_id(ship.box_specs.iloc[0], ship.box_fba_ids) == mark
+
+
+def test_packaging_name_row_does_not_steal_the_classic_box_columns():
+    """包装箱名称若先出现且列不同，不能抢走列映射，否则尺寸对不上真箱唛，S-01 的 box_total 会掉成 0。"""
+    from fba_tool.shipment_parser import parse_csv_shipment, snapshot_box_id
+
+    mark = "FBATEST07U000007"
+    raw = "\n".join([
+        '"货件编号","FBATEST07"',
+        '"货件名称","S07"',
+        '"配送地址","STEP45VILLE, ZZ"',
+        '"箱子数量","1"',
+        "",
+        '"单件商品（1 箱）"',
+        '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量"',
+        '"S07-SKU","rod","B0S07TEST1","X00TESTS07","新品","无","1","1"',
+        "",
+        '"包装箱名称","P1 - B1"',
+        f'"","","","","","","箱号","{mark}"',
+        '"","","","","","","包装箱重量（kg）：","10"',
+        '"","","","","","","包装箱长度（cm）：","10"',
+        '"","","","","","","包装箱宽度（cm）：","10"',
+        '"","","","","","","包装箱高度（cm）：","10"',
+    ]).encode("utf-8")
+    ship = parse_csv_shipment(raw, file_name="s01-columns.csv")
+    assert 7 in ship.column_to_box.values()
+    assert 1 not in ship.column_to_box.values()
+    assert list(ship.box_specs["FBA箱号"]) == [mark]
+    assert ship.box_fba_ids == {7: mark}
+    assert "P1 - B1" not in ship.box_fba_ids.values()
+    assert "P1 - B1" not in {str(value) for value in ship.box_specs["FBA箱号"]}
+    assert snapshot_box_id(ship.box_specs.iloc[0], ship.box_fba_ids) == mark
+
+
+def test_reference_keeps_classic_box_id_when_a_name_row_follows(tmp_path):
+    """复算基线跟 5457ff7：箱号格是真箱唛时，后面的箱子名称不加箱、也不改这个箱唛。"""
+    path = tmp_path / "ship.csv"
+    path.write_text(
+        "\n".join([
+            "货件编号,FBATEST01",
+            ",,,,,,箱号,FBATEST01U000001",
+            ",,,,,,箱子名称,P1 - B1",
+            ",,,,,,包装箱重量（kg）：,10",
+            ",,,,,,包装箱长度（cm）：,10",
+            ",,,,,,包装箱宽度（cm）：,10",
+            ",,,,,,包装箱高度（cm）：,10",
+        ]),
+        encoding="utf-8",
+    )
+    declared = parse_amazon_csv(path)
+    assert [row["id"] for row in declared] == ["FBATEST01U000001"]
 
 
 @pytest.mark.parametrize("name_before_id", [False, True])

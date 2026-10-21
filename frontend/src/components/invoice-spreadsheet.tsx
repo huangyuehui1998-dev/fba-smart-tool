@@ -172,8 +172,27 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
           const engine = await import("@/lib/univer-engine");
           if (gen !== shellGenRef.current) throw new Error("已取消加载");
           if (mountRef.current) return mountRef.current;
-          host.replaceChildren();
-          const mount = engine.mountUniverShell(host);
+          const claimed = await engine.claimWarmedShell(host);
+          if (gen !== shellGenRef.current) {
+            if (claimed) {
+              try {
+                claimed.univerAPI.dispose();
+              } catch {
+                // 这一轮已经卸载
+              }
+              try {
+                claimed.univer.dispose();
+              } catch {
+                // 同上
+              }
+            }
+            throw new Error("已取消加载");
+          }
+          let mount = claimed;
+          if (!mount) {
+            host.replaceChildren();
+            mount = engine.mountUniverShell(host);
+          }
           if (gen !== shellGenRef.current) {
             try {
               mount.univerAPI.dispose();
