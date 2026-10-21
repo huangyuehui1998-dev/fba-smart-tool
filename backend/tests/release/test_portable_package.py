@@ -129,7 +129,7 @@ def test_utf8_zip_keeps_chinese_names_and_drops_user_data(tmp_path):
     FIN._write_launcher(out)
     (out / FIN.README_NAME).write_text("使用说明", encoding="utf-8")
 
-    zip_path = tmp_path / "FBA_Smart_Tool_V3.3_便携版.zip"
+    zip_path = tmp_path / "FBA_Smart_Tool_V4_便携版.zip"
     FIN.write_utf8_zip(out, zip_path)
     required = [
         "FBA_Smart_Tool/FBA_Smart_Tool.exe",
@@ -172,17 +172,17 @@ def test_windows_workflow_uploads_artifact_and_does_not_publish():
     assert "runs-on: windows-latest" in text
     assert 'python-version: "3.12"' in text
     assert "workflow_dispatch:" in text
-    assert '"v3.3*"' in text
+    assert '"v4*"' in text
     assert "build_standalone.ps1" in text
     assert "requirements.lock.txt" in text
-    assert "FBA_Smart_Tool_V3.3_便携版.zip" in text
+    assert "FBA_Smart_Tool_V4_便携版.zip" in text
     assert "contents: read" in text
     assert "contents: write" not in text
     assert "action-gh-release" not in text
     assert "gh release" not in text
     assert "secrets." not in text
     doc = (ROOT / "docs" / "delivery" / "PORTABLE_WINDOWS_CI.md").read_text(encoding="utf-8")
-    assert "FBA_Smart_Tool_V3.3_便携版.zip" in doc
+    assert "FBA_Smart_Tool_V4_便携版.zip" in doc
     assert "Run workflow" in doc
     assert "不要在 Linux 上解压再重新压缩" in doc
     assert "不会创建或发布 GitHub Release" in doc

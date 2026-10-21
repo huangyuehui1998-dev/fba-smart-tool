@@ -1,6 +1,6 @@
-# V3.3 Windows 便携包（CI 产物）
+# V4 Windows 便携包（CI 产物）
 
-产品版本 `V3.3`。安装包只在 **GitHub Actions 的 `windows-latest`** 上打，不要在一台随意的电脑上手工打包再拿来发布。
+产品版本 `V4`。安装包只在 **GitHub Actions 的 `windows-latest`** 上打，不要在一台随意的电脑上手工打包再拿来发布。
 
 工作流：`.github/workflows/portable-windows.yml`（名称 **Portable Windows package**）。
 
@@ -28,7 +28,7 @@
 
 ## 包里有什么
 
-文件名：`dist/FBA_Smart_Tool_V3.3_便携版.zip`
+文件名：`dist/FBA_Smart_Tool_V4_便携版.zip`
 
 zip 内（正斜杠，中文名带 UTF-8 标志）：
 
@@ -61,16 +61,16 @@ zip 内（正斜杠，中文名带 UTF-8 标志）：
 
 1. **Pull request**（包括 draft）。打开或更新 PR 就会打一版，产物挂在那次运行上。
 2. **Actions → Run workflow**（`workflow_dispatch`）。这个按钮只在工作流文件已经在默认分支 `main` 上之后才会出现。出现之后：选要打的分支，再点 **Run workflow**。
-3. **推送 tag**，名字匹配 `v3.3*`（例如 `v3.3`、`v3.3.0`）。
+3. **推送 tag**，名字匹配 `v4*`（例如 `v4`、`v4.0.0`）。
 
 在工作流还没进 `main` 之前，用第 1 条：打开 PR 的 Checks，或 Actions 列表里那次 **Portable Windows package** 运行。不要为了按按钮先合并。
 
 ## 下载 artifact
 
 1. 打开仓库 **Actions** → 点开成功的 **Portable Windows package** 运行。也可以从 PR 的 Checks 进同一次运行。
-2. 跑完后页面底部 **Artifacts** 里下载 **`FBA_Smart_Tool_V3.3_便携版.zip`**。
+2. 跑完后页面底部 **Artifacts** 里下载 **`FBA_Smart_Tool_V4_便携版.zip`**。
 3. GitHub 下载 artifact 时会再套一层 zip。解**这一层**：
-   - 如果里面是一个同名的 `FBA_Smart_Tool_V3.3_便携版.zip`，**这个内层文件**才是便携包。
+   - 如果里面是一个同名的 `FBA_Smart_Tool_V4_便携版.zip`，**这个内层文件**才是便携包。
    - 如果打开后直接看到目录 `FBA_Smart_Tool` 和 `FBA_Smart_Tool.exe`，说明客户端已经解开了内层，不要再打包。回到 Artifacts 重新下载，上传时用内层那个 zip 文件本身。
 4. 运行摘要（Summary）里有 **SHA256** 和字节数。下载后的内层 zip 应与摘要一致。
 5. Artifact 保留 30 天。过期就再跑一次工作流，不要用旧包在别的机器上重打。
@@ -81,8 +81,8 @@ CI **不会**执行这一步。人工模拟测试通过后再做。
 
 1. 用上面下载的内层 zip，核对 SHA256 与那次 Actions 摘要一致。
 2. 打开仓库 **Releases** → **Draft a new release**。
-3. 选择已有 tag，或新建 tag（`v3.3.0` 这类 `v3.3*`）。新建 tag 会再触发一次打包；测试用的是哪一次运行的 zip，Release 上就挂哪一个，不要换成在 Linux 上重打的包。
-4. 把 `FBA_Smart_Tool_V3.3_便携版.zip` 拖进 **Attach binaries**。不要解压后再压缩。
+3. 选择已有 tag，或新建 tag（`v4.0.0` 这类 `v4*`）。新建 tag 会再触发一次打包；测试用的是哪一次运行的 zip，Release 上就挂哪一个，不要换成在 Linux 上重打的包。
+4. 把 `FBA_Smart_Tool_V4_便携版.zip` 拖进 **Attach binaries**。不要解压后再压缩。
 5. 先存 **Draft**。模拟测试没问题再 **Publish**。
 6. 不要把 `realdata`、`app_data`、领星密钥或发票历史另附到 Release 上。
 
@@ -99,7 +99,7 @@ Set-Location ..
 powershell -ExecutionPolicy Bypass -File scripts\build_standalone.ps1
 ```
 
-成功后看 `dist\FBA_Smart_Tool_V3.3_便携版.zip`，以及脚本打印的 SHA256。
+成功后看 `dist\FBA_Smart_Tool_V4_便携版.zip`，以及脚本打印的 SHA256。
 
 ## 打包失败时
 

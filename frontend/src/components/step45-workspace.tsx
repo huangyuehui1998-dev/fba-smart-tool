@@ -41,6 +41,7 @@ import { useWorkflow } from "@/context/workflow-context";
 import { StaleDataBanner } from "@/components/stale-data-banner";
 import { InvoiceSpreadsheet } from "@/components/invoice-spreadsheet";
 import { CELL_SOURCE_STYLES, type CellSourceKind } from "@/lib/invoice-spreadsheet";
+import { FILL_FAILED_EXPORT_BLOCK } from "@/lib/invoice-export-guard";
 
 const LEGEND_KEYS: CellSourceKind[] = ["exact", "local", "missing"];
 
@@ -63,6 +64,7 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
     copying,
     error,
     setError,
+    fillFailed,
     hasTemplate,
     canAutoFill,
     gridLoading,
@@ -186,6 +188,11 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
                     ? "填充态"
                     : "已加载"}{" "}
                 · Excel 原样排版已就绪
+              </p>
+            )}
+            {fillFailed && (
+              <p className="text-[11px] text-destructive" data-testid="export-blocked-after-fill">
+                {FILL_FAILED_EXPORT_BLOCK}
               </p>
             )}
             {hasTemplate && !parsing && (
@@ -427,11 +434,13 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
             <Button
               size="lg"
               data-testid="export-invoice"
-              disabled={(sheetPhase !== "filled" && sheetPhase !== "preview") || !hasTemplate || exporting || staleness.invoice}
+              disabled={(sheetPhase !== "filled" && sheetPhase !== "preview") || !hasTemplate || exporting || staleness.invoice || fillFailed}
               title={
-                staleness.invoice
-                  ? "结果已过期，不能作为正式文件下载"
-                  : "按当前表格整本回填。未映射的改动也会写入；公式格和合并从属格不能改成纯值。"
+                fillFailed
+                  ? FILL_FAILED_EXPORT_BLOCK
+                  : staleness.invoice
+                    ? "结果已过期，不能作为正式文件下载"
+                    : "按当前表格整本回填。未映射的改动也会写入；公式格和合并从属格不能改成纯值。"
               }
               className="gap-2 px-8 text-base font-semibold shadow-md"
               onClick={() => void handleExport()}

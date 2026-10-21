@@ -19,6 +19,7 @@ import {
   type InvoiceCellFill,
   type Sheet,
 } from "@/lib/invoice-spreadsheet";
+import { metricsFromUniverSheet, verticalWheelTarget, wheelPixelDelta } from "@/lib/grid-wheel";
 import type { UniverMount } from "@/lib/univer-engine";
 import { cn } from "@/lib/utils";
 
@@ -156,6 +157,24 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
       const root = hostRef.current;
       if (!root) return;
       const onWheel = (event: WheelEvent) => {
+        const deltaY = wheelPixelDelta(event.deltaY, event.deltaMode, window.innerHeight || 800);
+        if (!deltaY) {
+          event.preventDefault();
+          return;
+        }
+        const sheet = mountRef.current?.univerAPI.getActiveWorkbook()?.getActiveSheet() ?? null;
+        const metrics = metricsFromUniverSheet(sheet, root.clientHeight);
+        const target = verticalWheelTarget({ ...metrics, deltaY });
+        window.__fbaGridWheel = { target, ...metrics };
+        root.dataset.gridWheel = target;
+        const scroller = document.querySelector("[data-testid=app-scroll]");
+        if (target === "page" && scroller instanceof HTMLElement) {
+          const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+          const next = Math.min(max, Math.max(0, scroller.scrollTop + deltaY));
+          event.preventDefault();
+          if (next !== scroller.scrollTop) scroller.scrollTop = next;
+          return;
+        }
         event.preventDefault();
       };
       root.addEventListener("wheel", onWheel, { capture: true, passive: false });

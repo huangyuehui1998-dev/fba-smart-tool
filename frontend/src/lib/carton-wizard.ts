@@ -33,6 +33,31 @@ export function toCm(value: string, unit: "cm" | "in"): number | null {
   return unit === "in" ? parsed * IN_TO_CM : parsed;
 }
 
+export function cartonWizardStepBlockers(draft: CartonWizardDraft, step: number): string[] {
+  if (step <= 0) {
+    return draft.sku.trim() ? [] : ["请填写 SKU"];
+  }
+  if (step === 1) {
+    const blockers: string[] = [];
+    const length = toCm(draft.length, draft.unit);
+    const width = toCm(draft.width, draft.unit);
+    const height = toCm(draft.height, draft.unit);
+    if (length == null || length <= 0) blockers.push("请填写长度");
+    if (width == null || width <= 0) blockers.push("请填写宽度");
+    if (height == null || height <= 0) blockers.push("请填写高度");
+    return blockers;
+  }
+  if (step === 2) {
+    const blockers: string[] = [];
+    const qty = Number(draft.qty);
+    if (!Number.isInteger(qty) || qty <= 0) blockers.push("单箱数量必须是大于 0 的整数");
+    const gross = Number(draft.gross);
+    if (!Number.isFinite(gross) || gross <= 0) blockers.push("请填写单箱毛重");
+    return blockers;
+  }
+  return cartonWizardReview(draft).blockers;
+}
+
 export function cartonWizardReview(draft: CartonWizardDraft): { blockers: string[]; warnings: string[] } {
   const blockers: string[] = [];
   const warnings: string[] = [];

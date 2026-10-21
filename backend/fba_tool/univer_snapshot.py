@@ -90,14 +90,23 @@ def workbook_to_snapshot(
         rules_by_sheet: Dict[str, List[Dict[str, Any]]] = {}
         used = 1
         worksheets = list(wb.worksheets)
+        sheet_total = max(len(worksheets), 1)
         for index, ws in enumerate(worksheets):
             _check_cancel(cancel_event)
+
+            def _on_fraction(fraction: float, index: int = index) -> None:
+                if not progress:
+                    return
+                overall = int(100 * (index + max(0.0, min(fraction, 0.99))) / sheet_total)
+                progress(min(99, max(1, overall)))
+
             if progress:
-                progress(int(100 * index / max(len(worksheets), 1)))
+                _on_fraction(0.01)
             sheet_id = f"s{index}"
             order.append(sheet_id)
             sheet, rules, content_rows = _sheet_to_univer(
                 ws, sheet_id, clamp=clamp, styles=styles, style_cache=style_cache,
+                on_fraction=_on_fraction,
             )
             sheets[sheet_id] = sheet
             if rules:
@@ -148,6 +157,7 @@ def _sheet_to_univer(
     clamp: bool,
     styles: Dict[str, Any],
     style_cache: Dict[Any, Optional[str]],
+    on_fraction: Optional[Callable[[float], None]] = None,
 ) -> tuple:
     content_row, content_col = _content_extent(ws)
     dv_rules, dv_row, dv_col = _data_validations(ws, clamp=clamp, content_row=content_row, content_col=content_col)
@@ -164,15 +174,22 @@ def _sheet_to_univer(
     col_count = min(col_count, 512)
 
     cell_data: Dict[str, Dict[str, Any]] = {}
-    for cell in ws._cells.values():
-        if isinstance(cell, MergedCell):
-            continue
-        if cell.row > row_count or cell.column > col_count:
-            continue
+    owned = [
+        cell for cell in ws._cells.values()
+        if not isinstance(cell, MergedCell) and cell.row <= row_count and cell.column <= col_count
+    ]
+    owned.sort(key=lambda cell: (cell.row, cell.column))
+    steps = max(len(owned), 1)
+    last_bucket = -1
+    for index, cell in enumerate(owned, start=1):
         payload = _cell_payload(cell, styles, style_cache)
-        if payload is None:
-            continue
-        cell_data.setdefault(str(cell.row - 1), {})[str(cell.column - 1)] = payload
+        if payload is not None:
+            cell_data.setdefault(str(cell.row - 1), {})[str(cell.column - 1)] = payload
+        if on_fraction:
+            bucket = int(4 * index / steps)
+            if bucket != last_bucket:
+                last_bucket = bucket
+                on_fraction(min(index / steps, 0.99))
 
     sheet: Dict[str, Any] = {
         "id": sheet_id,

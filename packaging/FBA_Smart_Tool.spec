@@ -1,5 +1,5 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""PyInstaller spec — FBA Smart Tool V3.3 便携版（目录模式，启动更快）
+"""PyInstaller spec — FBA Smart Tool V4 便携版（目录模式，启动更快）
 
 使用前请先：
   1. cd frontend && npm run build

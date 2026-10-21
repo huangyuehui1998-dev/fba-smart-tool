@@ -8,6 +8,7 @@ import {
   EMPTY_CARTON_DRAFT,
   cartonWizardPayload,
   cartonWizardReview,
+  cartonWizardStepBlockers,
   type CartonWizardDraft,
 } from "@/lib/carton-wizard";
 
@@ -25,6 +26,12 @@ export function CartonSpecWizard({
   const [draft, setDraft] = useState<CartonWizardDraft>({ ...EMPTY_CARTON_DRAFT, sku: initialSku });
   const [saving, setSaving] = useState(false);
   const review = useMemo(() => cartonWizardReview(draft), [draft]);
+  const stepBlockers = useMemo(() => cartonWizardStepBlockers(draft, step), [draft, step]);
+
+  const goNext = () => {
+    if (stepBlockers.length) return;
+    setStep((value) => value + 1);
+  };
 
   const patch = (partial: Partial<CartonWizardDraft>) => setDraft((prev) => ({ ...prev, ...partial }));
 
@@ -66,7 +73,7 @@ export function CartonSpecWizard({
   return (
     <div className="space-y-3 rounded-lg border border-border bg-card p-4" data-testid="carton-wizard">
       <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-medium">
+        <p className="text-sm font-medium" data-testid="carton-step">
           箱规向导 · {STEPS[step]}（{step + 1}/4）
         </p>
         <Button type="button" size="sm" variant="ghost" onClick={() => setOpen(false)}>
@@ -127,6 +134,12 @@ export function CartonSpecWizard({
           </Label>
         </div>
       )}
+      {step < 3 &&
+        stepBlockers.map((item) => (
+          <p key={item} className="text-destructive" data-testid="carton-blocker">
+            {item}
+          </p>
+        ))}
       {step === 3 && (
         <div className="space-y-2 text-sm" data-testid="carton-review">
           <p>
@@ -151,7 +164,7 @@ export function CartonSpecWizard({
           </Button>
         )}
         {step < 3 ? (
-          <Button type="button" size="sm" data-testid="carton-next" onClick={() => setStep((value) => value + 1)}>
+          <Button type="button" size="sm" data-testid="carton-next" onClick={goNext}>
             下一步
           </Button>
         ) : (

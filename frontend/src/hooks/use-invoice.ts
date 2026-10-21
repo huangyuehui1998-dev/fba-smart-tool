@@ -29,6 +29,7 @@ import {
 import { sha256HexFromFile } from "@/lib/file-hash";
 import { rowToApi } from "@/lib/step1-rows";
 import { isOfficialExportBlocked, STALE_DOWNLOAD_HINT } from "@/lib/workflow-invalidation";
+import { exportBlockAfterFailedFill } from "@/lib/invoice-export-guard";
 
 export type { SheetPhase };
 
@@ -108,6 +109,7 @@ export function useInvoice() {
   const [exporting, setExporting] = useState(false);
   const [copying, setCopying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fillFailed, setFillFailed] = useState(false);
   const [invoiceTemplateHash, setInvoiceTemplateHash] = useState<string | null>(null);
   const [revenueTon, setRevenueTon] = useState<number | null>(null);
 
@@ -478,8 +480,10 @@ export function useInvoice() {
     setError(null);
     try {
       await fillOneShipment(selected);
+      setFillFailed(false);
       clearStageStale("invoice");
     } catch (err) {
+      setFillFailed(true);
       setError(formatApiError(err));
     } finally {
       setFilling(false);
@@ -503,9 +507,11 @@ export function useInvoice() {
         await fillOneShipment(shipment);
         ok += 1;
       }
+      setFillFailed(false);
       clearStageStale("invoice");
       toast.success(`已自动填写 ${ok} 个校验通过货件`);
     } catch (err) {
+      setFillFailed(true);
       setError(formatApiError(err));
     } finally {
       setFilling(false);
@@ -519,6 +525,11 @@ export function useInvoice() {
     }
     if ((!invoiceTemplateHash && !invoiceTemplateBase64) || (sheetPhase !== "filled" && sheetPhase !== "preview")) {
       setError("请先加载货代模板后再导出");
+      return;
+    }
+    const fillBlock = exportBlockAfterFailedFill(fillFailed);
+    if (fillBlock) {
+      setError(fillBlock);
       return;
     }
     const snapshot = spreadsheetRef.current?.getSnapshot();
@@ -556,6 +567,7 @@ export function useInvoice() {
     selectedShipmentId,
     selected,
     staleness,
+    fillFailed,
   ]);
 
   const handleCopyToExcel = useCallback(async () => {
@@ -578,6 +590,7 @@ export function useInvoice() {
     async (forwarderId: string) => {
       if (selectedShipmentId) persistCurrentSession(selectedShipmentId);
       setSelectedForwarderId(forwarderId);
+      setFillFailed(false);
       const profile = forwarders.find((f) => f.id === forwarderId);
       await loadForwarderTemplate(forwarderId, profile);
     },
@@ -683,6 +696,7 @@ export function useInvoice() {
     copying,
     error,
     setError,
+    fillFailed,
     hasTemplate,
     canAutoFill,
     gridLoading,

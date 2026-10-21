@@ -203,6 +203,7 @@ def build_invoice_line_items_workflow(
     grouped = ship.box_items.groupby("SKU", sort=True)
     for sku, grp in grouped:
         sku_str = str(sku)
+        rec = _catalog_record(catalog, sku_str)
         wf = lookup_sku(bundle.by_sku, sku_str)
         boxes = sorted(int(b) for b in grp["箱号"].tolist())
 
@@ -321,7 +322,6 @@ def build_invoice_line_items_workflow(
             elif not material_display:
                 material_display = purpose_val
 
-        rec = _catalog_record(catalog, sku_str)
         purchase = rec.unit_cost if rec and rec.unit_cost else None
         pcs = _pcs_from_sku(sku_str)
         asin = csv_row.get("asin") or (master.get("asin") if master else "") or (rec.asin if rec else "")

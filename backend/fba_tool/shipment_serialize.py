@@ -72,5 +72,5 @@ def resolve_csv_shipment(
         if ship is not None and not ship.box_items.empty:
             return ship
     if csv_bytes:
-        return parse_csv_shipment(csv_bytes, file_name=file_name)
+        return parse_csv_shipment(csv_bytes, file_name=file_name, allow_unassigned_fba=True)
     raise ValueError("缺少货件数据：请传入 parsed_shipment 或 csv_base64")

@@ -94,14 +94,56 @@ async function longestTaskAfterSnapshot(page: Page): Promise<number> {
   });
 }
 
-async function wheelInsideGrid(page: Page) {
+async function wheelInsideGrid(page: Page, expected: "page" | "sheet" | "match") {
   const main = page.getByTestId("app-scroll");
   const grid = page.getByTestId("data-univer-grid");
+  await main.evaluate((node) => {
+    node.scrollTop = 0;
+  });
   await grid.hover();
   const before = await main.evaluate((node) => node.scrollTop);
-  await page.mouse.wheel(0, 500);
+  await page.mouse.wheel(0, 600);
+  await page.waitForTimeout(80);
   const after = await main.evaluate((node) => node.scrollTop);
-  expect(after).toBe(before);
+  const target = await page.evaluate(() => window.__fbaGridWheel?.target ?? "");
+  const mode = expected === "match" ? target : expected;
+  expect(target).toBe(mode);
+  if (mode === "page") expect(after).toBeGreaterThan(before);
+  else expect(after).toBe(before);
+}
+
+async function wheelReachesPageAtGridEdge(page: Page) {
+  const grid = page.getByTestId("data-univer-grid");
+  const main = page.getByTestId("app-scroll");
+  await grid.evaluate((el) => {
+    const parent = el.parentElement;
+    if (!parent) return;
+    parent.style.height = "140px";
+    parent.style.minHeight = "140px";
+  });
+  await page.waitForTimeout(200);
+  await main.evaluate((node) => {
+    node.scrollTop = 0;
+  });
+  await grid.hover();
+  await page.mouse.wheel(0, 30);
+  await page.waitForTimeout(50);
+  const first = await page.evaluate(() => window.__fbaGridWheel?.target ?? "");
+  const mid = await main.evaluate((node) => node.scrollTop);
+  if (first === "sheet") {
+    expect(mid).toBe(0);
+    let target = first;
+    for (let i = 0; i < 16 && target !== "page"; i += 1) {
+      await page.mouse.wheel(0, 800);
+      await page.waitForTimeout(40);
+      target = await page.evaluate(() => window.__fbaGridWheel?.target ?? "");
+    }
+    expect(target).toBe("page");
+    expect(await main.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+    return;
+  }
+  expect(first).toBe("page");
+  expect(mid).toBeGreaterThan(0);
 }
 
 test("V4-T1 T2 T5 T6 B1 wheel and no external requests", async ({ page }) => {
@@ -128,7 +170,7 @@ test("V4-T1 T2 T5 T6 B1 wheel and no external requests", async ({ page }) => {
   const before = await outside.evaluate((node) => node.scrollTop);
   await page.mouse.wheel(0, 400);
   expect(await outside.evaluate((node) => node.scrollTop)).toBeGreaterThan(before);
-  await wheelInsideGrid(page);
+  await wheelInsideGrid(page, "match");
 
   for (const name of [
     "琪珞·FBA专线导入模版（T6）",
@@ -140,17 +182,17 @@ test("V4-T1 T2 T5 T6 B1 wheel and no external requests", async ({ page }) => {
     await chooseForwarder(page, name);
     expect(await longestTaskAfterSnapshot(page)).toBeLessThan(200);
   }
-  await wheelInsideGrid(page);
+  await wheelInsideGrid(page, "page");
+  await wheelReachesPageAtGridEdge(page);
 
   await page.getByRole("button", { name: "系统设置" }).click();
   await page.getByTestId("nav-carton").click();
   await expect(page.getByTestId("back-to-workflow")).toBeVisible();
   await page.getByTestId("carton-wizard-open").click();
   await page.getByTestId("carton-next").click();
-  await page.getByTestId("carton-next").click();
-  await page.getByTestId("carton-next").click();
-  await expect(page.getByTestId("carton-blocker").first()).toBeVisible();
-  await expect(page.getByTestId("carton-save")).toBeDisabled();
+  await expect(page.getByTestId("carton-step")).toContainText("SKU");
+  await expect(page.getByTestId("carton-blocker").first()).toContainText("SKU");
+  await expect(page.getByTestId("carton-save")).toHaveCount(0);
 
   await page.getByTestId("back-to-workflow").click();
   await expect(page.getByTestId("forwarder-select")).toBeVisible();
@@ -160,7 +202,7 @@ test("V4-T1 T2 T5 T6 B1 wheel and no external requests", async ({ page }) => {
     await chooseForwarder(page, "SEND（亚马逊 SEND 渠道）");
   }
   expect(await longestTaskAfterSnapshot(page)).toBeLessThan(200);
-  await wheelInsideGrid(page);
+  await wheelInsideGrid(page, "match");
   expect(external).toEqual([]);
 });
 

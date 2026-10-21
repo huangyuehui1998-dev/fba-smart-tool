@@ -1,7 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { cartonWizardPayload, cartonWizardReview, toCm } from "@/lib/carton-wizard";
+import { cartonWizardPayload, cartonWizardReview, cartonWizardStepBlockers, toCm } from "@/lib/carton-wizard";
 
 describe("carton wizard", () => {
+  it("blocks each step until its required fields are filled", () => {
+    const empty = {
+      sku: "",
+      unit: "cm" as const,
+      length: "",
+      width: "",
+      height: "",
+      qty: "",
+      gross: "",
+      tare: "",
+      unitWeight: "",
+    };
+    expect(cartonWizardStepBlockers(empty, 0)).toEqual(["请填写 SKU"]);
+    expect(cartonWizardStepBlockers({ ...empty, sku: "BOX-1" }, 0)).toEqual([]);
+    expect(cartonWizardStepBlockers({ ...empty, sku: "BOX-1" }, 1)).toEqual(["请填写长度", "请填写宽度", "请填写高度"]);
+    expect(
+      cartonWizardStepBlockers({ ...empty, sku: "BOX-1", length: "10", width: "10", height: "10" }, 1),
+    ).toEqual([]);
+    expect(
+      cartonWizardStepBlockers({ ...empty, sku: "BOX-1", length: "10", width: "10", height: "10" }, 2),
+    ).toEqual(["单箱数量必须是大于 0 的整数", "请填写单箱毛重"]);
+  });
+
   it("blocks save when required fields are missing", () => {
     const review = cartonWizardReview({
       sku: "",

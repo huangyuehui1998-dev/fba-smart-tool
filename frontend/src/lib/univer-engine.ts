@@ -114,5 +114,12 @@ declare global {
       getCell: (a1: string) => unknown;
       setCell: (a1: string, value: unknown) => void;
     };
+    __fbaGridWheel?: {
+      target: "sheet" | "page";
+      measurable: boolean;
+      scrollOffsetY: number;
+      contentHeight: number;
+      viewportHeight: number;
+    };
   }
 }
