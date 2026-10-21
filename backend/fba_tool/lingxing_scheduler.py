@@ -4,8 +4,9 @@
 - 与手动“一键拉取”共用同一把锁（SYNC_LOCK），防重入：上一轮没跑完，这一轮记一条“跳过”。
 - 失败自动重试（max_retries 次，间隔按 retry_delay_seconds 递增），每次尝试都记到 lingxing_sync_run（trigger/attempt）
   和日志文件 app_data/logs/lingxing_sync.log；全部失败后界面上可以手动“立即重试”。
-- 产品库以 MCP 为唯一来源（D-02）：定时同步拉到的 Listing 直接按预览的默认勾选写入；
-  手填（manual）字段保持锁定不覆盖，申报价来源 listing_price 例外，按 D-01 领星价优先（与 S2 确认写入同一函数）。
+- 产品库以 MCP 为唯一来源（D-02）：定时同步只写预览里默认勾选的字段。
+  手填（manual）字段保持锁定不覆盖。手填售价和领星不同时默认不勾，定时同步不覆盖，预览标出差异；
+  用户在预览里勾上后再确认仍会写入（售价不进手填锁）。
   SKU 对不上（sku_mismatch）和报关敏感字段（英文品名/品牌，本地已有值时）不自动写，记为“待人工确认”，留在预览里手动确认。
 - 只做只读调用：包一层 ReadOnlyClient，只放行同步用到的查询类 toolId，别的一律拒绝。
 - 密钥仍由 lingxing_sync.load_lingxing_settings 读取（DPAPI 密文 mcp_key_enc），日志里只出现掩码。
@@ -209,7 +210,7 @@ def status() -> Dict[str, Any]:
 
 # ---------------------------------------------------------------- 自动写入（D-02 / D-01）
 def auto_apply_preview(run_id: int) -> Dict[str, Any]:
-    """按预览默认勾选写入；手填锁定字段跳过（申报价 listing_price 除外，D-01）；未勾选的记“待人工确认”。"""
+    """按预览默认勾选写入。手填锁定字段跳过。手填售价和领星不同时默认不勾，不自动覆盖。未勾选的记“待人工确认”。"""
     from fba_tool.lingxing_preview import apply_lingxing_field_patch, serialize_preview
     from fba_tool.master_db import add_lingxing_sync_diff, list_lingxing_preview_skus
     import json
@@ -233,8 +234,11 @@ def auto_apply_preview(run_id: int) -> Dict[str, Any]:
                                            f"{f['field']} 是手填值，已锁定，未用领星值覆盖（本地「{f['local_value']}」，领星「{f['remote_value']}」）")
                 elif not f["default_checked"] and f["local_value"] != f["remote_value"]:
                     stats["needs_review"] += 1
-                    add_lingxing_sync_diff(run_id, "needs_review", sku,
-                                           f"{f['label']}：本地「{f['local_value']}」→ 领星「{f['remote_value']}」，报关敏感/锁定字段不自动写，请人工确认")
+                    note = f.get("difference") or (
+                        f"{f['label']}：本地「{f['local_value']}」→ 领星「{f['remote_value']}」，"
+                        "报关敏感/锁定字段不自动写，请人工确认"
+                    )
+                    add_lingxing_sync_diff(run_id, "needs_review", sku, note)
             if not fields:
                 continue
             old = {f["field"]: f["local_value"] for f in it["fields"]}

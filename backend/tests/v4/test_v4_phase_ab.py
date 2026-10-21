@@ -499,6 +499,11 @@ def test_v4_d1_listing_preview_confirm_rollback():
         items = []
         for rows in preview["groups"].values():
             for row in rows:
+                for field in row.get("fields") or []:
+                    if row["sku"] == sample["sku"] and field["field"] == "listing_price":
+                        assert field["default_checked"] is False
+                        assert field["manual_diff"] is True
+                        assert "1" in field["difference"] and "37.99" in field["difference"]
                 fields = [field["field"] for field in row.get("fields") or [] if field.get("default_checked")]
                 if "carton_length" in fields or "chinese_name" in fields or "material" in fields:
                     raise AssertionError(fields)
@@ -510,7 +515,7 @@ def test_v4_d1_listing_preview_confirm_rollback():
         assert saved["chinese_name"] == "手填品名"
         assert saved["material"] == "手填材质"
         assert saved["carton_length"] == 40
-        assert saved["listing_price"] == 37.99
+        assert saved["listing_price"] == 1  # 手填 1 与领星 37.99 不同，默认确认不覆盖
         assert saved["listing_price_currency"] == "USD"
         again = client.post(
             "/api/lingxing/import-xlsx",
@@ -622,6 +627,10 @@ def test_v4_d1_owner_listing_default_confirm():
                     if field["field"] == "fee_fba_est" and field["remote_value"] in {"0", "0.0"}:
                         zero_fee_seen = True
                         assert field["default_checked"] is False
+                    if row["sku"] == manual["sku"] and field["field"] == "listing_price":
+                        assert field["default_checked"] is False
+                        assert field["manual_diff"] is True
+                        assert "1" in field["difference"]
                     if field["field"] in {"chinese_name", "material", "purpose", "brand", "model_name", "hs_code", "carton_length"}:
                         raise AssertionError(field["field"])
         assert zero_fee_seen
@@ -633,7 +642,7 @@ def test_v4_d1_owner_listing_default_confirm():
         saved = get_product_by_sku(manual["sku"])
         for key, value in {**customs, **carton}.items():
             assert saved[key] == value
-        assert saved["listing_price"] == pytest.approx(manual["listing_price"])
+        assert saved["listing_price"] == 1  # 手填售价和领星不同，默认确认不覆盖
         assert get_product_by_sku(protected["sku"])["listing_price"] == 45
         assert get_product_by_sku(regular_host["sku"])["regular_price"] == 42
         for item in _default_confirm_items(preview):
@@ -711,6 +720,10 @@ def test_v4_d1_synthetic_sheet_default_confirm_and_rollback():
                     if field["field"] == "fee_fba_est" and field["remote_value"] in {"0", "0.0"}:
                         zero_fee_seen = True
                         assert field["default_checked"] is False
+                    if row["sku"] == "TEST_PRICED" and field["field"] == "listing_price":
+                        assert field["default_checked"] is False
+                        assert field["manual_diff"] is True
+                        assert "1" in field["difference"] and "10" in field["difference"]
                     if field["field"] in {"chinese_name", "material", "purpose", "brand", "model_name", "hs_code", "carton_length"}:
                         raise AssertionError(field["field"])
         assert zero_fee_seen
@@ -723,7 +736,7 @@ def test_v4_d1_synthetic_sheet_default_confirm_and_rollback():
         saved = get_product_by_sku("TEST_PRICED")
         for key, value in {**customs, **carton}.items():
             assert saved[key] == value
-        assert saved["listing_price"] == 10
+        assert saved["listing_price"] == 1  # 手填 1 与领星 10 不同，默认确认不覆盖
         assert get_product_by_sku("TEST_ZERO_FEE")["listing_price"] == 11
         assert get_product_by_sku("TEST_ZERO_FEE").get("fee_fba_est") in (None, "")
         assert get_product_by_sku("TEST_UNPRICED")["listing_price"] == 45

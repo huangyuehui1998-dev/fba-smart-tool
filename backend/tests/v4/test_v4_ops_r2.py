@@ -23,7 +23,7 @@ def _csv() -> bytes:
         "",
         '"单件商品（1 箱）"',
         '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量"',
-        '"STEP45-SKU","rod","B0STEP4501","X00STEP45A","新品","无","4","4"',
+        '"STEP45-SKU","rod","B0STEP4501","X00TEST45A","新品","无","4","4"',
         "",
         '"","","","","","","箱号","FBASTEP4501U000001"',
         '"","","","","","","包装箱重量（磅）：","10"',
@@ -55,7 +55,7 @@ def _seed():
     upsert_product(
         {
             "sku": "STEP45-SKU",
-            "fnsku": "X00STEP45A",
+            "fnsku": "X00TEST45A",
             "asin": "B0STEP4501",
             "english_name": "Fishing rod",
             "chinese_name": "鱼竿",
@@ -113,7 +113,7 @@ def test_manual_listing_price_defaults_unchecked(monkeypatch, tmp_path):
     monkeypatch.setattr("fba_tool.master_db._master_db_file", lambda: ad / "fba_master.db")
     monkeypatch.setattr("fba_tool.app_paths.app_data_dir", lambda: ad)
     init_master_db()
-    upsert_product({"sku": "PRICE-HAND", "fnsku": "X00PRICEH1", "asin": "B0PRICEH01"})
+    upsert_product({"sku": "PRICE-HAND", "fnsku": "X00TESTPH1", "asin": "B0PRICEH01"})
     set_product_fields("PRICE-HAND", {"listing_price": 52, "listing_price_currency": "USD"}, SOURCE_MANUAL)
     run_id = 545701
     build_listing_preview(
@@ -121,7 +121,7 @@ def test_manual_listing_price_defaults_unchecked(monkeypatch, tmp_path):
         [{
             "sku": "PRICE-HAND",
             "asin": "B0PRICEH01",
-            "fnsku": "X00PRICEH1",
+            "fnsku": "X00TESTPH1",
             "listing_price": 49.99,
             "listing_price_currency": "USD",
             "listing_price_basis": "listing_price",
@@ -242,12 +242,12 @@ def test_step45_matches_adapter_cells(forwarder_id):
             from fba_tool.warehouse_db import get_warehouse
             from routers.invoice_export import resolve_export_warehouse
 
-            product = lookup_by_fnsku("X00STEP45A")
+            product = lookup_by_fnsku("X00TEST45A")
             code, _source = resolve_export_warehouse(forwarder_id, "", ship.ship_to, ship.warehouse_code)
             direct = export_invoice(
                 forwarder_id,
                 shipment=ship,
-                products={"X00STEP45A": product},
+                products={"X00TEST45A": product},
                 reference_id="",
                 warehouse=code,
                 warehouse_info=get_warehouse(code) if code else None,
