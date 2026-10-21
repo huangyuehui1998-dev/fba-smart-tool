@@ -346,13 +346,14 @@ test("desensitized batch 13 fills step 4.5 then exports", async ({ page }) => {
       "-c",
       `
 import json
-from fba_tool.master_db import init_master_db, upsert_product
+from fba_tool.master_db import delete_product_by_sku, init_master_db, upsert_product
 from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
 init_master_db()
 for sku, fnsku, asin, price in (
     ("B13-AAA", "X00TESTAAA", "B0B13AAA1", 10),
     ("B13-TANZI", "X00TESTTNZ", "B0B13TNZ1", 49.99),
 ):
+    delete_product_by_sku(sku)
     upsert_product({
         "sku": sku,
         "fnsku": fnsku,
@@ -364,10 +365,9 @@ for sku, fnsku, asin, price in (
         "purpose": "户外",
         "hs_code": "9507100090",
         "model_name": "共用型号",
-        "declared_value": price,
         "extra_data": json.dumps({"invoice": {"unit": "个", "purchase_price": 5, "material_en": "plastic", "purpose_en": "outdoor", "pcs_per_set": 1}}, ensure_ascii=False),
     })
-    set_product_fields(sku, {"listing_price": 12.5, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+    set_product_fields(sku, {"listing_price": price, "listing_price_currency": "USD"}, SOURCE_MANUAL)
 `,
     ],
     {
@@ -452,7 +452,11 @@ for sku, fnsku, asin, price in (
   const sendGen = page.waitForResponse((response) => response.url().includes("/api/invoice/generate"));
   await page.getByTestId("invoice-autofill").click();
   expect((await sendGen).status()).toBe(200);
-  await expect(page.getByTestId("reference-id-hint")).toContainText("PDF");
+  const hint = page.getByTestId("reference-id-hint");
+  await expect(hint).toContainText("PDF");
+  const hintBox = await hint.boundingBox();
+  const spacerBox = await page.getByTestId("sheet-scroll-spacer").boundingBox();
+  expect(hintBox && spacerBox && hintBox.y < spacerBox.y).toBeTruthy();
   await expect(page.getByTestId("invoice-autofill")).toBeEnabled();
   const sendFile = join(mkdtempSync(join(tmpdir(), "fba-b13-send-")), "out.xlsx");
   const sendExport = await exportWorkbook(page);
@@ -551,6 +555,7 @@ else:
     await page.getByTestId("invoice-autofill").click();
     expect((await blocked).status()).toBe(422);
     await expect(page.getByText("这个配送地址对应多个仓库")).toBeVisible();
+    await expect(page.getByText(/配送地址「STEP45VILLE, ZZ」/)).toBeVisible();
     await expect(page.getByText("Unprocessable Content")).toHaveCount(0);
     await expect(page.getByTestId("warehouse-candidate-select")).toBeVisible();
     await page.getByTestId("warehouse-candidate-select").click();

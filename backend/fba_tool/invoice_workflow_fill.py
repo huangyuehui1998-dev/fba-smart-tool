@@ -258,8 +258,10 @@ def build_invoice_line_items_workflow(
         qty_master = _master_float(master, "qty_per_box")
         qty_val, qty_src = _pick_source(qty_step12, qty_step4, "", qty_master)
 
-        declared_master = _master_float(master, "declared_value")
-        declared_val, declared_src = _pick_source("", "", "", declared_master)
+        from fba_tool.product_fields import resolve_declared_price
+
+        resolved_price, _price_src = resolve_declared_price(master) if master else (None, "")
+        declared_val, declared_src = (resolved_price, "blue") if resolved_price not in (None, "") else ("", "red")
 
         material_val, material_src = _pick_source("", "", "", _master_text(master, "material"))
         purpose_val, purpose_src = _pick_source("", "", "", _master_text(master, "purpose"))

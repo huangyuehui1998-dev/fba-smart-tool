@@ -40,6 +40,7 @@ def _seed(
     purpose: str = "户外",
     declared_value: float | None = None,
     english_name: str = "Fishing rod",
+    listing_price: float | None = 12.5,
 ):
     from fba_tool.master_db import _connect, init_master_db, upsert_product
     from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
@@ -76,7 +77,8 @@ def _seed(
             ),
         }
     )
-    set_product_fields(sku, {"listing_price": 12.5, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+    if listing_price is not None:
+        set_product_fields(sku, {"listing_price": listing_price, "listing_price_currency": "USD"}, SOURCE_MANUAL)
 
 
 def _book(data: bytes):
@@ -402,7 +404,7 @@ def test_qiluo_multi_sku_rows_and_declared_total():
     )
     for sku, fnsku, asin, price in skus:
         delete_product_by_sku(sku)
-        _seed(sku, fnsku, asin, "共用型号", declared_value=price)
+        _seed(sku, fnsku, asin, "共用型号", listing_price=price)
     raw = _multi_sku_csv()
     client = TestClient(app)
     try:
@@ -713,6 +715,8 @@ def test_generate_multi_warehouse_422_names_candidates_in_chinese():
         detail = generated.json()["detail"]
         assert detail["code"] == "warehouse_undecided"
         assert "选择仓库" in detail["message"]
+        assert detail["address"] == "STEP45VILLE, ZZ"
+        assert "STEP45VILLE, ZZ" in detail["message"]
         assert "TST1" in detail["warehouse_candidates"]
         assert "TST2" in detail["warehouse_candidates"]
 
@@ -778,8 +782,11 @@ def test_jiufang_total_merge_follows_the_total_row(monkeypatch):
         return out
 
     warehouse = {"address1": "1 Test Road", "city": "STEP45VILLE", "state": "ZZ", "zip": "00000"}
-    expected = {1: ["M26:N26"], 2: ["M27:N27"], 3: ["M28:N28"]}
-    for count, merges in expected.items():
+    origin = _book(poisoned)
+    origin_font = origin["Invoice"]["M26"].font
+    saved_font = (origin_font.bold, origin_font.name, origin_font.size)
+    origin.close()
+    for count in (1, 2, 3, 6):
         ship = parse_csv_shipment(_lines_csv(count), file_name="lines.csv")
         result = export_invoice(
             "jiufang",
@@ -793,11 +800,17 @@ def test_jiufang_total_merge_follows_the_total_row(monkeypatch):
         wb = _book(result["bytes"])
         try:
             inv = wb["Invoice"]
-            assert _body_mn(inv) == merges
-            assert "M27:N27" not in _body_mn(inv) or count == 2
+            trow = 25 + count
+            assert _body_mn(inv) == []
+            assert "M27:N27" not in {str(merged) for merged in inv.merged_cells.ranges}
+            assert "M31:N31" not in {str(merged) for merged in inv.merged_cells.ranges}
+            assert inv[f"M{trow}"].value == "*Total（汇总）:"
+            total_font = inv[f"M{trow}"].font
+            assert (total_font.bold, total_font.name, total_font.size) == saved_font
             data_row = 24 + count
             assert not isinstance(inv[f"N{data_row}"], MergedCell)
             assert str(inv[f"N{data_row}"].value) == "7326909000"
+            assert not inv[f"M{data_row}"].font.bold
             header_now = sorted(str(merged) for merged in inv.merged_cells.ranges if merged.min_row < 25)
             assert header_now == kept
         finally:

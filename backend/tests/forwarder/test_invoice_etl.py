@@ -234,3 +234,92 @@ def test_qiluo_etl_declared_total_keeps_every_sku():
     assert prices == [10.0, 49.99]
     total = round(sum(float(it.values["total_declared_value_usd"]) for it in items), 2)
     assert total == 239.96
+
+
+def test_qiluo_declared_price_uses_listing_price_like_send():
+    """只有手填售价和发票扩展字段时，申报单价与 SEND 的 resolve_declared_price 相同。"""
+    import json
+
+    from fba_tool.invoice_table import InvoiceTableLayout, table_cells_from_line_items
+    from fba_tool.master_db import init_master_db, upsert_product
+    from fba_tool.product_fields import SOURCE_MANUAL, resolve_declared_price, set_product_fields
+
+    init_master_db()
+    prices = {"SKU-PRICE-A": 39.99, "SKU-PRICE-B": 49.99}
+    for sku, price in prices.items():
+        upsert_product(
+            {
+                "sku": sku,
+                "chinese_name": "品名",
+                "hs_code": "9507100090",
+                "model_name": "型号",
+                "extra_data": json.dumps(
+                    {"invoice": {"unit": "个", "purchase_price": 5, "material_en": "cotton", "purpose_en": "pet"}},
+                    ensure_ascii=False,
+                ),
+            }
+        )
+        set_product_fields(sku, {"listing_price": price, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+    box_items = pd.DataFrame(
+        [
+            {"箱号": 1, "SKU": "SKU-PRICE-A", "数量": 4},
+            {"箱号": 2, "SKU": "SKU-PRICE-B", "数量": 4},
+        ]
+    )
+    box_specs = pd.DataFrame(
+        [
+            {"箱号": 1, "长(cm)": 30, "宽(cm)": 20, "高(cm)": 10, "实重(kg)": 2.0},
+            {"箱号": 2, "长(cm)": 30, "宽(cm)": 20, "高(cm)": 10, "实重(kg)": 2.0},
+        ]
+    )
+    ship = CsvShipment(
+        shipment_id="FBAPRICE",
+        warehouse_code="ONT8",
+        box_count=2,
+        box_items=box_items,
+        box_specs=box_specs,
+        box_fba_ids={1: "FBAPRICEU000001", 2: "FBAPRICEU000002"},
+    )
+    items, warnings = run_invoice_etl(
+        forwarder_id="qiluo",
+        ship=ship,
+        csv_bytes=b"",
+        workflow_json=None,
+    )
+    by_sku = {item.values["sku"]: float(item.values["declared_price"]) for item in items}
+    assert by_sku == prices
+    assert not any("申报单价为空" in item for item in warnings)
+    from fba_tool.master_db import get_product_by_sku
+
+    for sku, price in prices.items():
+        resolved, _source = resolve_declared_price(get_product_by_sku(sku))
+        assert resolved == price
+
+    empty = CsvShipment(
+        shipment_id="FBAPRICEEMPTY",
+        warehouse_code="ONT8",
+        box_count=1,
+        box_items=pd.DataFrame([{"箱号": 1, "SKU": "SKU-PRICE-EMPTY", "数量": 1}]),
+        box_specs=pd.DataFrame([{"箱号": 1, "长(cm)": 30, "宽(cm)": 20, "高(cm)": 10, "实重(kg)": 2.0}]),
+        box_fba_ids={1: "FBAPRICEEMPTYU000001"},
+    )
+    upsert_product(
+        {
+            "sku": "SKU-PRICE-EMPTY",
+            "extra_data": json.dumps({"invoice": {"unit": "个", "purchase_price": 5}}, ensure_ascii=False),
+        }
+    )
+    blank_items, blank_warnings = run_invoice_etl(
+        forwarder_id="qiluo",
+        ship=empty,
+        csv_bytes=b"",
+        workflow_json=None,
+    )
+    assert blank_items[0].values["declared_price"] == ""
+    assert any("申报单价为空" in item and "SKU-PRICE-EMPTY" in item for item in blank_warnings)
+    layout = InvoiceTableLayout(header_row=1, first_data_row=2, columns={"sku": 4, "declared_price": 7})
+    cells = table_cells_from_line_items(layout, blank_items, {})
+    price_cell = next(cell for cell in cells if cell["field_key"] == "declared_price")
+    assert price_cell["cell"] == "G2"
+    assert price_cell["value"] == ""
+    assert price_cell["required"] is True

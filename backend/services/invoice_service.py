@@ -175,6 +175,7 @@ def invoice_generate_payload(body: InvoiceGenerateRequest) -> Dict[str, Any]:
                 "code": "warehouse_undecided",
                 "message": message,
                 "detail": message,
+                "address": getattr(exc, "address", ""),
                 "warehouse_candidates": exc.candidates,
             },
         ) from exc

@@ -194,23 +194,25 @@ export function missingRequiredFromCellMeta(
   const FIELD_LABELS: Record<string, string> = {
     reference_id: "Reference ID / ID号",
     sku_image: "SKU图片",
+    declared_price: "申报单价 (USD)",
   };
-  const requiredKeys = new Map<string, { ok: boolean; row: number }>();
+  const requiredKeys = new Map<string, { ok: boolean; row: number; labelKey: string }>();
   for (const [cell, meta] of Object.entries(cellMeta)) {
     if (!meta.required) continue;
-    const key = meta.fieldKey ?? cell;
+    const labelKey = meta.fieldKey ?? cell;
+    const key = labelKey === "declared_price" ? cell : labelKey;
     const val = getValue(cell).trim();
     const row = excelRowOf(cell);
     if (val) {
-      requiredKeys.set(key, { ok: true, row });
+      requiredKeys.set(key, { ok: true, row, labelKey });
     } else if (!requiredKeys.has(key)) {
-      requiredKeys.set(key, { ok: false, row });
+      requiredKeys.set(key, { ok: false, row, labelKey });
     }
   }
   return [...requiredKeys.entries()]
     .filter(([, item]) => !item.ok)
-    .map(([key, item]) => {
-      const label = FIELD_LABELS[key] ?? key;
+    .map(([, item]) => {
+      const label = FIELD_LABELS[item.labelKey] ?? item.labelKey;
       const id = identityOnRow(cells, item.row);
       return `SKU ${id.sku || "未填"} · FNSKU ${id.fnsku || "未填"}：${label}`;
     });

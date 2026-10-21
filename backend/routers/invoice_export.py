@@ -25,13 +25,23 @@ def api_export_forwarders():
 class WarehouseUndecided(ValueError):
     """配送地址对应多个/没有仓库，且 CSV 里的仓库代码也定不下来：返回候选给界面选。"""
 
-    def __init__(self, message: str, candidates):
+    def __init__(self, message: str, candidates, address: str = ""):
         super().__init__(message)
         self.candidates = list(candidates)
+        self.address = str(address or "")
 
 
 def _undecided(exc: "WarehouseUndecided"):
-    return JSONResponse(status_code=422, content={"detail": str(exc), "warehouse_candidates": exc.candidates})
+    return JSONResponse(
+        status_code=422,
+        content={
+            "code": "warehouse_undecided",
+            "detail": str(exc),
+            "message": str(exc),
+            "address": exc.address,
+            "warehouse_candidates": exc.candidates,
+        },
+    )
 
 
 def _adapter_of(forwarder_id: str) -> str:
@@ -77,7 +87,7 @@ def resolve_export_warehouse(forwarder_id: str, explicit: str, ship_to: str, csv
     cands = codes or list_warehouse_codes(whitelist_only=True)
     msg = (f"货件 CSV 配送地址「{ship_to}」" + (f"对应多个仓库：{'、'.join(codes)}" if codes else "在仓库地址库里找不到")
            + (f"，CSV 仓库代码 {cc} 也不在其中" if cc else "") + "，请在面板上选择仓库")
-    raise WarehouseUndecided(msg, cands)
+    raise WarehouseUndecided(msg, cands, ship_to)
 
 
 async def _run(forwarder_id, csv_file, reference_id, order_no, channel, invoice_date, warehouse, measured_file, box_id_fix,

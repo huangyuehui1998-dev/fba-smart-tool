@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { ErrorLines } from "@/components/feedback/error-notice";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
@@ -134,7 +135,9 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
       {error && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
-          <AlertDescription className="whitespace-pre-wrap">{error}</AlertDescription>
+          <AlertDescription>
+          <ErrorLines text={error} />
+        </AlertDescription>
           {warehouseCandidates.length > 0 && (
             <div className="mt-3 max-w-xs space-y-1">
               <Label className="text-xs">选择仓库后再点自动填写</Label>
@@ -341,6 +344,16 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
         </Card>
       </div>
 
+      {(referenceIdHint || missingLabels.some((label) => label.includes("Reference ID"))) && (
+        <Alert className="border-amber-300 bg-amber-50" data-testid="reference-id-hint">
+          <AlertTriangle className="h-4 w-4 !text-amber-600" />
+          <AlertTitle className="text-sm font-semibold text-amber-900">Reference ID 为空</AlertTitle>
+          <AlertDescription className="text-xs text-amber-800">
+            {referenceIdHint || "请上传货件 PDF。Reference ID 在货件 PDF 里，产品库没有这一项。"}
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex flex-wrap items-center gap-3">
         {revenueTon != null && sheetPhase === "filled" && (
           <Badge
@@ -379,16 +392,6 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
         onCellEdited={handleCellEdited}
       />
       <div data-testid="sheet-scroll-spacer" className="h-[70vh]" />
-
-      {(referenceIdHint || missingLabels.some((label) => label.includes("Reference ID"))) && (
-        <Alert className="border-amber-300 bg-amber-50" data-testid="reference-id-hint">
-          <AlertTriangle className="h-4 w-4 !text-amber-600" />
-          <AlertTitle className="text-sm font-semibold text-amber-900">Reference ID 为空</AlertTitle>
-          <AlertDescription className="text-xs text-amber-800">
-            请上传货件 PDF。Reference ID 在货件 PDF 里，产品库没有这一项。
-          </AlertDescription>
-        </Alert>
-      )}
 
       {missingLabels.some((label) => !label.includes("Reference ID")) && (
         <Alert className="border-amber-300 bg-amber-50">

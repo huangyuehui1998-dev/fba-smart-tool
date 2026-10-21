@@ -31,6 +31,24 @@ def _model_text(val: Any) -> str:
     return "" if text.lower() == "nan" else text
 
 
+def _blank_price(val: Any) -> Any:
+    """空、NaN 都当成没填申报价。有数字就保留原值。"""
+    if val in (None, ""):
+        return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except TypeError:
+        pass
+    try:
+        number = float(val)
+    except (TypeError, ValueError):
+        return ""
+    if number != number:
+        return ""
+    return number
+
+
 def _to_float(val: Any) -> Optional[float]:
     if val in (None, ""):
         return None
@@ -127,6 +145,8 @@ def join_master_db(df: pd.DataFrame, warnings: List[str]) -> pd.DataFrame:
     for col in master_cols:
         df[col] = None
 
+    from fba_tool.product_fields import resolve_declared_price
+
     missing_skus: set[str] = set()
     for idx, row in df.iterrows():
         sku = str(row.get("sku") or "").strip()
@@ -142,7 +162,8 @@ def join_master_db(df: pd.DataFrame, warnings: List[str]) -> pd.DataFrame:
         df.at[idx, "master_brand"] = master.get("brand") or ""
         df.at[idx, "master_material"] = master.get("material") or ""
         df.at[idx, "master_purpose"] = master.get("purpose") or ""
-        df.at[idx, "master_declared_price"] = _to_float(master.get("declared_value"))
+        price, _source = resolve_declared_price(master)
+        df.at[idx, "master_declared_price"] = price
         df.at[idx, "master_length_cm"] = _to_float(
             master.get("carton_length") or master.get("unit_length")
         )
@@ -385,7 +406,7 @@ def dataframe_to_line_items(
             elif not material:
                 material = purpose
 
-        declared = row.get("declared_price")
+        declared = _blank_price(row.get("declared_price"))
         total_qty = int(row.get("total_qty") or row.get("qty") or 0)
         total_declared = ""
         if declared not in (None, "") and total_qty > 0:
@@ -490,4 +511,13 @@ def run_invoice_etl(
         po_number=po_number,
         separate_material_purpose=separate_mp,
     )
+    if "declared_price" in (mapping.get("columns_mapping") or {}):
+        missing = [
+            str(item.values.get("sku") or "").strip()
+            for item in line_items
+            if item.values.get("declared_price") in (None, "")
+        ]
+        missing = [sku for sku in missing if sku]
+        if missing:
+            warnings.append("申报单价为空：" + "、".join(missing) + "。请填写售价后再导出")
     return line_items, warnings

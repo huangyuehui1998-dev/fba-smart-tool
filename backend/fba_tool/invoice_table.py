@@ -583,7 +583,7 @@ def table_cells_from_line_items(
 ) -> List[Dict[str, Any]]:
     """映射发票行到单元格。清空脏数据由 export 侧处理，此处不批量下发 clear cells（避免 FortuneSheet 崩溃）。"""
     cells: List[Dict[str, Any]] = []
-    always_include = {"reference_id", "sku_image"}
+    always_include = {"reference_id", "sku_image", "declared_price"}
     for row_offset, item in enumerate(line_items):
         row = layout.first_data_row + row_offset
         for field_key, col in layout.columns.items():
@@ -597,7 +597,7 @@ def table_cells_from_line_items(
                     "value": val if val not in (None, "") else "",
                     "source": source_labels.get(src_kind, "精准提取"),
                     "field_key": field_key,
-                    "required": field_key == "reference_id",
+                    "required": field_key in {"reference_id", "declared_price"},
                 }
             )
     return cells

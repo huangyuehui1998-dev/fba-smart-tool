@@ -204,13 +204,18 @@ def write_jiufang(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, An
     inv["B17"] = wh.get("state", "")
     inv["B19"] = code
     inv["B22"] = code
-    data_st, total_st = _style_row(inv, 25), _style_row(inv, 26)
+    n = len(model.lines)
     _drop_shifted_total_merges(inv, 25)
-    for c in inv[26]:
-        c.value = None
+    if n > 1:
+        inv.insert_rows(26, n - 1)
+    data_st = _style_row(inv, 25)
+    trow = 25 + n
+    for cell in inv[trow]:
+        cell.value = None
     for i, l in enumerate(model.lines):
         row = 25 + i
-        _apply_style(inv, row, data_st)
+        if i:
+            _apply_style(inv, row, data_st)
         vals = {"A": model.shipment_id, "B": model.reference_id, "C": l["fnsku"], "D": l["english_name"], "E": l["chinese_name"],
                 "F": l["brand"], "G": l["model"], "H": l["material_en"], "I": l["has_battery"], "J": "", "K": "", "L": "",
                 "M": l["purpose_en"], "N": str(l["hs_code"]), "O": l["qty"], "P": l["invoice_unit"],
@@ -218,10 +223,7 @@ def write_jiufang(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, An
                 "T": cfg.get("image_placeholder", "") if i == 0 else "", "U": l["asin"], "V": ""}
         for col, v in vals.items():
             inv[f"{col}{row}"] = v
-    trow = 25 + len(model.lines)
-    _apply_style(inv, trow, total_st)
     inv[f"M{trow}"] = "*Total（汇总）:"
-    inv.merge_cells(f"M{trow}:N{trow}")
     inv[f"O{trow}"] = model.total_qty
     inv[f"Q{trow}"] = "Currency"
     inv[f"R{trow}"] = DECLARED_CURRENCY

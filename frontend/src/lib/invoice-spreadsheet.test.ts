@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { applyFillsToSheets, type Sheet } from "@/lib/invoice-spreadsheet";
+import {
+  applyFillsToSheets,
+  cellMetaFromFills,
+  missingRequiredFromCellMeta,
+  type Sheet,
+} from "@/lib/invoice-spreadsheet";
 
 describe("applyFillsToSheets", () => {
   it("returns sheet with data matrix for FortuneSheet remount", () => {
@@ -27,5 +32,22 @@ describe("applyFillsToSheets", () => {
     expect(sheet.data![1]![1]).toMatchObject({ v: "SKU-1", m: "SKU-1" });
     expect(sheet.celldata?.length).toBeGreaterThan(0);
     expect(sheet.calcChain).toEqual([]);
+  });
+});
+
+describe("missingRequiredFromCellMeta", () => {
+  it("names an empty required declared price on that row", () => {
+    const cells = [
+      { cell: "D2", value: "TANZI", field_key: "sku", source: "精准提取" },
+      { cell: "G2", value: "", field_key: "declared_price", source: "必填", required: true },
+      { cell: "D3", value: "OTHER", field_key: "sku", source: "精准提取" },
+      { cell: "G3", value: "39.99", field_key: "declared_price", source: "精准提取", required: true },
+    ];
+    const labels = missingRequiredFromCellMeta(cellMetaFromFills(cells), (cell) => {
+      return cell.toUpperCase() === "G3" ? "39.99" : "";
+    }, cells);
+    expect(labels.join(" ")).toContain("TANZI");
+    expect(labels.join(" ")).toContain("申报单价 (USD)");
+    expect(labels.join(" ")).not.toContain("OTHER");
   });
 });

@@ -59,13 +59,38 @@ function statusFallback(res: Response): string {
   return text || `HTTP ${res.status}`;
 }
 
+function withErrorContext(body: unknown, detail: unknown): unknown {
+  if (!body || typeof body !== "object") return detail;
+  const extra = body as { address?: unknown; code?: unknown; warehouse_candidates?: unknown };
+  const address = typeof extra.address === "string" ? extra.address : "";
+  const code = typeof extra.code === "string" ? extra.code : "";
+  const candidates = Array.isArray(extra.warehouse_candidates) ? extra.warehouse_candidates : undefined;
+  if (!address && !code && !candidates) return detail;
+  if (detail && typeof detail === "object" && !Array.isArray(detail)) {
+    const obj = detail as { address?: unknown; code?: unknown; warehouse_candidates?: unknown };
+    return {
+      ...obj,
+      ...(address ? { address: typeof obj.address === "string" && obj.address ? obj.address : address } : {}),
+      ...(code ? { code: typeof obj.code === "string" && obj.code ? obj.code : code } : {}),
+      ...(candidates ? { warehouse_candidates: obj.warehouse_candidates ?? candidates } : {}),
+    };
+  }
+  return {
+    detail,
+    message: typeof detail === "string" ? detail : undefined,
+    ...(address ? { address } : {}),
+    ...(code ? { code } : {}),
+    ...(candidates ? { warehouse_candidates: candidates } : {}),
+  };
+}
+
 async function parseErrorResponse(res: Response): Promise<{ message: string; detail: unknown }> {
   const fallback = statusFallback(res);
   try {
     const body = await res.json();
     const detail = body?.detail ?? body;
     const message = readableErrorText(detail) || readableErrorText(body?.message) || fallback;
-    return { message, detail };
+    return { message, detail: withErrorContext(body, detail) };
   } catch {
     return { message: fallback, detail: undefined };
   }

@@ -120,6 +120,93 @@ def test_batch14_packaging_name_row_maps_p1_boxes_and_keeps_inches():
     assert length == 44.96
 
 
+def test_send_quantity_is_sku_total_not_per_box():
+    """8 箱各 4 件。重量差 0.003 kg 仍合并。SEND 的 SKU个数是 32，不是单箱 4。"""
+    import io
+
+    from openpyxl import load_workbook
+
+    from fba_tool.invoice_export import SEND_SHEET, export_invoice
+    from fba_tool.invoice_rules import Box, box_ranges
+    from fba_tool.shipment_parser import parse_csv_shipment
+
+    dims = (45.0, 45.0, 41.0)
+    near = [
+        Box(i, f"FBATEST8QU{i:06d}", [("X00TEST8Q", 4)], 10.004 if i % 2 else 10.001, dims)
+        for i in range(1, 9)
+    ]
+    assert [(row.label, row.qty) for row in box_ranges(near)] == [("1-8", 32)]
+    apart = box_ranges([
+        Box(1, "", [("A", 4)], 7.5, dims),
+        Box(2, "", [("A", 4)], 7.6, dims),
+    ])
+    assert [(row.label, row.weight) for row in apart] == [("1", 7.5), ("2", 7.6)]
+
+    def quoted(cells: list[object]) -> str:
+        return ",".join(f'"{cell}"' for cell in cells)
+
+    headers = ["SKU", "商品名称", "ASIN", "FNSKU", "状况", "预处理类型", "商品总数"]
+    headers += [f"箱子 {i} 的商品数量" for i in range(1, 9)]
+    line = ["QTY-SKU", "rod", "B0QTY00001", "X00TEST8Q", "新品", "无", "32", *["4"] * 8]
+    marks = ["", "", "", "", "", "", "箱号"] + [f"FBATEST8QU{i:06d}" for i in range(1, 9)]
+    weight = ["", "", "", "", "", "", "包装箱重量（kg）："] + ["10"] * 8
+    length = ["", "", "", "", "", "", "包装箱长度（cm）："] + ["40"] * 8
+    width = ["", "", "", "", "", "", "包装箱宽度（cm）："] + ["40"] * 8
+    height = ["", "", "", "", "", "", "包装箱高度（cm）："] + ["40"] * 8
+    raw = "\n".join([
+        '"货件编号","FBATEST8Q"',
+        '"货件名称","QTY"',
+        '"配送地址","STEP45VILLE, ZZ"',
+        '"箱子数量","8"',
+        "",
+        '"单件商品（8 箱）"',
+        quoted(headers),
+        quoted(line),
+        "",
+        quoted(marks),
+        quoted(weight),
+        quoted(length),
+        quoted(width),
+        quoted(height),
+    ]).encode()
+    ship = parse_csv_shipment(raw, allow_unassigned_fba=True)
+    result = export_invoice(
+        "send",
+        shipment=ship,
+        products={
+            "X00TEST8Q": {
+                "sku": "QTY-SKU",
+                "fnsku": "X00TEST8Q",
+                "asin": "B0QTY00001",
+                "listing_price": 10.0,
+                "english_name": "Item",
+                "chinese_name": "物品",
+                "brand": "B",
+                "material": "铁",
+                "purpose": "用",
+                "hs_code": "7326909000",
+                "model_name": "无",
+                "invoice": {
+                    "unit": "个",
+                    "purchase_price": 5,
+                    "material_en": "iron",
+                    "purpose_en": "use",
+                    "pcs_per_set": 1,
+                },
+            }
+        },
+        reference_id="R",
+    )
+    wb = load_workbook(io.BytesIO(result["bytes"]))
+    try:
+        ws = wb[SEND_SHEET]
+        assert ws["A15"].value == "1-8"
+        assert ws["F15"].value == 32
+        assert ws["F16"].value in (None, "")
+    finally:
+        wb.close()
+
+
 def test_classic_fba_box_row_still_maps():
     from fba_tool.shipment_parser import parse_csv_shipment
 
@@ -293,6 +380,22 @@ def _invoice_files(root: Path) -> list[Path]:
     return found
 
 
+def _text_has_qty(texts: set[str], qty: str) -> bool:
+    if qty in texts:
+        return True
+    try:
+        number = float(qty)
+    except ValueError:
+        return False
+    for text in texts:
+        try:
+            if float(text) == number:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def _workbook_texts(data: bytes) -> set[str]:
     import openpyxl
 
@@ -408,6 +511,11 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
                 upsert_product(seed)
                 set_product_fields(seed["sku"], {"listing_price": 10, "listing_price_currency": "USD"}, SOURCE_MANUAL)
             qty_tokens = {str(int(value)) for value in ship.box_items["数量"] if int(value) > 0}
+            sku_qty: dict[str, int] = {}
+            for _, rec in ship.box_items.iterrows():
+                sku_name = str(rec.get("SKU") or "")
+                sku_qty[sku_name] = sku_qty.get(sku_name, 0) + int(rec["数量"])
+            sku_qty_tokens = {str(total) for total in sku_qty.values() if total > 0}
             for forwarder_id in FORWARDERS:
                 generated = client.post(
                     "/api/invoice/generate",
@@ -434,15 +542,26 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
                 assert exported.status_code == 200, f"{batch} {path.name} {forwarder_id} export {exported.text[:300]}"
                 texts = _workbook_texts(exported.content)
                 assert ship.shipment_id in texts, f"{forwarder_id} 导出没有货件号 {ship.shipment_id}"
-                assert qty_tokens & texts, f"{forwarder_id} 导出没有 CSV 数量 {qty_tokens}"
+                if forwarder_id == "send":
+                    missing_totals = {qty for qty in sku_qty_tokens if not _text_has_qty(texts, qty)}
+                    assert not missing_totals, (
+                        f"send 数量应按 SKU 汇总 {sku_qty_tokens}，不是单箱 {qty_tokens}，缺 {missing_totals}"
+                    )
+                else:
+                    assert qty_tokens & texts, f"{forwarder_id} 导出没有 CSV 数量 {qty_tokens}"
                 pipeline.append((batch, path.name, forwarder_id, ship.shipment_id))
                 for invoice in invoices:
                     if ship.shipment_id and ship.shipment_id in invoice.name.upper().replace("-", ""):
                         invoice_texts = _workbook_texts(invoice.read_bytes())
                         assert ship.shipment_id in invoice_texts
-                        shared = (qty_tokens & invoice_texts) or ({str(int(ship.box_items["数量"].sum()))} & invoice_texts)
-                        assert shared, f"{invoice.name} 和 CSV 数量对不上 {qty_tokens}"
-                        missing_in_export = shared - texts
+                        if forwarder_id == "send":
+                            shared = {qty for qty in sku_qty_tokens if _text_has_qty(invoice_texts, qty)}
+                            assert shared, f"{invoice.name} 和 SEND 的 SKU 汇总数对不上 {sku_qty_tokens}"
+                            missing_in_export = {qty for qty in shared if not _text_has_qty(texts, qty)}
+                        else:
+                            shared = (qty_tokens & invoice_texts) or ({str(int(ship.box_items["数量"].sum()))} & invoice_texts)
+                            assert shared, f"{invoice.name} 和 CSV 数量对不上 {qty_tokens}"
+                            missing_in_export = shared - texts
                         assert not missing_in_export, f"{forwarder_id} 导出缺真实发票里的数量 {missing_in_export}"
                         compared.append((forwarder_id, ship.shipment_id, invoice.name))
     assert pipeline

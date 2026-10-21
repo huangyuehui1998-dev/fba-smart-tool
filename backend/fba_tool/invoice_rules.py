@@ -140,6 +140,20 @@ class RangeRow:
         return str(self.start) if self.start == self.end else f"{self.start}-{self.end}"
 
 
+def _range_spec_key(
+    weight: Optional[float],
+    dims: Tuple[Optional[float], Optional[float], Optional[float]],
+) -> Tuple[Optional[float], Tuple[Optional[float], Optional[float], Optional[float]]]:
+    """合并键按两位小数比。10.004 和 10.001 是同一箱规，7.50 和 7.60 仍然分开。"""
+
+    def rounded(value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
+        return round2(value)
+
+    return (rounded(weight), tuple(rounded(item) for item in dims))
+
+
 def box_ranges(boxes: List[Box]) -> List[RangeRow]:
     """合并连续箱号：同一 SKU、单箱数量相同、单箱重相同、尺寸相同才合并；混装箱单独成行。"""
     rows: List[RangeRow] = []
@@ -151,7 +165,7 @@ def box_ranges(boxes: List[Box]) -> List[RangeRow]:
             prev = None
             continue
         sku, q = b.items[0]
-        key = (sku, q, b.weight, b.dims)
+        key = (sku, q, *_range_spec_key(b.weight, b.dims))
         if prev is not None and prev == key and rows and rows[-1].end == b.no - 1 and not rows[-1].mixed:
             rows[-1].end = b.no
             rows[-1].qty += q

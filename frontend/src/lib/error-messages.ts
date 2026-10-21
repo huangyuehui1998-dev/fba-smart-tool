@@ -65,10 +65,11 @@ export function explainApiError(err: unknown): ErrorCopy {
   const candidates = warehouseCandidatesOf(detail);
   if (code === "warehouse_undecided" || candidates.length > 0) {
     const listed = candidates.length ? candidates.join("、") : "";
-    const server = raw && !/unprocessable/i.test(raw) ? raw : "";
+    const address = warehouseAddress(detail, raw);
+    const where = address ? `配送地址「${address}」对应多个仓库` : "同一个城市有多个仓库";
     return {
       what: "这个配送地址对应多个仓库，发票还不能确定派送仓",
-      why: server || (listed ? `同一个城市有多个仓库：${listed}` : "同一个城市有多个仓库代码。"),
+      why: listed ? `${where}：${listed}` : `${where}。`,
       action: listed ? `请选择仓库后再填写。候选：${listed}。` : "请选择仓库后再填写。",
     };
   }
@@ -92,6 +93,15 @@ export function explainApiError(err: unknown): ErrorCopy {
 
 export function formatErrorCopy(copy: ErrorCopy): string {
   return `发生了什么：${copy.what}\n可能原因：${copy.why}\n怎么处理：${copy.action}`;
+}
+
+function warehouseAddress(detail: unknown, message: string): string {
+  if (detail && typeof detail === "object") {
+    const address = (detail as { address?: unknown }).address;
+    if (typeof address === "string" && address.trim()) return address.trim();
+  }
+  const found = message.match(/配送地址「([^」]*)」/);
+  return found?.[1]?.trim() ?? "";
 }
 
 function rawMessage(err: unknown): string {

@@ -31,17 +31,21 @@ describe("explainApiError", () => {
   it("explains a multi-warehouse 422 in Chinese and names the warehouses", () => {
     const err = new ApiError(422, "Unprocessable Content", {
       code: "warehouse_undecided",
-      detail: "货件 CSV 配送地址对应多个仓库：TST1、TST2，请在面板上选择仓库",
-      message: "货件 CSV 配送地址对应多个仓库：TST1、TST2，请在面板上选择仓库",
+      address: "STEP45VILLE, ZZ",
       warehouse_candidates: ["TST1", "TST2"],
     });
     const copy = explainApiError(err);
     const text = formatApiError(err);
+    const html = renderToStaticMarkup(<ErrorNotice copy={copy} />);
     expect(text).not.toMatch(/unprocessable/i);
     expect(copy.what).toContain("多个仓库");
+    expect(copy.why).toContain("配送地址「STEP45VILLE, ZZ」");
+    expect(copy.why).toContain("TST1");
+    expect(copy.why).toContain("TST2");
     expect(text).toContain("选择仓库");
-    expect(text).toContain("TST1");
-    expect(text).toContain("TST2");
+    expect(html).toContain("grid-cols-[6.5rem_1fr]");
+    expect(html).toContain("可能原因");
+    expect(html).toContain("发生了什么");
   });
 
   it("does not show Internal Server Error", () => {
