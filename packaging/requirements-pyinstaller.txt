@@ -1,0 +1,5 @@
+# 与 backend/requirements-dev.lock.txt 里的打包版本一致。
+# scripts/build_standalone.ps1 和 Windows CI 都安装这份，避免临时装到不兼容的新版本。
+# Python 3.12。3.14 的引导程序出过问题，CI 不用它。
+pyinstaller==6.20.0
+pyinstaller-hooks-contrib==2026.5
