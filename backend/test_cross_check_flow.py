@@ -27,23 +27,23 @@ def test_mixed_label_on_single_sku_is_one_blocking_error():
     assert blocking[0].startswith("❌")
 
 
-def test_unlabeled_boxes_collapse_to_one_warning():
+def test_unrecognized_box_labels_are_blocking():
+    """SKU、FNSKU、数量都空时，每一页单独 ❌，不再收成一条跳过比对的警告。"""
     csv = _csv(3)
     pages = [
         PdfBoxPage(i, "FBATEST0001", f"FBATEST0001U{i + 1:06d}", i + 1)
         for i in range(3)
     ]
     errors = cross_validate_pair(csv, pages, "CLT2", "FBATEST0001")
-    warnings = [e for e in errors if e.startswith("⚠️")]
-    assert len(warnings) == 1
-    assert "3 箱" in warnings[0]
-    assert "已跳过逐箱 SKU 比对" in warnings[0]
-    assert not any(e.startswith("❌") for e in errors)
+    blocking = [e for e in errors if e.startswith("❌") and "都识别不出" in e]
+    assert len(blocking) == 3
+    assert not any("已跳过逐箱 SKU 比对" in e for e in errors)
 
     pair = SimpleNamespace(csv=csv, warehouse_code="CLT2", shipment_id="FBATEST0001")
     result = run_cross_validation([pair], {"FBATEST0001": pages})
-    assert result.ok is True
-    assert any(line.startswith("⚠️") for line in result.status_lines)
+    assert result.ok is False
+    assert sum(1 for line in result.errors if "都识别不出" in line) == 3
+    assert result.status_lines[-1].startswith("❌")
 
 
 def test_duplicate_box_label_lists_page_count():
