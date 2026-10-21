@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { Sheet } from "@fortune-sheet/core";
-import { applyFillsToSheets } from "@/lib/invoice-spreadsheet";
+import { applyFillsToSheets, type Sheet } from "@/lib/invoice-spreadsheet";
 
 describe("applyFillsToSheets", () => {
   it("returns sheet with data matrix for FortuneSheet remount", () => {

@@ -150,7 +150,7 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
                 onValueChange={(id) => void handleForwarderChange(id)}
                 disabled={forwardersLoading || parsing}
               >
-                <SelectTrigger className="h-11 flex-1">
+                <SelectTrigger className="h-11 flex-1" data-testid="forwarder-select">
                   <SelectValue placeholder={forwardersLoading ? "加载货代…" : "选择货代"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -344,6 +344,7 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
         onLoadError={(msg) => setError(msg)}
         onCellEdited={handleCellEdited}
       />
+      <div data-testid="sheet-scroll-spacer" className="h-[70vh]" />
 
       {hasMissing && (
         <Alert className="border-amber-300 bg-amber-50">

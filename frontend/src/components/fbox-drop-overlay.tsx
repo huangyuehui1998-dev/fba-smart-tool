@@ -53,11 +53,13 @@ export function FboxDropOverlay() {
   );
 
   useEffect(() => {
+    window.__fbaFboxDropReady = true;
     window.addEventListener("dragenter", onDragEnter, true);
     window.addEventListener("dragover", onDragOver, true);
     window.addEventListener("dragleave", onDragLeave, true);
     window.addEventListener("drop", onDrop, true);
     return () => {
+      window.__fbaFboxDropReady = false;
       window.removeEventListener("dragenter", onDragEnter, true);
       window.removeEventListener("dragover", onDragOver, true);
       window.removeEventListener("dragleave", onDragLeave, true);
@@ -88,4 +90,10 @@ export function FboxDropOverlay() {
       </div>
     </div>
   );
+}
+
+declare global {
+  interface Window {
+    __fbaFboxDropReady?: boolean;
+  }
 }

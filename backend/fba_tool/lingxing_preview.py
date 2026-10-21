@@ -33,7 +33,31 @@ CUSTOMS_SENSITIVE_FIELDS = ("english_name", "brand")
 PRICE_FIELDS = ("listing_price", "regular_price")  # v8 E1 实时售价；S9-step2-fix A1：常规价单独变化也要能写入（D-12 判断促销）
 NAME_FIELDS = ("local_name",)  # 领星本地品名
 CATEGORY_FIELDS = ("category",)  # jewelry / watch / other；映射不到不写入
-CONFIRM_FIELDS = AMAZON_IDENTITY_FIELDS + CUSTOMS_SENSITIVE_FIELDS + PRICE_FIELDS + NAME_FIELDS + CATEGORY_FIELDS
+LISTING_EXTRA_FIELDS = (
+    "local_sku",
+    "listing_price_site",
+    "fee_fba_est",
+    "fee_referral_rate",
+    "product_cost_cny",
+    "product_cost_currency",
+)
+CONFIRM_FIELDS = (
+    AMAZON_IDENTITY_FIELDS + CUSTOMS_SENSITIVE_FIELDS + PRICE_FIELDS + NAME_FIELDS + CATEGORY_FIELDS + LISTING_EXTRA_FIELDS
+)
+# 箱规和报关结构字段不从领星预览写入。采购成本人民币不在这张名单里。
+_NEVER_FROM_LINGXING = frozenset({
+    "carton_length",
+    "carton_width",
+    "carton_height",
+    "carton_weight",
+    "carton_gross_weight",
+    "qty_per_box",
+    "chinese_name",
+    "material",
+    "purpose",
+    "model_name",
+    "hs_code",
+})
 
 FIELD_LABELS = {
     "listing_price": "实时售价(申报价)",
@@ -48,6 +72,12 @@ FIELD_LABELS = {
     "english_name": "英文品名（报关）",
     "brand": "品牌（报关）",
     "category": "品类",
+    "local_sku": "本地 SKU",
+    "listing_price_site": "站点",
+    "fee_fba_est": "预估 FBA 费",
+    "fee_referral_rate": "平台费率",
+    "product_cost_cny": "采购成本（人民币）",
+    "product_cost_currency": "采购成本币种",
 }
 
 CONFIRMABLE_STATUSES = {"preview_pending", "partial", "auto_applied", "auto_applied_partial"}  # S5：定时同步自动写入后，剩下“待人工确认”的仍可在预览里确认
@@ -578,7 +608,7 @@ def apply_lingxing_field_patch(sku: str, fields: Iterable[str], remote: Dict[str
     from fba_tool.product_fields import OWN_FIELDS, SOURCE_LINGXING, SOURCE_MANUAL, mark_field_sources, set_product_fields
 
     key = str(sku or "").strip()
-    allowed = [f for f in fields if f in CONFIRM_FIELDS]
+    allowed = [f for f in fields if f in CONFIRM_FIELDS and f not in _NEVER_FROM_LINGXING]
     result: Dict[str, List[str]] = {"written": [], "skipped_locked": [], "skipped_invalid": []}
     if not key or not allowed:
         return result
@@ -616,10 +646,15 @@ def apply_lingxing_field_patch(sku: str, fields: Iterable[str], remote: Dict[str
             if remote.get("listing_price_currency"):
                 own_vals["listing_price_currency"] = remote["listing_price_currency"]
             own_vals["listing_price_basis"] = remote.get("listing_price_basis") or "listing_price"
+            if remote.get("listing_price_site"):
+                own_vals["listing_price_site"] = remote["listing_price_site"]
+        if "product_cost_cny" in own_vals and remote.get("product_cost_currency"):
+            own_vals["product_cost_currency"] = remote["product_cost_currency"]
         res = set_product_fields(key, own_vals, SOURCE_LINGXING)
         result["skipped_locked"].extend(f for f in res["skipped_locked"] if f not in result["skipped_locked"])
+        companions = {"listing_price_currency", "listing_price_basis", "listing_price_site", "product_cost_currency"}
         result["written"].extend(
-            f for f in own_vals if f not in res["skipped_locked"] and f not in ("listing_price_currency", "listing_price_basis")
+            f for f in own_vals if f not in res["skipped_locked"] and f not in companions
         )
     return result
 

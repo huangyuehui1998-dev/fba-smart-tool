@@ -1,5 +1,25 @@
-import { api, type Cell, type Sheet } from "@fortune-sheet/core";
 import { sourceLabelToKind } from "@/lib/box-editor";
+
+export interface SheetCell {
+  v?: string | number | boolean | null;
+  m?: string;
+  bg?: string;
+}
+
+export interface Sheet {
+  name?: string;
+  id?: string;
+  status?: number;
+  order?: number;
+  row?: number;
+  column?: number;
+  celldata?: { r: number; c: number; v: SheetCell }[];
+  data?: (SheetCell | null)[][];
+  config?: Record<string, unknown>;
+  calcChain?: unknown[];
+}
+
+type Cell = SheetCell;
 
 export type CellSourceKind = "exact" | "local" | "ai" | "missing" | "preview";
 
@@ -200,6 +220,33 @@ export function cloneSheets<T>(sheets: T[]): T[] {
   return JSON.parse(JSON.stringify(sheets)) as T[];
 }
 
+function celldataToData(
+  celldata: NonNullable<Sheet["celldata"]>,
+  rowCount: number,
+  colCount: number,
+): (Cell | null)[][] {
+  const data: (Cell | null)[][] = Array.from({ length: rowCount }, () => Array(colCount).fill(null));
+  for (const item of celldata) {
+    while (data.length <= item.r) data.push([]);
+    const row = data[item.r]!;
+    while (row.length <= item.c) row.push(null);
+    row[item.c] = item.v ?? null;
+  }
+  return data;
+}
+
+function dataToCelldata(data: (Cell | null)[][]): NonNullable<Sheet["celldata"]> {
+  const out: NonNullable<Sheet["celldata"]> = [];
+  data.forEach((row, r) => {
+    row?.forEach((cell, c) => {
+      if (!cell) return;
+      if ((cell.v == null || cell.v === "") && !cell.m && !cell.bg) return;
+      out.push({ r, c, v: cell });
+    });
+  });
+  return out;
+}
+
 function sheetToDataMatrix(sheet: Sheet): (Cell | null)[][] {
   const rowCount = Math.max(Number(sheet.row) || 0, 36);
   const colCount = Math.max(Number(sheet.column) || 0, 18);
@@ -207,7 +254,7 @@ function sheetToDataMatrix(sheet: Sheet): (Cell | null)[][] {
     return sheet.data as (Cell | null)[][];
   }
   if (sheet.celldata?.length) {
-    return api.celldataToData(sheet.celldata, rowCount, colCount) ?? [];
+    return celldataToData(sheet.celldata, rowCount, colCount);
   }
   return Array.from({ length: rowCount }, () => Array(colCount).fill(null));
 }
@@ -280,7 +327,7 @@ export function applyFillsToSheets(sheets: Sheet[], fills: InvoiceCellFill[]): S
       row: rowCount,
       column: colCount,
       data,
-      celldata: api.dataToCelldata(data),
+      celldata: dataToCelldata(data),
       calcChain: [],
     };
   });

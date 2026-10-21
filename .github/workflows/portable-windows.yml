@@ -74,6 +74,13 @@ jobs:
           npm ci --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+      - name: Forbid browser spreadsheet parsers
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          & backend\.venv\Scripts\python.exe scripts\check_spreadsheet_deps.py
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
       - name: Build portable package
         shell: pwsh
         run: |
@@ -83,6 +90,14 @@ jobs:
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
           & .\scripts\build_standalone.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Check Univer hyphen chunks
+        shell: pwsh
+        run: |
+          $assets = Get-ChildItem -Path "frontend\dist\client\assets" -File -ErrorAction Stop
+          $hyphen = @($assets | Where-Object { $_.Name -match '(^|-)(af|as|be|bg|bn|ca|cop|cs|cu|cy|da|de-1901|de-1996|de-ch|el-monoton|el-polyton|en-gb|es|et|eu|fi|fr|hu|hy|lt|lv|nb|nl|nn|pl|pt|ro|ru|sk|sl|sr|sv|tr|uk|zh-latn-pinyin|univer-hyphen-stub)(-|\.)' })
+          Write-Host ("hyphen-like chunks: " + $hyphen.Count)
+          if ($hyphen.Count -ge 70) { throw "too many hyphen locale chunks: $($hyphen.Count)" }
 
       - name: Upload portable zip
         uses: actions/upload-artifact@v4

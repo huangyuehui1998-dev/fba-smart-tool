@@ -424,6 +424,9 @@ def _ensure_lingxing_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE lingxing_sync_run ADD COLUMN trigger TEXT DEFAULT 'manual'")
     if "attempt" not in run_cols:
         conn.execute("ALTER TABLE lingxing_sync_run ADD COLUMN attempt INTEGER DEFAULT 1")
+    for name, typ in (("source_file", "TEXT"), ("export_at", "TEXT"), ("backup_path", "TEXT")):
+        if name not in run_cols:
+            conn.execute(f"ALTER TABLE lingxing_sync_run ADD COLUMN {name} {typ}")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS lingxing_sync_preview_sku (
@@ -1050,6 +1053,7 @@ from fba_tool.master_db_lingxing import (  # noqa: E402
     replace_lingxing_preview,
     replace_lingxing_replenish,
     replace_lingxing_shops,
+    set_lingxing_run_file_meta,
     tag_lingxing_sync_run,
 )
 

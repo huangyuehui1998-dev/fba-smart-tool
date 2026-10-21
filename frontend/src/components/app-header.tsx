@@ -138,6 +138,7 @@ export function AppHeader({
                 <li key={s.id} className="flex items-center">
                   <button
                     type="button"
+                    data-testid={`workflow-step-${s.id}`}
                     onClick={() => {
                       if (blocked) {
                         setBlockedStep(s.id);

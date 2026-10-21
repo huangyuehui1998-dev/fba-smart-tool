@@ -108,6 +108,10 @@ def app_data_dir() -> Path:
         return path
     root = project_root()
     beside = root / "app_data"
+    # 直接双击 exe：数据放在 exe 旁边，和 bat 便携目录一致，不落到 LOCALAPPDATA。
+    if getattr(sys, "frozen", False):
+        beside.mkdir(parents=True, exist_ok=True)
+        return beside
     if (root / "portable.flag").is_file():
         beside.mkdir(parents=True, exist_ok=True)
         return beside

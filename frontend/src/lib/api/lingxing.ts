@@ -303,6 +303,9 @@ export type LingxingRun = {
   attempt: number | null;
   error: string | null;
   diff_counts: Record<string, number>;
+  backup_path?: string | null;
+  source_file?: string | null;
+  export_at?: string | null;
 };
 
 export function fetchLingxingSchedule() {

@@ -425,6 +425,9 @@ def export_invoice(forwarder_id: str, *, shipment, products: Dict[str, Dict[str,
     model = build_model(forwarder=forwarder_id, shipment=shipment, products=products, reference_id=reference_id,
                         warehouse=warehouse or shipment.warehouse_code, measured=measured, required=required,
                         hs_templates=hs_templates)
+    from fba_tool.export_compliance import attach_compliance
+
+    attach_compliance(model, products, invoice_date or date.today().isoformat())
     if fw["export_adapter"] in ADDRESS_REQUIRED and not warehouse_info:
         raise InvoiceBlocked([{"code": "warehouse_address_missing",
                                "message": f"仓库 {model.warehouse} 在 FBA 仓库地址库里没有地址，{fw.get('name') or forwarder_id}发票的派送地址填不了"}])

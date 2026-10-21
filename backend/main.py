@@ -42,6 +42,7 @@ from routers.invoice_templates import router as invoice_templates_router
 from routers.invoice_export import router as invoice_export_router
 from routers.carton import router as carton_router
 from routers.fx_rates import router as fx_rates_router
+from routers.univer_snapshot import router as univer_snapshot_router
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,7 @@ _ROUTERS = (
     invoice_export_router,
     carton_router,
     fx_rates_router,
+    univer_snapshot_router,
 )
 
 

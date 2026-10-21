@@ -108,8 +108,27 @@ def _detect_layout(template_bytes: bytes, forwarder_id: str | None = None) -> tu
 def list_forwarders() -> List[ForwarderProfile]:
     raw = _load_raw()
     out: List[ForwarderProfile] = []
+    seen: set[str] = set()
     for item in raw.get("forwarders", []):
-        out.append(ForwarderProfile(**item))
+        profile = ForwarderProfile(**item)
+        out.append(profile)
+        seen.add(profile.id)
+    from dataclasses import fields as dataclass_fields
+
+    from fba_tool.invoice_export import export_forwarders
+
+    names = {item.name for item in dataclass_fields(ForwarderProfile)}
+    for item in export_forwarders().values():
+        fid = str(item.get("id") or "")
+        if not fid or fid in seen:
+            continue
+        payload = {key: value for key, value in item.items() if key in names}
+        payload.setdefault("header_row", 1)
+        payload.setdefault("first_data_row", 2)
+        payload.setdefault("column_map", {})
+        payload.setdefault("created_at", "")
+        out.append(ForwarderProfile(**payload))
+        seen.add(fid)
     return out
 
 

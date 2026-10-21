@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Dropzone, FeeCompareCell } from "@/components/step4-dropzone";
 import {
   ArrowLeft,
@@ -120,6 +120,10 @@ function StaActualFeeCard({
 export function Step4Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext?: () => void }) {
   const { csvFiles, setCsvFiles, pdfFiles, setPdfFiles, throwRatio, setThrowRatio, boxEditorApi, staleness, setForwarder } =
     useWorkflow();
+
+  useEffect(() => {
+    void import("@/lib/univer-engine").then((mod) => mod.preloadUniverEngine());
+  }, []);
 
   const {
     validating,

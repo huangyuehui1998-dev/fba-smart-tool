@@ -20,6 +20,11 @@ const PdfLabelsRoute = PdfLabelsRouteImport.update({
   path: '/pdf-labels',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MasterDataRoute = MasterDataRouteImport.update({
+  id: '/master-data',
+  path: '/master-data',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const CartonCompareRoute = CartonCompareRouteImport.update({
   id: '/carton-compare',
   path: '/carton-compare',
@@ -30,11 +35,6 @@ const AboutRoute = AboutRouteImport.update({
   path: '/about',
   getParentRoute: () => rootRouteImport,
 } as any)
-const MasterDataRoute = MasterDataRouteImport.update({
-  id: '/master-data',
-  path: '/master-data',
-  getParentRoute: () => rootRouteImport,
-} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -43,40 +43,46 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
+  '/carton-compare': typeof CartonCompareRoute
   '/master-data': typeof MasterDataRoute
   '/pdf-labels': typeof PdfLabelsRoute
-  '/carton-compare': typeof CartonCompareRoute
-  '/about': typeof AboutRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
+  '/carton-compare': typeof CartonCompareRoute
   '/master-data': typeof MasterDataRoute
   '/pdf-labels': typeof PdfLabelsRoute
-  '/carton-compare': typeof CartonCompareRoute
-  '/about': typeof AboutRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/about': typeof AboutRoute
+  '/carton-compare': typeof CartonCompareRoute
   '/master-data': typeof MasterDataRoute
   '/pdf-labels': typeof PdfLabelsRoute
-  '/carton-compare': typeof CartonCompareRoute
-  '/about': typeof AboutRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/master-data' | '/pdf-labels' | '/carton-compare' | '/about'
+  fullPaths: '/' | '/about' | '/carton-compare' | '/master-data' | '/pdf-labels'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/master-data' | '/pdf-labels' | '/carton-compare' | '/about'
-  id: '__root__' | '/' | '/master-data' | '/pdf-labels' | '/carton-compare' | '/about'
+  to: '/' | '/about' | '/carton-compare' | '/master-data' | '/pdf-labels'
+  id:
+    | '__root__'
+    | '/'
+    | '/about'
+    | '/carton-compare'
+    | '/master-data'
+    | '/pdf-labels'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AboutRoute: typeof AboutRoute
+  CartonCompareRoute: typeof CartonCompareRoute
   MasterDataRoute: typeof MasterDataRoute
   PdfLabelsRoute: typeof PdfLabelsRoute
-  CartonCompareRoute: typeof CartonCompareRoute
-  AboutRoute: typeof AboutRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -86,6 +92,13 @@ declare module '@tanstack/react-router' {
       path: '/pdf-labels'
       fullPath: '/pdf-labels'
       preLoaderRoute: typeof PdfLabelsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/master-data': {
+      id: '/master-data'
+      path: '/master-data'
+      fullPath: '/master-data'
+      preLoaderRoute: typeof MasterDataRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/carton-compare': {
@@ -102,13 +115,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AboutRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/master-data': {
-      id: '/master-data'
-      path: '/master-data'
-      fullPath: '/master-data'
-      preLoaderRoute: typeof MasterDataRouteImport
-      parentRoute: typeof rootRouteImport
-    }
     '/': {
       id: '/'
       path: '/'
@@ -121,10 +127,10 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AboutRoute: AboutRoute,
+  CartonCompareRoute: CartonCompareRoute,
   MasterDataRoute: MasterDataRoute,
   PdfLabelsRoute: PdfLabelsRoute,
-  CartonCompareRoute: CartonCompareRoute,
-  AboutRoute: AboutRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

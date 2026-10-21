@@ -1,826 +1,377 @@
 import {
-
   forwardRef,
-
   useCallback,
-
   useEffect,
-
   useImperativeHandle,
-
   useRef,
-
   useState,
-
 } from "react";
-
 import { Loader2 } from "lucide-react";
 
+import { SpreadsheetErrorBoundary } from "@/components/spreadsheet-error-boundary";
+import {
+  SOURCE_BG_HEX,
+  buildClipboardHtmlTable,
+  cellMetaFromFills,
+  formatCellRef,
+  type CellMeta,
+  type InvoiceCellFill,
+  type Sheet,
+} from "@/lib/invoice-spreadsheet";
+import type { UniverMount } from "@/lib/univer-engine";
 import { cn } from "@/lib/utils";
 
-import type { InvoiceCellFill } from "@/lib/invoice-spreadsheet";
-
-import {
-
-  SOURCE_BG_HEX,
-
-  applyFillsToSheets,
-
-  buildClipboardHtmlTable,
-
-  cellMetaFromFills,
-
-  cloneSheets,
-
-  formatCellRef,
-
-  parseCellRef,
-
-  type CellMeta,
-
-  type CellSourceKind,
-
-} from "@/lib/invoice-spreadsheet";
-
-import {
-
-  createEmptyFortuneSheet,
-
-  isBrowser,
-
-  normalizeFortuneSheets,
-
-} from "@/lib/fortune-sheet-normalize";
-
-import { SpreadsheetErrorBoundary } from "@/components/spreadsheet-error-boundary";
-
-import "@fortune-sheet/react/dist/index.css";
-
-import "@/styles/invoice-fortune-sheet.css";
-
-
-
-import type { WorkbookInstance } from "@fortune-sheet/react";
-
-import type { Sheet } from "@fortune-sheet/core";
-
-
-
-const AUDIT_WORKBOOK_SETTINGS = {
-
-  showToolbar: false,
-
-  showFormulaBar: false,
-
-  showSheetTabs: false,
-
-  allowEdit: true,
-
-} as const;
-
-
-
 export interface InvoiceSpreadsheetHandle {
-
   loadFile: (file: File) => Promise<void>;
-
   applyCells: (fills: InvoiceCellFill[]) => void;
-
-  /** 在已加载模板上直接写入单元格，并同步内部 sheet 快照（不重挂载） */
   applyCellsAndSyncSheets: (fills: InvoiceCellFill[]) => void;
-
   resetTemplate: () => void;
-
-  /** 重置为模板快照并合并填充数据，单次重挂载避免竞态丢值 */
   resetAndApplyCells: (fills: InvoiceCellFill[]) => void;
-
   getCellValue: (cell: string) => string;
-
   isReady: () => boolean;
-
   copyToClipboard: () => Promise<void>;
-
 }
-
-
 
 interface InvoiceSpreadsheetProps {
-
   loading?: boolean;
-
   className?: string;
-
   onReadyChange?: (ready: boolean) => void;
-
   onCellEdited?: (cell: string, value: string) => void;
-
   onLoadError?: (message: string) => void;
-
 }
 
+interface JobBody {
+  job_id?: string;
+  status?: string;
+  progress?: number;
+  error?: string;
+  result?: { snapshot?: unknown };
+  snapshot?: unknown;
+}
 
-
-type WorkbookComponent = typeof import("@fortune-sheet/react").Workbook;
-
-
-
-function applySheetDimensions(api: WorkbookInstance | null, sheetList: Sheet[]) {
-
-  if (!api) return;
-
-  for (const sheet of sheetList) {
-
-    const config = sheet.config;
-
-    api.setColumnWidth?.((config?.columnlen as Record<string, number>) || {}, { id: sheet.id });
-
-    api.setRowHeight?.((config?.rowlen as Record<string, number>) || {}, { id: sheet.id });
-
+function displayValue(value: unknown): string {
+  if (value == null) return "";
+  if (typeof value === "object" && value && "v" in value) {
+    return displayValue((value as { v?: unknown }).v);
   }
-
+  return String(value);
 }
 
-
-
-function FortuneWorkbookHost({
-
-  Workbook,
-
-  sheets,
-
-  workbookKey,
-
-  sheetRef,
-
-  onCellEdited,
-
-  onWorkbookChange,
-
-}: {
-
-  Workbook: WorkbookComponent;
-
-  sheets: Sheet[];
-
-  workbookKey: number;
-
-  sheetRef: React.RefObject<WorkbookInstance | null>;
-
-  onCellEdited?: (row: number, col: number, oldValue: unknown, newValue: unknown) => void;
-
-  onWorkbookChange?: () => void;
-
-}) {
-
-  const hostRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-
-    const root = hostRef.current;
-
-    if (!root) return;
-
-    const onWheel = (e: WheelEvent) => {
-
-      const xBar = root.querySelector<HTMLElement>(".luckysheet-scrollbar-x");
-
-      if (!xBar) return;
-
-      if (e.shiftKey && e.deltaY !== 0) {
-
-        xBar.scrollLeft += e.deltaY;
-
-        e.preventDefault();
-
-        e.stopPropagation();
-
-      }
-
-    };
-
-    root.addEventListener("wheel", onWheel, { passive: false, capture: true });
-
-    return () => root.removeEventListener("wheel", onWheel, { capture: true });
-
-  }, [workbookKey]);
-
-  return (
-
-    <div ref={hostRef} className="invoice-fortune-sheet-host h-full w-full min-h-0 min-w-0">
-
-      <Workbook
-
-        key={workbookKey}
-
-        ref={sheetRef}
-
-        data={sheets}
-
-        {...AUDIT_WORKBOOK_SETTINGS}
-
-        hooks={{ afterUpdateCell: onCellEdited }}
-
-        onChange={onWorkbookChange}
-
-      />
-
-    </div>
-
-  );
-
+async function readError(response: Response): Promise<string> {
+  const text = await response.text();
+  try {
+    const body = JSON.parse(text) as { detail?: unknown };
+    if (typeof body.detail === "string") return body.detail;
+    if (body.detail) return JSON.stringify(body.detail);
+  } catch {
+    // 保留原文
+  }
+  return text || `表格加载失败（${response.status}）`;
 }
-
-
 
 export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSpreadsheetProps>(
-
-  function InvoiceSpreadsheet(
-
-    { loading = false, className, onReadyChange, onCellEdited, onLoadError },
-
-    ref,
-
-  ) {
-
-    const sheetRef = useRef<WorkbookInstance>(null);
-
-    const snapshotRef = useRef<Sheet[]>([]);
-
-    const latestSheetsRef = useRef<Sheet[]>(createEmptyFortuneSheet());
-
+  function InvoiceSpreadsheet({ loading = false, className, onReadyChange, onCellEdited, onLoadError }, ref) {
+    const hostRef = useRef<HTMLDivElement>(null);
+    const mountRef = useRef<UniverMount | null>(null);
+    const snapshotRef = useRef<unknown>(null);
+    const valuesRef = useRef<Record<string, string>>({});
     const cellMetaRef = useRef<Record<string, CellMeta>>({});
-
-    const [mounted, setMounted] = useState(false);
-
-    const [Workbook, setWorkbook] = useState<WorkbookComponent | null>(null);
-
-    const [sheets, setSheets] = useState<Sheet[]>(() => createEmptyFortuneSheet());
-
-    const [workbookKey, setWorkbookKey] = useState(0);
-
+    const loadSeq = useRef(0);
     const [ready, setReady] = useState(false);
-
-    const [hasTemplateData, setHasTemplateData] = useState(false);
-
     const [parsing, setParsing] = useState(false);
+    const [progress, setProgress] = useState<number | null>(null);
+    const [jobId, setJobId] = useState<string | null>(null);
+    const [loadCount, setLoadCount] = useState(0);
+    const cancelRef = useRef(false);
 
-
-
-    useEffect(() => {
-
-      setMounted(true);
-
+    const dispose = useCallback(() => {
+      const current = mountRef.current;
+      mountRef.current = null;
+      window.__fbaUniver = undefined;
+      try {
+        current?.univerAPI.dispose();
+      } catch {
+        // 卸载时实例可能已经销毁
+      }
+      try {
+        current?.univer.dispose();
+      } catch {
+        // 同上
+      }
     }, []);
 
-
+    useEffect(() => () => dispose(), [dispose]);
 
     useEffect(() => {
-
-      if (!mounted || !isBrowser()) return;
-
-      let cancelled = false;
-
-      void import("@fortune-sheet/react").then((mod) => {
-
-        if (!cancelled) setWorkbook(() => mod.Workbook);
-
-      });
-
-      return () => {
-
-        cancelled = true;
-
+      const root = hostRef.current;
+      if (!root) return;
+      const onWheel = (event: WheelEvent) => {
+        event.preventDefault();
       };
+      root.addEventListener("wheel", onWheel, { capture: true, passive: false });
+      return () => root.removeEventListener("wheel", onWheel, { capture: true });
+    }, [ready, loadCount]);
 
-    }, [mounted]);
-
-
-
-    const markReady = useCallback(
-
-      (next: Sheet[]) => {
-
-        snapshotRef.current = cloneSheets(next);
-
-        latestSheetsRef.current = next;
-
-        setHasTemplateData(true);
-
-        setReady(true);
-
-        onReadyChange?.(true);
-
+    const paint = useCallback(
+      async (snapshot: unknown) => {
+        const host = hostRef.current;
+        if (!host) throw new Error("表格容器还没准备好");
+        const engine = await import("@/lib/univer-engine");
+        dispose();
+        host.replaceChildren();
+        const mount = engine.mountUniver(host, snapshot);
+        mountRef.current = mount;
+        engine.publishUniverDebug(mount.univerAPI);
+        snapshotRef.current = snapshot;
+        mount.univerAPI.addEvent(mount.univerAPI.Event.CommandExecuted, (event) => {
+          if (!String(event.id || "").includes("set-range-values")) return;
+          const params = event.params as { range?: { startRow?: number; startColumn?: number }; value?: unknown } | undefined;
+          const row = params?.range?.startRow;
+          const col = params?.range?.startColumn;
+          if (row == null || col == null) return;
+          const cell = formatCellRef(row, col);
+          const text = displayValue(params?.value);
+          valuesRef.current[cell] = text;
+          const meta = cellMetaRef.current[cell];
+          if (meta?.source === "missing" && text.trim()) {
+            cellMetaRef.current = { ...cellMetaRef.current, [cell]: { ...meta, source: "exact" } };
+          }
+          onCellEdited?.(cell, text);
+        });
       },
-
-      [onReadyChange],
-
+      [dispose, onCellEdited],
     );
 
+    const markReady = useCallback(() => {
+      setReady(true);
+      onReadyChange?.(true);
+    }, [onReadyChange]);
 
+    const pollJob = useCallback(async (id: string, seq: number): Promise<unknown> => {
+      for (;;) {
+        if (cancelRef.current || seq !== loadSeq.current) throw new Error("已取消加载");
+        const response = await fetch(`/api/jobs/${id}`);
+        if (!response.ok) throw new Error(await readError(response));
+        const body = (await response.json()) as JobBody;
+        setProgress(typeof body.progress === "number" ? body.progress : 0);
+        if (body.status === "done") return body.result?.snapshot;
+        if (body.status === "failed") throw new Error(body.error || "表格转换失败");
+        if (body.status === "cancelled") throw new Error("已取消加载");
+        await new Promise((resolve) => window.setTimeout(resolve, 300));
+      }
+    }, []);
 
     const loadFile = useCallback(
-
       async (file: File) => {
-
-        if (!isBrowser()) {
-
-          throw new Error("表格引擎仅支持在浏览器中运行");
-
-        }
-
-        if (!Workbook) {
-
-          throw new Error("表格引擎尚未就绪，请稍后重试");
-
-        }
-
-
-
+        const seq = loadSeq.current + 1;
+        loadSeq.current = seq;
+        cancelRef.current = false;
+        setLoadCount((count) => count + 1);
         setReady(false);
-
-        setHasTemplateData(false);
-
         setParsing(true);
-
+        setProgress(null);
+        setJobId(null);
         onReadyChange?.(false);
-
+        valuesRef.current = {};
         cellMetaRef.current = {};
-
-
-
         try {
-
-          const { transformExcelToFortune } = await import("@corbe30/fortune-excel");
-
-          let parsedSheets: Sheet[] = [];
-
-
-
-          await transformExcelToFortune(
-
-            file,
-
-            (next: Parameters<typeof normalizeFortuneSheets>[0]) => {
-
-              parsedSheets = normalizeFortuneSheets(next);
-
-              latestSheetsRef.current = parsedSheets;
-
-              setSheets(parsedSheets);
-
-            },
-
-            () => {
-
-              setWorkbookKey((k) => k + 1);
-
-            },
-
-            sheetRef,
-
-          );
-
-
-
-          markReady(parsedSheets);
-
+          const body = new FormData();
+          body.append("file", file);
+          const response = await fetch("/api/univer/snapshot?clamp=true", { method: "POST", body });
+          window.__fbaSnapshotReadyAt = performance.now();
+          if (seq !== loadSeq.current) return;
+          if (response.status === 202) {
+            const job = (await response.json()) as JobBody;
+            if (!job.job_id) throw new Error("后台任务没有编号");
+            setJobId(job.job_id);
+            setProgress(job.progress ?? 0);
+            const snapshot = await pollJob(job.job_id, seq);
+            if (seq !== loadSeq.current) return;
+            await paint(snapshot);
+          } else if (!response.ok) {
+            throw new Error(await readError(response));
+          } else {
+            const payload = (await response.json()) as JobBody;
+            await paint(payload.snapshot);
+          }
+          if (seq === loadSeq.current) markReady();
         } catch (err) {
-
           const message = err instanceof Error ? err.message : "模板解析失败";
-
           onLoadError?.(message);
-
           throw err;
-
         } finally {
-
-          setParsing(false);
-
+          if (seq === loadSeq.current) {
+            setParsing(false);
+            setProgress(null);
+            setJobId(null);
+          }
         }
-
       },
-
-      [Workbook, markReady, onLoadError, onReadyChange],
-
+      [markReady, onLoadError, onReadyChange, paint, pollJob],
     );
 
-
-
-    useEffect(() => {
-
-      if (!hasTemplateData || !sheets.length) return;
-
-      const timer = window.setTimeout(() => {
-
-        applySheetDimensions(sheetRef.current, sheets);
-
-      }, 0);
-
-      return () => window.clearTimeout(timer);
-
-    }, [hasTemplateData, sheets, workbookKey]);
-
-
-
-    const getCellValue = useCallback((cell: string): string => {
-
-      const api = sheetRef.current;
-
-      if (!api) return "";
-
+    const readCell = useCallback((cell: string): string => {
+      const upper = cell.toUpperCase();
+      if (upper in valuesRef.current) return valuesRef.current[upper] ?? "";
       try {
-
-        const { row, col } = parseCellRef(cell);
-
-        const val = api.getCellValue(row, col, { type: "m" });
-
-        if (val == null) return "";
-
-        return String(val);
-
+        const api = mountRef.current?.univerAPI;
+        if (!api) return "";
+        const sheet = api.getActiveWorkbook()?.getActiveSheet();
+        return displayValue(sheet?.getRange(upper).getValue());
       } catch {
-
         return "";
-
       }
-
     }, []);
 
-
-
-    const applyCells = useCallback((fills: InvoiceCellFill[]) => {
-
-      const api = sheetRef.current;
-
-      if (!api) return;
-
-
-
-      cellMetaRef.current = cellMetaFromFills(fills);
-
-
-
-      for (const fill of fills) {
-
-        if (!fill.cell) continue;
-
-        try {
-
-          const { row, col } = parseCellRef(fill.cell);
-
-          const source = cellMetaRef.current[fill.cell.toUpperCase()]?.source ?? "preview";
-
-          if (fill.value === "" || fill.value == null) {
-            api.setCellValue(row, col, "");
-          } else {
-            api.setCellValue(row, col, fill.value);
-          }
-
-          if (!fill.clear) {
-            api.setCellFormat(row, col, "bg", SOURCE_BG_HEX[source]);
-          }
-
-        } catch {
-
-          // skip invalid refs
-
-        }
-
+    const writeFill = useCallback((fill: InvoiceCellFill) => {
+      if (!fill.cell) return;
+      const upper = fill.cell.toUpperCase();
+      const text = fill.value == null ? "" : String(fill.value);
+      valuesRef.current[upper] = text;
+      const api = mountRef.current?.univerAPI;
+      const sheet = api?.getActiveWorkbook()?.getActiveSheet();
+      if (!sheet) return;
+      const source = cellMetaRef.current[upper]?.source ?? "preview";
+      try {
+        sheet.getRange(upper).setValue(text);
+        if (!fill.clear && text) sheet.getRange(upper).setBackgroundColor(SOURCE_BG_HEX[source]);
+      } catch {
+        // 非法单元格引用跳过
       }
-
     }, []);
 
-
-
-    const resetTemplate = useCallback(() => {
-
-      cellMetaRef.current = {};
-
-      if (!snapshotRef.current.length) return;
-
-      setSheets(cloneSheets(snapshotRef.current));
-
-      setWorkbookKey((k) => k + 1);
-
-    }, []);
-
-
+    const applyCells = useCallback(
+      (fills: InvoiceCellFill[]) => {
+        cellMetaRef.current = cellMetaFromFills(fills);
+        for (const fill of fills) writeFill(fill);
+      },
+      [writeFill],
+    );
 
     const applyCellsAndSyncSheets = useCallback(
       (fills: InvoiceCellFill[]) => {
-        cellMetaRef.current = cellMetaFromFills(fills);
-        if (snapshotRef.current.length) {
-          latestSheetsRef.current = applyFillsToSheets(snapshotRef.current, fills);
-        }
         applyCells(fills);
       },
       [applyCells],
     );
 
+    const resetTemplate = useCallback(() => {
+      cellMetaRef.current = {};
+      valuesRef.current = {};
+      if (snapshotRef.current) void paint(snapshotRef.current).then(() => markReady());
+    }, [markReady, paint]);
 
-
-    const resetAndApplyCells = useCallback((fills: InvoiceCellFill[]) => {
-
-      cellMetaRef.current = cellMetaFromFills(fills);
-
-      if (!snapshotRef.current.length) return;
-
-      const merged = applyFillsToSheets(snapshotRef.current, fills);
-
-      latestSheetsRef.current = merged;
-
-      setSheets(merged);
-
-      setWorkbookKey((k) => k + 1);
-
-    }, []);
-
-
+    const resetAndApplyCells = useCallback(
+      (fills: InvoiceCellFill[]) => {
+        cellMetaRef.current = cellMetaFromFills(fills);
+        const apply = () => applyCells(fills);
+        if (snapshotRef.current) {
+          void paint(snapshotRef.current).then(() => {
+            apply();
+            markReady();
+          });
+          return;
+        }
+        apply();
+      },
+      [applyCells, markReady, paint],
+    );
 
     const copyToClipboard = useCallback(async () => {
-
-      const api = sheetRef.current;
-
-      const sheet = latestSheetsRef.current[0];
-
-      if (!api || !sheet) {
-
-        throw new Error("表格尚未加载");
-
-      }
-
-      const rowCount = Math.min(Number(sheet.row ?? 60), 200);
-
-      const colCount = Math.min(Number(sheet.column ?? 20), 40);
-
-      const merges = (sheet.config?.merge ?? []) as {
-
-        r: number;
-
-        c: number;
-
-        rs: number;
-
-        cs: number;
-
-      }[];
-
-      const columnWidths = (sheet.config?.columnlen ?? {}) as Record<string, number>;
-
-      const read = (r: number, c: number) => {
-
-        const val = api.getCellValue(r, c, { type: "m" });
-
-        return val == null ? "" : String(val);
-
-      };
-
-      const html = buildClipboardHtmlTable(read, {
-
+      const sheet = (Array.isArray((snapshotRef.current as { sheets?: unknown })?.sheets)
+        ? null
+        : Object.values(((snapshotRef.current as { sheets?: Record<string, Sheet> })?.sheets) || {})[0]) as
+        | (Sheet & { mergeData?: { startRow: number; endRow: number; startColumn: number; endColumn: number }[] })
+        | undefined;
+      const rowCount = Math.min(Number(sheet?.rowCount ?? 40), 80);
+      const colCount = Math.min(Number(sheet?.columnCount ?? 16), 30);
+      const merges = (sheet?.mergeData ?? []).map((item) => ({
+        r: item.startRow,
+        c: item.startColumn,
+        rs: item.endRow - item.startRow + 1,
+        cs: item.endColumn - item.startColumn + 1,
+      }));
+      const html = buildClipboardHtmlTable((row, col) => readCell(formatCellRef(row, col)), {
         rowCount,
-
         colCount,
-
         merges,
-
-        columnWidths,
-
       });
-
-      const plainRows: string[] = [];
-
-      for (let r = 0; r < rowCount; r += 1) {
-
-        const cols: string[] = [];
-
-        for (let c = 0; c < colCount; c += 1) {
-
-          cols.push(read(r, c));
-
-        }
-
-        if (cols.some((v) => v.trim())) plainRows.push(cols.join("\t"));
-
-      }
-
-      const plain = plainRows.join("\n");
-
+      const plain = Array.from({ length: rowCount }, (_, row) =>
+        Array.from({ length: colCount }, (_, col) => readCell(formatCellRef(row, col))).join("\t"),
+      )
+        .filter((line) => line.trim())
+        .join("\n");
       if (navigator.clipboard?.write && typeof ClipboardItem !== "undefined") {
-
         await navigator.clipboard.write([
-
           new ClipboardItem({
-
             "text/html": new Blob([html], { type: "text/html" }),
-
             "text/plain": new Blob([plain], { type: "text/plain" }),
-
           }),
-
         ]);
-
       } else {
-
         await navigator.clipboard.writeText(plain);
-
       }
+    }, [readCell]);
 
-    }, []);
-
-
-
-    const handleCellEdited = useCallback(
-
-      (row: number, col: number, _oldValue: unknown, newValue: unknown) => {
-
-        const cell = formatCellRef(row, col);
-
-        const meta = cellMetaRef.current[cell];
-
-        if (meta && String(newValue ?? "").trim() && meta.source === "missing") {
-
-          cellMetaRef.current = {
-
-            ...cellMetaRef.current,
-
-            [cell]: { ...meta, source: "exact" as CellSourceKind },
-
-          };
-
-          sheetRef.current?.setCellFormat(row, col, "bg", SOURCE_BG_HEX.exact);
-
-        }
-
-        onCellEdited?.(cell, String(newValue ?? ""));
-
-      },
-
-      [onCellEdited],
-
-    );
-
-
+    const cancelJob = useCallback(() => {
+      cancelRef.current = true;
+      if (jobId) void fetch(`/api/jobs/${jobId}/cancel`, { method: "POST" });
+    }, [jobId]);
 
     useImperativeHandle(
-
       ref,
-
       () => ({
-
         loadFile,
-
         applyCells,
-
         applyCellsAndSyncSheets,
-
         resetTemplate,
-
         resetAndApplyCells,
-
-        getCellValue,
-
+        getCellValue: readCell,
         isReady: () => ready,
-
         copyToClipboard,
-
       }),
-
-      [
-        applyCells,
-        applyCellsAndSyncSheets,
-        copyToClipboard,
-        getCellValue,
-        loadFile,
-        ready,
-        resetAndApplyCells,
-        resetTemplate,
-      ],
-
+      [applyCells, applyCellsAndSyncSheets, copyToClipboard, loadFile, readCell, ready, resetAndApplyCells, resetTemplate],
     );
-
-
-
-    if (!mounted) {
-
-      return (
-
-        <div className="flex h-[min(72vh,720px)] min-h-[480px] items-center justify-center rounded-lg border border-border bg-card">
-
-          <Loader2 className="h-6 w-6 animate-spin text-primary" />
-
-        </div>
-
-      );
-
-    }
-
-
 
     return (
-
-      <SpreadsheetErrorBoundary
-        resetKey={workbookKey}
-
-        onError={(error) => {
-
-          onLoadError?.(error.message);
-
-          setHasTemplateData(false);
-
-          setReady(false);
-
-          onReadyChange?.(false);
-
-        }}
-
-      >
-
+      <SpreadsheetErrorBoundary onError={(error) => onLoadError?.(error.message)}>
         <div
-
           className={cn(
-
-            "invoice-fortune-sheet relative h-[min(72vh,720px)] min-h-[480px] overflow-auto rounded-lg border border-border bg-card shadow-sm",
-
+            "relative h-[46vh] min-h-[320px] overflow-hidden rounded-lg border border-border bg-card shadow-sm",
             className,
-
           )}
-
+          data-sheet-ready={ready ? "1" : "0"}
+          data-sheet-load={loadCount}
         >
-
+          <div ref={hostRef} data-testid="data-univer-grid" data-univer-grid="" className="h-full w-full overscroll-contain" />
           {(loading || parsing) && (
-
-            <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/70 backdrop-blur-[1px]">
-
-              <div className="flex flex-col items-center gap-2 text-sm text-muted-foreground">
-
+            <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/70">
+              <div className="flex w-64 flex-col items-center gap-2 text-sm text-muted-foreground">
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
-
-                <span>{parsing ? "正在解析 Excel 格式…" : "正在自动填写单元格…"}</span>
-
+                <span>{parsing ? "正在加载表格…" : "正在自动填写单元格…"}</span>
+                {progress != null && (
+                  <div className="w-full" data-testid="snapshot-progress">
+                    <div className="h-2 overflow-hidden rounded bg-muted">
+                      <div className="h-full bg-primary" style={{ width: `${Math.max(4, progress)}%` }} />
+                    </div>
+                    <p className="mt-1 text-center text-xs">{progress}%</p>
+                    {jobId && (
+                      <button type="button" className="mt-1 text-xs underline" data-testid="snapshot-cancel" onClick={cancelJob}>
+                        取消
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
-
             </div>
-
           )}
-
-
-
-          {!Workbook ? (
-
-            <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-
-              <Loader2 className="mr-2 h-5 w-5 animate-spin text-primary" />
-
-              正在加载表格引擎…
-
+          {!ready && !parsing && (
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-card/85 text-sm text-muted-foreground">
+              选择货代后，将在此预览发票模板
             </div>
-
-          ) : (
-
-            <FortuneWorkbookHost
-
-              Workbook={Workbook}
-
-              sheets={sheets}
-
-              workbookKey={workbookKey}
-
-              sheetRef={sheetRef}
-
-              onCellEdited={handleCellEdited}
-
-              onWorkbookChange={() =>
-
-                applySheetDimensions(sheetRef.current, latestSheetsRef.current)
-
-              }
-
-            />
-
           )}
-
-
-
-          {!hasTemplateData && !parsing && Workbook && (
-
-            <div className="pointer-events-none absolute inset-0 z-20 flex flex-col items-center justify-center gap-2 bg-card/85 px-6 text-center text-sm text-muted-foreground">
-
-              <p>选择货代后，将在此以 Excel 原样排版预览</p>
-
-              <p className="text-[11px]">支持合并单元格、边框与列宽</p>
-
-            </div>
-
-          )}
-
         </div>
-
       </SpreadsheetErrorBoundary>
-
     );
-
   },
-
 );
-
-
