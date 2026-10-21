@@ -1,4 +1,4 @@
-"""主库迁移。只加不删。当前最新 user_version = 5。"""
+"""主库迁移。只加不删。当前最新 user_version = 6。"""
 from __future__ import annotations
 
 import json
@@ -9,7 +9,7 @@ from typing import Callable, List, Optional, Tuple
 from fba_tool.db_backup import backup_daily, backup_migration, integrity_ok, utc_now
 from fba_tool.sku_keys import sku_key
 
-LATEST_VERSION = 5
+LATEST_VERSION = 6
 Migration = Tuple[int, Callable[[sqlite3.Connection], None]]
 
 _MIGRATION_ERROR: dict[str, str] = {}
@@ -122,6 +122,7 @@ def create_v4_tables(conn: sqlite3.Connection) -> None:
         """CREATE TABLE IF NOT EXISTS carton_measurement (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fba_id TEXT,
+            waybill TEXT,
             fba_box_id TEXT,
             box_no INTEGER,
             sku_key TEXT,
@@ -177,6 +178,7 @@ def create_v4_tables(conn: sqlite3.Connection) -> None:
     conn.execute("CREATE INDEX IF NOT EXISTS idx_carton_spec_sku ON carton_spec(sku_key, status)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_carton_measure_batch ON carton_measurement(import_batch_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_item_measure_batch ON item_measurement(import_batch_id)")
+    ensure_measurement_waybill(conn)
 
 
 def _has_carton(row: sqlite3.Row) -> bool:
@@ -280,6 +282,34 @@ def migrate_v4_carton_lib(conn: sqlite3.Connection) -> None:
         fn(conn)
 
 
+def ensure_measurement_waybill(conn: sqlite3.Connection) -> None:
+    """给已有实测表补 waybill，并把只写在 raw_json 里的运单号回填到 fba_id。"""
+    tables = {row[0] for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+    if "carton_measurement" not in tables:
+        return
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(carton_measurement)")}
+    if "waybill" not in columns:
+        conn.execute("ALTER TABLE carton_measurement ADD COLUMN waybill TEXT")
+    conn.execute(
+        """UPDATE carton_measurement
+           SET waybill = json_extract(raw_json, '$.waybill')
+           WHERE (waybill IS NULL OR waybill = '')
+             AND json_extract(raw_json, '$.waybill') IS NOT NULL
+             AND json_extract(raw_json, '$.waybill') != ''"""
+    )
+    conn.execute(
+        """UPDATE carton_measurement
+           SET fba_id = waybill
+           WHERE (fba_id IS NULL OR fba_id = '')
+             AND waybill IS NOT NULL
+             AND waybill != ''"""
+    )
+
+
+def migrate_v6_measurement_waybill(conn: sqlite3.Connection) -> None:
+    ensure_measurement_waybill(conn)
+
+
 def migrate_v5_net_weight_mode(conn: sqlite3.Connection) -> None:
     """老库默认 minus_per_box、且没有用户改过口径时，改成 tare_from_carton。"""
     conn.execute(
@@ -324,6 +354,7 @@ def migrate_v5_net_weight_mode(conn: sqlite3.Connection) -> None:
 MIGRATIONS: List[Migration] = [
     (4, migrate_v4_carton_lib),
     (5, migrate_v5_net_weight_mode),
+    (6, migrate_v6_measurement_waybill),
 ]
 
 

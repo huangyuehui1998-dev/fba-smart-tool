@@ -331,7 +331,7 @@ def test_m1_product_rows_unchanged(isolated, monkeypatch):
     assert _user_version(isolated / "fba_master.db") == 3
     monkeypatch.delenv("FBA_SKIP_MIGRATION")
     init_master_db()
-    assert _user_version(isolated / "fba_master.db") == 5
+    assert _user_version(isolated / "fba_master.db") == 6
     assert _product_digest(isolated / "fba_master.db") == before
     conn = sqlite3.connect(isolated / "fba_master.db")
     try:
@@ -380,7 +380,7 @@ def test_m4_second_start_does_not_migrate_again(isolated):
     init_master_db()
     init_master_db()
     backups = list((isolated / "backups").glob("fba_master.v*_to_v*.db"))
-    assert len(backups) == 2
+    assert len(backups) == 3
     dailies = list((isolated / "backups").glob("fba_master.daily.*.db"))
     assert len(dailies) == 1
 
@@ -430,7 +430,7 @@ def test_a3_health_fields(isolated):
     assert response.status_code == 200
     body = response.json()
     assert body["data_dir"] == str(isolated)
-    assert body["schema_version"] == 5
+    assert body["schema_version"] == 6
     assert body["carton_spec_count"] == 0
 
 
@@ -575,7 +575,7 @@ def test_r1_r2_backup_still_has_products(isolated, monkeypatch):
 def test_r3_newer_db_is_readonly(isolated):
     _init()
     conn = sqlite3.connect(isolated / "fba_master.db")
-    conn.execute("PRAGMA user_version = 6")
+    conn.execute("PRAGMA user_version = 7")
     conn.commit()
     conn.close()
     from fastapi.testclient import TestClient

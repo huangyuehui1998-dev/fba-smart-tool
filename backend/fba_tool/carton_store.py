@@ -517,12 +517,29 @@ def export_specs_csv() -> bytes:
 def zip_app_data(dest: Path) -> Path:
     from fba_tool.app_paths import app_data_dir
 
+    import sqlite3
+
     root = app_data_dir()
+    db_file = root / "fba_master.db"
+    if db_file.is_file():
+        checkpoint = sqlite3.connect(db_file)
+        try:
+            checkpoint.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        finally:
+            checkpoint.close()
     dest.parent.mkdir(parents=True, exist_ok=True)
     with zipfile.ZipFile(dest, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        for path in root.rglob("*"):
-            if path.is_file() and "backups" not in path.relative_to(root).parts:
+        for path in list(root.rglob("*")):
+            if not path.is_file() or "backups" in path.relative_to(root).parts:
+                continue
+            if path.name.endswith(("-wal", "-shm")):
+                continue
+            try:
                 zf.write(path, path.relative_to(root).as_posix())
+            except FileNotFoundError:
+                if path.name.endswith(("-wal", "-shm")):
+                    continue
+                raise
     return dest
 
 
@@ -585,7 +602,7 @@ def snapshot_from_validation(ctx: Dict[str, Any]) -> None:
         return
     parsed = ctx.get("parsed")
     csv_map = getattr(parsed, "csv_map", None) or {}
-    batch = _batch_label(ctx)
+    batch = resolve_snapshot_batch(ctx)
     for ship in csv_map.values():
         boxes = []
         specs = getattr(ship, "box_specs", None)
@@ -606,18 +623,137 @@ def snapshot_from_validation(ctx: Dict[str, Any]) -> None:
                     "declared_to_amazon": declared,
                 })
         if boxes and getattr(ship, "shipment_id", ""):
-            record_box_snapshot(ship.shipment_id, "step4_validated", boxes, batch=batch)
+            record_box_snapshot(
+                ship.shipment_id,
+                "step4_validated",
+                boxes,
+                task_id=_task_id(ctx),
+                batch=batch,
+            )
+
+
+def _task_id(ctx: Dict[str, Any]) -> str:
+    wf = ctx.get("wf") if isinstance(ctx.get("wf"), dict) else {}
+    return str(ctx.get("task_id") or wf.get("task_id") or "").strip()
+
+
+def _batch_in_text(text: str) -> str:
+    import re
+
+    found = re.search(r"第\s*(\d+)\s*批", text or "")
+    if found:
+        return found.group(1)
+    found = re.search(r"(?:^|[\\/])batches[\\/](\d+)(?:[\\/]|$)", text or "", re.IGNORECASE)
+    if found:
+        return found.group(1)
+    found = re.search(r"(?:^|[\\/]|^)batch[-_](\d+)(?:[\\/.]|$)", text or "", re.IGNORECASE)
+    if found:
+        return found.group(1)
+    return ""
+
+
+def _normalize_batch(value: str) -> str:
+    import re
+
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    found = _batch_in_text(text)
+    if found:
+        return found
+    if re.fullmatch(r"\d+", text):
+        return text
+    return ""
+
+
+def _first_batch(*values: Any) -> str:
+    for value in values:
+        if isinstance(value, dict):
+            for key in ("batch", "batch_id", "batch_no", "批次"):
+                found = _normalize_batch(str(value.get(key) or ""))
+                if found:
+                    return found
+            continue
+        found = _normalize_batch(str(value or ""))
+        if found:
+            return found
+    return ""
+
+
+def _batch_from_task_snapshot(task_id: str) -> str:
+    if not task_id:
+        return ""
+    try:
+        from fba_tool.session_store import load_history_payload
+
+        payload = load_history_payload(task_id) or {}
+    except Exception:
+        return ""
+    found = _first_batch(payload)
+    if found:
+        return found
+    return _batch_in_text(str(payload.get("task_name") or ""))
+
+
+def _batch_from_tickets(ctx: Dict[str, Any]) -> str:
+    parsed = ctx.get("parsed")
+    csv_map = getattr(parsed, "csv_map", None) or {}
+    shipment_ids = []
+    for ship in csv_map.values():
+        shipment_id = str(getattr(ship, "shipment_id", "") or "").strip()
+        if shipment_id:
+            shipment_ids.append(shipment_id)
+    if not shipment_ids:
+        return ""
+    try:
+        from fba_tool.ticket_import import get_ticket
+    except Exception:
+        return ""
+    found = []
+    for shipment_id in shipment_ids:
+        try:
+            ticket = get_ticket(shipment_id) or {}
+        except Exception:
+            return ""
+        batch = _normalize_batch(str(ticket.get("batch") or ""))
+        if not batch:
+            return ""
+        found.append(batch)
+    if len(found) == len(shipment_ids) and len(set(found)) == 1:
+        return found[0]
+    return ""
+
+
+def _filename_batch(ctx: Dict[str, Any]) -> str:
+    parsed = ctx.get("parsed")
+    names = list(getattr(parsed, "csv_names", {}).values()) if parsed is not None else []
+    wf = ctx.get("wf") if isinstance(ctx.get("wf"), dict) else {}
+    names.extend(str(item) for item in (wf.get("source_paths") or []))
+    pdf_names = list(getattr(parsed, "pdf_names", {}).values()) if parsed is not None else []
+    names.extend(str(item) for item in pdf_names)
+    return _batch_in_text(" ".join(str(name) for name in names))
+
+
+def resolve_snapshot_batch(ctx: Dict[str, Any]) -> str:
+    """批次优先取任务快照和 workflow，文件名里的「第N批」只作兜底。"""
+    wf = ctx.get("wf") if isinstance(ctx.get("wf"), dict) else {}
+    explicit = _first_batch(ctx.get("batch"), wf, wf.get("task") if isinstance(wf.get("task"), dict) else {})
+    if explicit:
+        return explicit
+    task_name = _batch_in_text(str(wf.get("task_name") or ctx.get("task_name") or ""))
+    if task_name:
+        return task_name
+    saved = _batch_from_task_snapshot(_task_id(ctx))
+    if saved:
+        return saved
+    ticket_batch = _batch_from_tickets(ctx)
+    if ticket_batch:
+        return ticket_batch
+    return _filename_batch(ctx)
 
 
 def _batch_label(ctx: Dict[str, Any]) -> str:
-    import re
-
-    parsed = ctx.get("parsed")
-    names = list(getattr(parsed, "csv_names", {}).values()) if parsed is not None else []
-    match = re.search(r"第\s*(\d+)\s*批", " ".join(str(name) for name in names))
-    if match:
-        return match.group(1)
-    return str(ctx.get("batch") or "")
+    return resolve_snapshot_batch(ctx)
 
 
 def _declared_to_amazon(spec: Any) -> Dict[str, Any]:
@@ -689,8 +825,9 @@ def import_measurements(rows: List[Dict[str, Any]], *, measured_by: str, source_
         waybills.discard("")
         for item in waybills:
             conn.execute(
-                "DELETE FROM carton_measurement WHERE json_extract(raw_json, '$.waybill') = ?",
-                (item,),
+                """DELETE FROM carton_measurement
+                   WHERE waybill = ? OR json_extract(raw_json, '$.waybill') = ?""",
+                (item, item),
             )
             conn.execute("DELETE FROM forwarder_bill WHERE fba_id = ?", (item,))
         for row in rows:
@@ -738,18 +875,27 @@ def import_measurements(rows: List[Dict[str, Any]], *, measured_by: str, source_
                 "SELECT 1 FROM carton_measurement WHERE content_hash=? AND source_file=?",
                 (digest, source_file),
             ).fetchone()
+            fba_id, waybill = _stored_ticket_ids(row)
             if exists:
+                if fba_id or waybill:
+                    conn.execute(
+                        """UPDATE carton_measurement
+                           SET fba_id = CASE WHEN fba_id IS NULL OR fba_id = '' THEN ? ELSE fba_id END,
+                               waybill = CASE WHEN waybill IS NULL OR waybill = '' THEN ? ELSE waybill END
+                           WHERE content_hash = ? AND source_file = ?""",
+                        (fba_id, waybill, digest, source_file),
+                    )
                 skipped += 1
                 continue
             status = "invalid_id" if not is_fba_box_id(row.get("fba_box_id")) else ""
             conn.execute(
                 """INSERT INTO carton_measurement (
-                    fba_id, fba_box_id, box_no, sku_key, measured_by, length_cm, width_cm, height_cm,
+                    fba_id, waybill, fba_box_id, box_no, sku_key, measured_by, length_cm, width_cm, height_cm,
                     weight_kg, chargeable_kg, raw_unit, raw_json, source_file, source_row, measured_at,
                     imported_at, import_batch_id, match_status, content_hash
-                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
                 (
-                    row.get("fba_id"), str(row.get("fba_box_id") or ""), row.get("box_no"),
+                    fba_id, waybill, str(row.get("fba_box_id") or ""), row.get("box_no"),
                     sku_key(row.get("sku") or ""), measured_by, row.get("length_cm"), row.get("width_cm"),
                     row.get("height_cm"), row.get("weight_kg"), row.get("chargeable_kg"), row.get("raw_unit"),
                     json.dumps(row.get("raw") or {}, ensure_ascii=False), source_file, row.get("source_row"),
@@ -895,9 +1041,21 @@ def compare_carton(fba_id: str = "", batch: str = "", source: str = "", threshol
     missing = missing_declared(declared_by_id.keys(), [row["_used_id"] for row in measured_rows if row["match_status"] != "invalid_id"])
     for box_id in missing:
         quality.append({"kind": "无过机记录", "fba_box_id": box_id, "match_status": "missing"})
-    tickets = _tickets_for_carry(measured_rows, bills, divisor)
+    tickets, unmatched_bills = _tickets_for_carry(measured_rows, bills, divisor)
+    for bill in unmatched_bills:
+        quality.append({
+            "kind": "账单无对应过机行",
+            "match_status": "账单无对应过机行",
+            "fba_box_id": bill.get("fba_id"),
+            "fba_id": bill.get("fba_id"),
+            "bill_kg": float(q(bill.get("bill_kg") or 0, 2)),
+            "message": "该票没有对应过机行，未把整票账单计入进位",
+        })
     parts = decompose(matched_for_math, tickets, divisor)
     lines = summary_lines(parts, len(main), duplicate_ids)
+    if unmatched_bills:
+        names = "、".join(str(bill.get("fba_id") or "") for bill in unmatched_bills)
+        lines["unmatched_bills"] = f"{names} 无对应过机行，未计入进位"
     bias = suggest_spec_update(matched_for_math)
     volumes = []
     for item in matched_for_math:
@@ -920,7 +1078,8 @@ def compare_carton(fba_id: str = "", batch: str = "", source: str = "", threshol
             "deduped_count": len(main),
             "measured_count": len(measured_rows),
             "scope_note": f"去重 {len(main)} 箱" if main else "",
-            "carry_scope": "全票口径",
+            "carry_scope": "按票匹配",
+            "unmatched_bills": [bill.get("fba_id") for bill in unmatched_bills],
             "suggest_update": bias,
             "suggest_text": "建议更新箱规库 / STA 箱规" if bias else "",
             "volume_bias_pct": format_volume_bias_pct(mean_ratio) if volumes else "",
@@ -986,22 +1145,64 @@ def _dims_text(dims: Sequence[Any], kg: Any) -> str:
     return " / ".join([f"{q(item, 2):.2f}" for item in dims] + [f"{q(kg or 0, 3):.3f}"])
 
 
-def _tickets_for_carry(measured_rows: List[Dict[str, Any]], bills: List[Dict[str, Any]], divisor) -> List[Dict[str, Any]]:
+def _stored_ticket_ids(row: Dict[str, Any]) -> tuple[str, str]:
+    waybill = str(row.get("waybill") or "").strip()
+    raw = row.get("raw")
+    if not waybill and isinstance(raw, dict):
+        waybill = str(raw.get("waybill") or "").strip()
+    fba_id = str(row.get("fba_id") or "").strip() or waybill
+    return fba_id, waybill
+
+
+def _measurement_ticket_id(row: Dict[str, Any]) -> str:
+    fba_id, waybill = _stored_ticket_ids(row)
+    if fba_id:
+        return fba_id
+    if waybill:
+        return waybill
+    raw_json = row.get("raw_json")
+    if isinstance(raw_json, str) and raw_json.strip():
+        try:
+            payload = json.loads(raw_json)
+        except json.JSONDecodeError:
+            payload = {}
+        text = str((payload or {}).get("waybill") or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _tickets_for_carry(
+    measured_rows: List[Dict[str, Any]],
+    bills: List[Dict[str, Any]],
+    divisor,
+) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    del divisor
     by_fba: Dict[str, List[Dict[str, Any]]] = {}
     for row in measured_rows:
-        by_fba.setdefault(str(row.get("fba_id") or ""), []).append({
+        dims = [row.get("length_cm") or 0, row.get("width_cm") or 0, row.get("height_cm") or 0]
+        entry: Dict[str, Any] = {
             "weight_kg": row.get("weight_kg") or 0,
-            "dims": [row.get("length_cm") or 0, row.get("width_cm") or 0, row.get("height_cm") or 0],
             "chargeable_kg": row.get("chargeable_kg"),
-        })
-    tickets = []
+        }
+        if any(D(item) > 0 for item in dims):
+            entry["dims"] = dims
+        by_fba.setdefault(_measurement_ticket_id(row), []).append(entry)
+    matched: List[Dict[str, Any]] = []
+    unmatched: List[Dict[str, Any]] = []
     for bill in bills:
-        tickets.append({
-            "fba_id": bill.get("fba_id"),
+        key = str(bill.get("fba_id") or "").strip()
+        rows = by_fba.get(key) or []
+        ticket = {
+            "fba_id": key,
             "bill_kg": bill.get("bill_chargeable_kg") or 0,
-            "rows": by_fba.get(str(bill.get("fba_id") or ""), []),
-        })
-    return tickets
+            "rows": rows,
+        }
+        if rows:
+            matched.append(ticket)
+        else:
+            unmatched.append(ticket)
+    return matched, unmatched
 
 
 def compare_export_xlsx(fba_id: str = "", batch: str = "", source: str = "") -> bytes:

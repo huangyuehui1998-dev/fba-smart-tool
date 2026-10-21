@@ -249,8 +249,11 @@ def decompose(
         actual += q(row["measured_kg"], 3) - q(row["declared_kg"], 3)
     carry = Decimal("0")
     for ticket in tickets:
+        scans = ticket.get("rows") or []
+        if not scans:
+            continue
         line_sum = Decimal("0")
-        for scan in ticket.get("rows") or []:
+        for scan in scans:
             dims = scan.get("dims")
             if dims:
                 line_sum += chargeable_kg(scan["weight_kg"], dims, divisor)
@@ -356,8 +359,11 @@ def light_heavy_check(
 def bill_warnings(tickets: Sequence[Dict[str, Any]], divisor: Any = DEFAULT_DIM_DIVISOR) -> List[str]:
     notes: List[str] = []
     for ticket in tickets:
+        scans = ticket.get("rows") or []
+        if not scans:
+            continue
         line_sum = Decimal("0")
-        for scan in ticket.get("rows") or []:
+        for scan in scans:
             dims = scan.get("dims")
             if dims:
                 line_sum += chargeable_kg(scan["weight_kg"], dims, divisor)

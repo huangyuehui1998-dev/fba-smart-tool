@@ -50,7 +50,7 @@ def test_old_minus_per_box_migrates_unless_the_user_chose_it(tmp_path, monkeypat
     conn.execute("INSERT INTO customs_rule_profile VALUES ('default', 'minus_per_box', '2020-01-01')")
     conn.execute("PRAGMA user_version = 4")
     conn.commit()
-    assert run_migrations(conn, str(auto)) == 5
+    assert run_migrations(conn, str(auto)) == 6
     mode = conn.execute("SELECT net_weight_mode FROM customs_rule_profile").fetchone()[0]
     conn.close()
     assert mode == "tare_from_carton"

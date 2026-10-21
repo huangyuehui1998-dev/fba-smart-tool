@@ -195,9 +195,10 @@ class JiufangBoxAdapter:
                 chargeable = chargeable_kg_rounded(weight, volumetric if volumetric is not None else weight)
                 if column_vol is not None:
                     volumetric = column_vol
+                ticket_id = str(_cell(raw, fba_at) or "").strip() or waybill
                 rows.append({
                     "kind": "box",
-                    "fba_id": str(_cell(raw, fba_at) or ""),
+                    "fba_id": ticket_id,
                     "fba_box_id": box_id,
                     "sku": str(_cell(raw, sku_at) or ""),
                     "length_cm": None if length is None else float(length),
