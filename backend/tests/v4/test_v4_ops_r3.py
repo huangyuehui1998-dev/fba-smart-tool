@@ -472,8 +472,54 @@ def test_real_batch_seed_copies_asin_from_csv():
     assert all(item["fnsku"].startswith("X00TEST14") for item in seeds)
 
 
+def _warehouse_xlsx(rows: list[tuple]) -> bytes:
+    """琪珞「！」表。列顺序与地址库表头一致，合成夹具用，不读真实文件。"""
+    import openpyxl
+
+    book = openpyxl.Workbook()
+    sheet = book.active
+    sheet.title = "！"
+    sheet.append(["FBA仓码", "收件人名称", "收件人公司", "邮编", "地址1", "地址2", "地址3", "国家", "城市", "州", "收件人电话"])
+    for row in rows:
+        sheet.append(list(row))
+    buf = io.BytesIO()
+    book.save(buf)
+    book.close()
+    return buf.getvalue()
+
+
+def _api_warehouse_code(raw: bytes) -> str:
+    """生成接口把文件名换成货代 id，路径里的仓码不会进入解析。"""
+    from fba_tool.shipment_parser import parse_csv_shipment
+
+    ship = parse_csv_shipment(raw, file_name="invoice.csv", allow_unassigned_fba=True)
+    code = (ship.warehouse_code or "").strip().upper()
+    return "" if code in ("", "UNKN") else code
+
+
+def _shared_address_candidates(forwarder_id: str, ship_to: str, csv_code: str) -> list[str] | None:
+    """一个地址对应多个仓库、且 CSV 仓码不在其中时，要写派送地址的货代返回这些候选。SEND 不写地址。"""
+    from fba_tool.invoice_export import export_forwarders
+    from fba_tool.invoice_templates import _ship_to_codes
+
+    adapter = str((export_forwarders().get(forwarder_id) or {}).get("export_adapter") or "")
+    if adapter in ("", "send"):
+        return None
+    codes = _ship_to_codes(ship_to)
+    cc = (csv_code or "").strip().upper()
+    if cc == "UNKN":
+        cc = ""
+    if len(codes) > 1 and cc not in codes:
+        return codes
+    return None
+
+
 def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tmp_path):
-    """真实目录在时跑六个货代的自动填写→导出，并和同票发票核对货件号与数量。"""
+    """真实目录在时先导入仓库地址库，再跑六个货代的自动填写→导出，并和同票发票核对货件号与数量。
+
+    一个地址对应多个仓库、货件名称里的仓码又不在其中（第 14 批 GYR2 / LGB8 同城多仓就是这种）时，
+    九方等要写地址的货代返回 422 和候选仓库列表，不按 200 失败。
+    """
     from tests.smoke.reference import LayoutMissing, available, realdata_root
 
     if not available():
@@ -481,6 +527,9 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
     monkeypatch.setenv("FBA_APP_DATA_DIR", str(tmp_path / "app"))
     monkeypatch.setenv("FBA_DISABLE_SCHEDULER", "1")
     root = realdata_root()
+    warehouse_file = root / "tests" / "fixtures" / "warehouse" / "fba_warehouse_qiluo.xlsx"
+    if not warehouse_file.is_file():
+        pytest.skip("需要 box realdata: " + str(warehouse_file))
     csvs = _batch_csvs(root)
     missing = [batch for batch, paths in csvs.items() if not paths]
     if missing:
@@ -493,9 +542,12 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
     from fba_tool.master_db import init_master_db, upsert_product
     from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
     from fba_tool.shipment_parser import parse_csv_shipment
+    from fba_tool.warehouse_db import apply_warehouse_import
     from main import create_app
 
     init_master_db()
+    imported = apply_warehouse_import(warehouse_file.read_bytes(), warehouse_file.name)
+    assert imported["written"] > 0
     client = TestClient(create_app())
     invoices = _invoice_files(root)
     compared = []
@@ -525,6 +577,7 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
                 sku_name = str(rec.get("SKU") or "")
                 sku_qty[sku_name] = sku_qty.get(sku_name, 0) + int(rec["数量"])
             sku_qty_tokens = {str(total) for total in sku_qty.values() if total > 0}
+            api_code = _api_warehouse_code(raw)
             for forwarder_id in FORWARDERS:
                 generated = client.post(
                     "/api/invoice/generate",
@@ -534,6 +587,22 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
                         "csv_base64": base64.b64encode(raw).decode(),
                     },
                 )
+                candidates = _shared_address_candidates(forwarder_id, ship.ship_to, api_code)
+                if candidates is not None:
+                    assert generated.status_code == 422, (
+                        f"{batch} {path.name} {forwarder_id} 配送地址对应多个仓库，应 422，"
+                        f"实际 {generated.status_code} {generated.text[:400]}"
+                    )
+                    detail = generated.json()["detail"]
+                    assert detail["code"] == "warehouse_undecided"
+                    assert detail["address"] == ship.ship_to
+                    assert detail["warehouse_candidates"] == candidates, (
+                        f"{batch} {path.name} {forwarder_id} 候选仓库应是该配送地址在地址库里的仓库"
+                        f"（第 14 批 GYR2/LGB8 同城多仓即这种），实际 {detail.get('warehouse_candidates')}"
+                    )
+                    assert "对应多个仓库" in detail["message"]
+                    assert "选择仓库" in detail["message"]
+                    continue
                 assert generated.status_code == 200, f"{batch} {path.name} {forwarder_id} {generated.text}"
                 assert "箱号" not in generated.text
                 body = generated.json()
@@ -580,3 +649,126 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
     assert pipeline
     if invoices and not compared:
         raise AssertionError("找到了发票文件，但没有一份能按货件号和第 13/14 批 CSV 对上：" + ", ".join(path.name for path in invoices[:8]))
+
+
+def _plain_csv(shipment: str, ship_to: str) -> bytes:
+    """货件名称不含仓码。生成接口也看不到文件名里的仓码，仓库只能靠配送地址。"""
+    return "\n".join([
+        f'"货件编号","{shipment}"',
+        '"货件名称","PLAIN"',
+        f'"配送地址","{ship_to}"',
+        '"箱子数量","1"',
+        "",
+        '"单件商品（1 箱）"',
+        '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量"',
+        '"N5C-SKU","rod","B0N5C00001","X00TESTN5C","新品","无","4","4"',
+        "",
+        f'"","","","","","","箱号","{shipment}U000001"',
+        '"","","","","","","包装箱重量（磅）：","10"',
+        '"","","","","","","包装箱长度（英寸）：","17.70"',
+        '"","","","","","","包装箱宽度（英寸）：","17.70"',
+        '"","","","","","","包装箱高度（英寸）：","16.10"',
+    ]).encode("utf-8")
+
+
+def test_import_warehouse_library_then_fill(monkeypatch, tmp_path):
+    """先导入地址库再填写。唯一地址的九方在导入前 422，导入后写出该仓；同城多仓返回 422 和候选。"""
+    import base64
+    import json
+
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import delete_product_by_sku, init_master_db, upsert_product
+    from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
+    from fba_tool.warehouse_db import apply_warehouse_import
+    from main import create_app
+
+    monkeypatch.setenv("FBA_APP_DATA_DIR", str(tmp_path / "app"))
+    monkeypatch.setenv("FBA_DISABLE_SCHEDULER", "1")
+    init_master_db()
+    sku = "N5C-SKU"
+    upsert_product(
+        {
+            "sku": sku,
+            "fnsku": "X00TESTN5C",
+            "asin": "B0N5C00001",
+            "english_name": "Fishing rod",
+            "chinese_name": "鱼竿",
+            "brand": "Acme",
+            "material": "棉",
+            "purpose": "宠物",
+            "hs_code": "9507100090",
+            "model_name": "型号甲",
+            "extra_data": json.dumps(
+                {"invoice": {"unit": "个", "purchase_price": 5, "material_en": "cotton", "purpose_en": "pet", "pcs_per_set": 1}},
+                ensure_ascii=False,
+            ),
+        }
+    )
+    set_product_fields(sku, {"listing_price": 10, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+    library = _warehouse_xlsx([
+        ("ONL1", "ONL1", "Amazon", "00001", "1 Only Road", "", "", "US", "ONLYVILLE", "ZZ", ""),
+        ("GYR2", "GYR2", "Amazon", "00002", "2 Share Road", "", "", "US", "SHAREVILLE", "ZZ", ""),
+        ("LGB8", "LGB8", "Amazon", "00003", "3 Share Road", "", "", "US", "SHAREVILLE", "ZZ", ""),
+    ])
+    unique = _plain_csv("FBAN5CONLY", "ONLYVILLE, ZZ")
+    shared = _plain_csv("FBAN5CSHARE", "SHAREVILLE, ZZ")
+    client = TestClient(create_app())
+
+    def generate(raw: bytes, shipment: str, warehouse: str = ""):
+        body = {
+            "shipment_id": shipment,
+            "forwarder_id": "jiufang",
+            "csv_base64": base64.b64encode(raw).decode(),
+        }
+        if warehouse:
+            body["warehouse"] = warehouse
+        return client.post("/api/invoice/generate", json=body)
+
+    try:
+        blocked = generate(unique, "FBAN5CONLY")
+        assert blocked.status_code == 422, blocked.text[:400]
+        assert blocked.json()["detail"]["code"] == "warehouse_undecided"
+
+        imported = apply_warehouse_import(library, "synthetic-warehouse.xlsx")
+        assert imported["written"] == 3
+
+        filled = generate(unique, "FBAN5CONLY")
+        assert filled.status_code == 200, filled.text[:400]
+        body = filled.json()
+        exported = client.post(
+            "/api/export_invoice",
+            json={
+                "template_hash": body["template_hash"],
+                "forwarder_id": "jiufang",
+                "shipment_id": body["shipment_id"],
+                "warehouse_code": body["warehouse_code"],
+                "template_sheet": body["template_sheet"],
+                "fields": body["cells"],
+            },
+        )
+        assert exported.status_code == 200, exported.text[:400]
+        import openpyxl
+
+        book = openpyxl.load_workbook(io.BytesIO(exported.content), data_only=True)
+        try:
+            sheet = book["Invoice"]
+            assert sheet["B12"].value == "ONL1"
+            assert sheet["B16"].value == "ONLYVILLE"
+        finally:
+            book.close()
+
+        ambiguous = generate(shared, "FBAN5CSHARE")
+        assert ambiguous.status_code == 422, ambiguous.text[:400]
+        detail = ambiguous.json()["detail"]
+        assert detail["code"] == "warehouse_undecided"
+        assert detail["address"] == "SHAREVILLE, ZZ"
+        assert detail["warehouse_candidates"] == ["GYR2", "LGB8"]
+        assert "对应多个仓库" in detail["message"]
+        assert "GYR2" in detail["message"] and "LGB8" in detail["message"]
+        assert "选择仓库" in detail["message"]
+
+        chosen = generate(shared, "FBAN5CSHARE", warehouse="LGB8")
+        assert chosen.status_code == 200, chosen.text[:400]
+    finally:
+        delete_product_by_sku(sku)
