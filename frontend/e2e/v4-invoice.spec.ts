@@ -476,3 +476,104 @@ for sku, fnsku, asin, price in (
   expect(send.E15).toBe("X00TESTAAA");
   expect(send.E16).toBe("X00TESTTNZ");
 });
+
+test("multi-warehouse 422 asks for a warehouse in Chinese", async ({ page }) => {
+  test.setTimeout(180_000);
+  const csv = [
+    '"货件编号","FBAB4E2E"',
+    '"货件名称","PLAIN"',
+    '"配送地址","STEP45VILLE, ZZ"',
+    '"箱子数量","1"',
+    "",
+    '"单件商品（1 箱）"',
+    '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量"',
+    '"B4-E2E","rod","B0B4E2E001","X00TESTB4E","新品","无","4","4"',
+    "",
+    '"","","","","","","箱号","FBAB4E2EU000001"',
+    '"","","","","","","包装箱重量（磅）：","10"',
+    '"","","","","","","包装箱长度（英寸）：","10"',
+    '"","","","","","","包装箱宽度（英寸）：","10"',
+    '"","","","","","","包装箱高度（英寸）：","10"',
+  ].join("\n");
+  const seed = (cleanup: boolean) => {
+    execFileSync(
+      e2ePython(),
+      [
+        "-c",
+        `
+import json
+from datetime import datetime, timezone
+from fba_tool.master_db import _connect, delete_product_by_sku, init_master_db, upsert_product
+from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
+init_master_db()
+now = datetime.now(timezone.utc).isoformat()
+with _connect() as conn:
+    conn.execute("DELETE FROM fba_warehouse WHERE code = ?", ("TST2",))
+    if not ${cleanup ? "True" : "False"}:
+        conn.execute("DELETE FROM fba_warehouse WHERE code = ?", ("TST1",))
+        conn.execute(
+            "INSERT INTO fba_warehouse (code, name, company, address1, city, state, zip, country, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            ("TST1", "TST1", "Amazon", "1 Test Road", "STEP45VILLE", "ZZ", "00000", "US", now),
+        )
+        conn.execute(
+            "INSERT INTO fba_warehouse (code, name, company, address1, city, state, zip, country, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
+            ("TST2", "TST2", "Amazon", "2 Test Road", "STEP45VILLE", "ZZ", "00000", "US", now),
+        )
+    conn.commit()
+if ${cleanup ? "True" : "False"}:
+    delete_product_by_sku("B4-E2E")
+else:
+    upsert_product({
+        "sku": "B4-E2E", "fnsku": "X00TESTB4E", "asin": "B0B4E2E001",
+        "english_name": "Catalog Rod", "chinese_name": "鱼竿", "brand": "Acme",
+        "material": "塑料", "purpose": "户外", "hs_code": "9507100090", "model_name": "型号乙",
+        "declared_value": 10,
+        "extra_data": json.dumps({"invoice": {"unit": "个", "purchase_price": 5, "material_en": "plastic", "purpose_en": "outdoor", "pcs_per_set": 1}}, ensure_ascii=False),
+    })
+    set_product_fields("B4-E2E", {"listing_price": 12.5, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+`,
+      ],
+      {
+        cwd: join("..", "backend"),
+        env: { ...process.env, FBA_APP_DATA_DIR: "/tmp/fba-e2e-data", FBA_DISABLE_SCHEDULER: "1" },
+      },
+    );
+  };
+  seed(false);
+  try {
+    const payload = {
+      ...FBOX,
+      grid_data: {
+        ...FBOX.grid_data,
+        react_selected_shipment_id: "FBAB4E2E",
+        step4_shipment_bundle: [
+          {
+            shipment_id: "FBAB4E2E",
+            warehouse: "TST1",
+            csv_b64: Buffer.from(csv).toString("base64"),
+            pdf_b64: Buffer.from("hello").toString("base64"),
+          },
+        ],
+      },
+    };
+    await openInvoice(page, payload);
+    await chooseForwarder(page, "九方");
+    await expect(page.getByTestId("invoice-autofill")).toBeEnabled({ timeout: 20_000 });
+    const blocked = page.waitForResponse((response) => response.url().includes("/api/invoice/generate"));
+    await page.getByTestId("invoice-autofill").click();
+    expect((await blocked).status()).toBe(422);
+    await expect(page.getByText("这个配送地址对应多个仓库")).toBeVisible();
+    await expect(page.getByText("Unprocessable Content")).toHaveCount(0);
+    await expect(page.getByTestId("warehouse-candidate-select")).toBeVisible();
+    await page.getByTestId("warehouse-candidate-select").click();
+    await page.getByRole("option", { name: "TST2", exact: true }).click();
+    const retried = page.waitForResponse((response) => response.url().includes("/api/invoice/generate"));
+    await page.getByTestId("invoice-autofill").click();
+    const again = await retried;
+    expect(again.status()).toBe(200);
+    expect(again.request().postDataJSON().warehouse).toBe("TST2");
+    await expect(page.getByTestId("warehouse-candidate-select")).toHaveCount(0);
+  } finally {
+    seed(true);
+  }
+});

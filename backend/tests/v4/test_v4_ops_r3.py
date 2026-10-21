@@ -109,6 +109,11 @@ def test_batch14_packaging_name_row_maps_p1_boxes_and_keeps_inches():
     assert ship.box_count == 2
     assert not ship.box_items.empty
     assert int(ship.box_items["数量"].sum()) == 4 * 3 + 2 * 3
+    marks = ship.box_specs["FBA箱号"].fillna("").astype(str).str.strip()
+    assert list(marks) == ["", ""]
+    assert set(ship.box_specs["箱名"].astype(str)) == {"P1 - B1", "P1 - B2"}
+    assert ship.box_names == {1: "P1 - B1", 2: "P1 - B2"}
+    assert ship.box_fba_ids == {}
     width = float(ship.box_specs.loc[ship.box_specs["箱号"] == 1, "宽(cm)"].iloc[0])
     length = float(ship.box_specs.loc[ship.box_specs["箱号"] == 1, "长(cm)"].iloc[0])
     assert width == 44.96

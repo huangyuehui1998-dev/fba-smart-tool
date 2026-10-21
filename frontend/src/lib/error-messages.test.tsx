@@ -28,6 +28,22 @@ describe("explainApiError", () => {
     expect(text).not.toContain("填写不满足规则");
   });
 
+  it("explains a multi-warehouse 422 in Chinese and names the warehouses", () => {
+    const err = new ApiError(422, "Unprocessable Content", {
+      code: "warehouse_undecided",
+      detail: "货件 CSV 配送地址对应多个仓库：TST1、TST2，请在面板上选择仓库",
+      message: "货件 CSV 配送地址对应多个仓库：TST1、TST2，请在面板上选择仓库",
+      warehouse_candidates: ["TST1", "TST2"],
+    });
+    const copy = explainApiError(err);
+    const text = formatApiError(err);
+    expect(text).not.toMatch(/unprocessable/i);
+    expect(copy.what).toContain("多个仓库");
+    expect(text).toContain("选择仓库");
+    expect(text).toContain("TST1");
+    expect(text).toContain("TST2");
+  });
+
   it("does not show Internal Server Error", () => {
     const html = renderToStaticMarkup(
       <ErrorNotice copy={explainApiError(new ApiError(500, "Internal Server Error"))} />,

@@ -68,7 +68,27 @@ async function fail(res: Response): Promise<never> {
   } catch {
     // ignore
   }
-  const msg = typeof body.detail === "string" ? body.detail : res.statusText || `HTTP ${res.status}`;
+  const detail = body.detail;
+  let msg = "";
+  if (typeof detail === "string") msg = detail.trim();
+  else if (detail && typeof detail === "object") {
+    const obj = detail as { message?: unknown; detail?: unknown; warehouse_candidates?: unknown };
+    if (typeof obj.message === "string") msg = obj.message.trim();
+    else if (typeof obj.detail === "string") msg = obj.detail.trim();
+    if (!Array.isArray(body.warehouse_candidates) && Array.isArray(obj.warehouse_candidates)) {
+      body.warehouse_candidates = obj.warehouse_candidates.map(String);
+    }
+  }
+  if (!msg) {
+    const listed = (body.warehouse_candidates || []).filter(Boolean);
+    if (res.status === 422 && listed.length) {
+      msg = `配送地址对应多个仓库（${listed.join("、")}），请在下面选择仓库`;
+    } else if (/^unprocessable\b/i.test(res.statusText || "")) {
+      msg = "请求没有完成";
+    } else {
+      msg = res.statusText || `HTTP ${res.status}`;
+    }
+  }
   if (res.status === 422 && Array.isArray(body.warehouse_candidates))
     throw new WarehouseUndecidedError(msg, body.warehouse_candidates);
   if (res.status === 409) throw new ExportBlockedError(msg, body.blocking || []);

@@ -279,6 +279,31 @@ def overlay_csv_asin(products: Dict[str, Dict[str, Any]], csv_bytes: bytes | Non
     return filled
 
 
+def overlay_csv_english_name(products: Dict[str, Dict[str, Any]], csv_bytes: bytes | None) -> Dict[str, Dict[str, Any]]:
+    """产品库没有英文品名时，用这份 CSV 的商品名称填到副本上。不写回产品库。"""
+    from fba_tool.invoice_rules import invoice_english_name
+
+    meta = extract_csv_sku_meta(csv_bytes or b"")
+    by_fnsku: Dict[str, str] = {}
+    for entry in meta.values():
+        fnsku = str(entry.get("fnsku") or "").strip().upper()
+        title = str(entry.get("title") or "").strip()
+        if fnsku and title:
+            by_fnsku[fnsku] = title
+    filled: Dict[str, Dict[str, Any]] = {}
+    for key, product in (products or {}).items():
+        item = dict(product or {})
+        fnsku = str(item.get("fnsku") or key or "").strip().upper()
+        title = by_fnsku.get(fnsku, "")
+        if not title:
+            hit = lookup_sku(meta, item.get("sku"))
+            if isinstance(hit, dict):
+                title = str(hit.get("title") or "").strip()
+        item["english_name"] = invoice_english_name(item.get("english_name"), title)
+        filled[key] = item
+    return filled
+
+
 def _pcs_from_sku(sku: str) -> Optional[int]:
     m = PCS_IN_SKU_RE.search(sku)
     if m:
@@ -368,11 +393,11 @@ def build_invoice_line_items(
         ai_keys = lookup_sku(customs_ai_keys, sku_str, set())
         master_hints = invoice_hints_from_master(master)
 
-        english = (
-            csv_row.get("title")
-            or master_hints.get("英文品名")
-            or customs.get("英文品名")
-            or ""
+        from fba_tool.invoice_rules import invoice_english_name
+
+        english = invoice_english_name(
+            master_hints.get("英文品名") or customs.get("英文品名"),
+            csv_row.get("title"),
         )
         chinese = master_hints.get("中文品名") or customs.get("中文品名") or ""
         material = master_hints.get("材料") or customs.get("材料") or ""
@@ -439,10 +464,10 @@ def build_invoice_line_items(
         sources: Dict[str, str] = {}
         field_layer: Dict[str, str] = {
             "english_name": (
-                "green"
-                if csv_row.get("title")
-                else "blue"
+                "blue"
                 if master_hints.get("英文品名")
+                else "green"
+                if english and csv_row.get("title")
                 else "yellow"
                 if english and "英文品名" in ai_keys
                 else "red"

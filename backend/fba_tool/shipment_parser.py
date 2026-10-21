@@ -110,6 +110,8 @@ class CsvShipment:
     box_items: pd.DataFrame = field(default_factory=pd.DataFrame)
     box_specs: pd.DataFrame = field(default_factory=pd.DataFrame)
     box_fba_ids: Dict[int, str] = field(default_factory=dict)
+    # 包装箱名称（如 P1 - B34）。不写入 box_fba_ids / FBA箱号。
+    box_names: Dict[int, str] = field(default_factory=dict)
     sku_fnsku: Dict[str, str] = field(default_factory=dict)
     # 仓库代码从哪来：货件名称 / 文件名 / CSV头部；空 = 没识别出（UNKN）。界面上可据此标“来自文件名”
     warehouse_source: str = ""
@@ -174,6 +176,7 @@ def parse_csv_shipment(
     box_items = _box_data_to_items_df(box_data, warehouse, sku_fnsku)
     box_specs = pd.DataFrame(_extract_box_specs(rows, warehouse, box_start, column_to_box))
     box_fba_ids = _extract_fba_box_ids(rows, box_start, column_to_box)
+    box_names = _extract_box_names(rows, column_to_box)
 
     if box_count <= 0 and box_data:
         box_count = max(box_data.keys())
@@ -189,6 +192,7 @@ def parse_csv_shipment(
         box_items=box_items,
         box_specs=box_specs,
         box_fba_ids=box_fba_ids,
+        box_names=box_names,
         sku_fnsku=sku_fnsku,
     )
 
@@ -294,11 +298,42 @@ def _norm_csv_cell(value: object) -> str:
     return str(value or "").replace("\xa0", " ").replace("\u3000", " ").strip()
 
 
+def _label_key(cell: object) -> str:
+    return _norm_csv_cell(cell).strip(":").strip("：").lower().replace(" ", "")
+
+
 def _is_box_id_label(cell: object) -> bool:
-    text = _norm_csv_cell(cell).strip(":").strip("：").lower().replace(" ", "")
+    """能用来给列编号的行：真箱号，或 STA 包装箱名称。"""
+    text = _label_key(cell)
     if text in {"箱号", "编号", "boxid", "箱子名称"}:
         return True
     return text.startswith("包装箱名称")
+
+
+def _is_fba_mark_label(cell: object) -> bool:
+    """箱号行。包装箱名称不是箱号，不能写进 FBA 箱号。"""
+    return _label_key(cell) in {"箱号", "编号", "boxid", "箱子名称"}
+
+
+def _is_packaging_name_label(cell: object) -> bool:
+    return _label_key(cell).startswith("包装箱名称")
+
+
+def _labeled_cells(rows: List[List[str]], column_to_box: Dict[int, int], predicate) -> Dict[int, str]:
+    """按列记下某一类标签行的原文。后面的同类行覆盖前面的，另一类标签不会进来。"""
+    found: Dict[int, str] = {}
+    sorted_cols = sorted(column_to_box)
+    for row in rows:
+        if not row or not sorted_cols or len(row) <= min(sorted_cols):
+            continue
+        if not predicate(_row_packaging_label(row)):
+            continue
+        for col_idx in sorted_cols:
+            cell = str(row[col_idx]).strip() if col_idx < len(row) else ""
+            if not cell or cell.lower() == "nan":
+                continue
+            found[col_idx] = cell
+    return found
 
 
 def _cell_box_no(cell: object) -> int:
@@ -414,21 +449,15 @@ def _extract_sku_fnsku_map(rows: List[List[str]], header_idx: int) -> Dict[str, 
 def _extract_fba_box_ids(
     rows: List[List[str]], box_start: int, column_to_box: Dict[int, int]
 ) -> Dict[int, str]:
-    sorted_cols = sorted(column_to_box.keys())
-    fba_ids: Dict[int, str] = {}
-    for row in rows:
-        if not row or not sorted_cols or len(row) <= min(sorted_cols):
-            continue
-        label = _row_packaging_label(row)
-        if not _is_box_id_label(label):
-            continue
-        for col_idx in sorted_cols:
-            if col_idx >= len(row):
-                continue
-            cell = str(row[col_idx]).strip()
-            if cell and _fba_suffix_to_box_no(cell) > 0:
-                fba_ids[column_to_box[col_idx]] = cell
-    return fba_ids
+    """箱号保持箱号行的原值。包装箱名称（P1 - B34）另存在 box_names。"""
+    del box_start
+    by_col = _labeled_cells(rows, column_to_box, _is_fba_mark_label)
+    return {column_to_box[col]: text for col, text in by_col.items() if col in column_to_box}
+
+
+def _extract_box_names(rows: List[List[str]], column_to_box: Dict[int, int]) -> Dict[int, str]:
+    by_col = _labeled_cells(rows, column_to_box, _is_packaging_name_label)
+    return {column_to_box[col]: text for col, text in by_col.items() if col in column_to_box}
 
 
 def _extract_box_specs(
@@ -440,7 +469,8 @@ def _extract_box_specs(
     weight_vals: Dict[int, float] = {}
     length_unit = width_unit = height_unit = "in"
     weight_unit = "lb"
-    fba_ids: Dict[int, str] = {}
+    fba_ids = _labeled_cells(rows, column_to_box, _is_fba_mark_label)
+    box_names = _labeled_cells(rows, column_to_box, _is_packaging_name_label)
 
     sorted_cols = sorted(column_to_box.keys())
 
@@ -462,21 +492,6 @@ def _extract_box_specs(
         elif "包装箱重量" in label or ("weight" in label_lower and "包装" in label_lower):
             weight_vals = _row_values_by_col(row, sorted_cols)
             weight_unit = detect_weight_unit(label)
-        elif _is_box_id_label(label):
-            from fba_tool.carton_math import is_fba_box_id
-
-            for col_idx in sorted_cols:
-                cell = str(row[col_idx]).strip() if col_idx < len(row) else ""
-                if not cell or cell.lower() == "nan":
-                    continue
-                existing = str(fba_ids.get(col_idx) or "").strip()
-                if (
-                    existing
-                    and is_fba_box_id(normalize_fba_box_id(existing))
-                    and not is_fba_box_id(normalize_fba_box_id(cell))
-                ):
-                    continue
-                fba_ids[col_idx] = cell
 
     records: List[Dict] = []
     for col_idx, true_box in column_to_box.items():
@@ -508,6 +523,7 @@ def _extract_box_specs(
             "箱号": true_box,
             **normalized,
             "FBA箱号": fba_ids.get(col_idx, ""),
+            "箱名": box_names.get(col_idx, ""),
             "declared_in": declared_in,
             "declared_lb": declared_lb,
         })

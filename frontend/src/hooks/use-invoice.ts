@@ -3,6 +3,7 @@ import { toast } from "sonner";
 
 import type { InvoiceSpreadsheetHandle } from "@/components/invoice-spreadsheet";
 import { useWorkflow } from "@/context/workflow-context";
+import { warehouseCandidatesFromError } from "@/lib/error-messages";
 import { formatApiError } from "@/lib/format-api-error";
 import { fileToBase64 } from "@/lib/box-editor";
 import { exportInvoice, fillInvoice } from "@/lib/api/workflow";
@@ -109,6 +110,8 @@ export function useInvoice() {
   const [exporting, setExporting] = useState(false);
   const [copying, setCopying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warehouseCandidates, setWarehouseCandidates] = useState<string[]>([]);
+  const [warehouseChoice, setWarehouseChoice] = useState("");
   const [fillFailed, setFillFailed] = useState(false);
   const [invoiceTemplateHash, setInvoiceTemplateHash] = useState<string | null>(null);
   const [revenueTon, setRevenueTon] = useState<number | null>(null);
@@ -429,6 +432,7 @@ export function useInvoice() {
         parsed_shipment: shipment.parsed_shipment,
         forwarder_id: selectedForwarderId,
         po_number: poNumber.trim(),
+        warehouse: warehouseChoice.trim() || undefined,
         workflow_json: buildWorkflowJson(),
         template_base64: invoiceTemplateBase64 ?? undefined,
       });
@@ -464,6 +468,7 @@ export function useInvoice() {
       selectedShipmentId,
       applyFilledResponse,
       setInvoiceSessionsByShipment,
+      warehouseChoice,
     ],
   );
 
@@ -481,9 +486,11 @@ export function useInvoice() {
     try {
       await fillOneShipment(selected);
       setFillFailed(false);
+      setWarehouseCandidates([]);
       clearStageStale("invoice");
     } catch (err) {
       setFillFailed(true);
+      setWarehouseCandidates(warehouseCandidatesFromError(err));
       setError(formatApiError(err));
     } finally {
       setFilling(false);
@@ -508,10 +515,12 @@ export function useInvoice() {
         ok += 1;
       }
       setFillFailed(false);
+      setWarehouseCandidates([]);
       clearStageStale("invoice");
       toast.success(`已自动填写 ${ok} 个校验通过货件`);
     } catch (err) {
       setFillFailed(true);
+      setWarehouseCandidates(warehouseCandidatesFromError(err));
       setError(formatApiError(err));
     } finally {
       setFilling(false);
@@ -696,6 +705,9 @@ export function useInvoice() {
     copying,
     error,
     setError,
+    warehouseCandidates,
+    warehouseChoice,
+    setWarehouseChoice,
     fillFailed,
     hasTemplate,
     canAutoFill,

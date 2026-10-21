@@ -64,6 +64,9 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
     copying,
     error,
     setError,
+    warehouseCandidates,
+    warehouseChoice,
+    setWarehouseChoice,
     fillFailed,
     hasTemplate,
     canAutoFill,
@@ -130,7 +133,24 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
       {error && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="whitespace-pre-wrap">{error}</AlertDescription>
+          {warehouseCandidates.length > 0 && (
+            <div className="mt-3 max-w-xs space-y-1">
+              <Label className="text-xs">选择仓库后再点自动填写</Label>
+              <Select value={warehouseChoice || undefined} onValueChange={setWarehouseChoice}>
+                <SelectTrigger className="h-9 bg-background" data-testid="warehouse-candidate-select">
+                  <SelectValue placeholder="请选择仓库" />
+                </SelectTrigger>
+                <SelectContent>
+                  {warehouseCandidates.map((code) => (
+                    <SelectItem key={code} value={code}>
+                      {code}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </Alert>
       )}
 

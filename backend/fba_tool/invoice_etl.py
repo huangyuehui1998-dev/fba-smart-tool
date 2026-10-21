@@ -186,11 +186,10 @@ def priority_fallback(
         height_step4 = _to_float(row.get("高(cm)"))
         weight_step4 = _to_float(row.get("实重(kg)"))
 
-        df.at[idx, "english_name"], _ = _pick_source(
-            "",
-            lookup_sku(sku_meta, sku, {}).get("title", ""),
-            row.get("master_english_name"),
-        )
+        from fba_tool.invoice_rules import invoice_english_name
+
+        title = lookup_sku(sku_meta, sku, {}).get("title", "")
+        df.at[idx, "english_name"] = invoice_english_name(row.get("master_english_name"), title)
         df.at[idx, "chinese_name"], _ = _pick_source("", "", row.get("master_chinese_name"))
         df.at[idx, "hs_code"], _ = _pick_source("", "", row.get("master_hs_code"))
         df.at[idx, "brand"], _ = _pick_source("", "", row.get("master_brand"))

@@ -345,6 +345,7 @@ export function fillInvoice(body: {
   template_base64?: string;
   forwarder_id?: string;
   po_number?: string;
+  warehouse?: string;
   workflow_json?: Record<string, unknown>;
   api_key?: string;
   model?: string;

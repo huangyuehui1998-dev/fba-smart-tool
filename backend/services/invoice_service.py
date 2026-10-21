@@ -163,13 +163,20 @@ def invoice_generate_payload(body: InvoiceGenerateRequest) -> Dict[str, Any]:
             use_workflow_fill=use_workflow,
             forwarder_id=body.forwarder_id,
             parsed_shipment=body.parsed_shipment,
+            warehouse=body.warehouse or "",
         )
     except InvoiceBlocked as exc:
         raise HTTPException(status_code=409, detail={"detail": str(exc), "blocking": exc.blocking}) from exc
     except WarehouseUndecided as exc:
+        message = str(exc)
         raise HTTPException(
             status_code=422,
-            detail={"detail": str(exc), "warehouse_candidates": exc.candidates},
+            detail={
+                "code": "warehouse_undecided",
+                "message": message,
+                "detail": message,
+                "warehouse_candidates": exc.candidates,
+            },
         ) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"发票生成失败：{exc}") from exc

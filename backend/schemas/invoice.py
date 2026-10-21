@@ -17,6 +17,7 @@ class InvoiceGenerateRequest(BaseModel):
     template_base64: Optional[str] = Field(None, description="发票模板 xlsx base64；不传则读货代或 templates/ 默认")
     forwarder_id: Optional[str] = Field(None, description="货代 ID；优先于 template_base64")
     po_number: Optional[str] = Field("", description="POAnumber，Step 4.5 手填")
+    warehouse: Optional[str] = Field("", description="同城多仓时界面选定的仓库代码")
     workflow_json: Optional[Dict[str, Any]] = Field(None, description="Step1–4 工作流上下文")
     api_key: Optional[str] = None
     model: Optional[str] = Field(None, description="DeepSeek 模型")

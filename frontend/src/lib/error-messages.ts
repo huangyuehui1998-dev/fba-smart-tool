@@ -43,6 +43,18 @@ export function errorCode(detail: unknown): string {
   return typeof code === "string" ? code : "";
 }
 
+export function warehouseCandidatesOf(detail: unknown): string[] {
+  if (!detail || typeof detail !== "object") return [];
+  const raw = (detail as { warehouse_candidates?: unknown }).warehouse_candidates;
+  if (!Array.isArray(raw)) return [];
+  return raw.map((item) => String(item || "").trim()).filter(Boolean);
+}
+
+export function warehouseCandidatesFromError(err: unknown): string[] {
+  if (!(err instanceof ApiError)) return [];
+  return warehouseCandidatesOf(err.detail);
+}
+
 export function explainApiError(err: unknown): ErrorCopy {
   if (isNetworkFetchError(err)) return NETWORK_COPY;
   const status = err instanceof ApiError ? err.status : 0;
@@ -50,6 +62,16 @@ export function explainApiError(err: unknown): ErrorCopy {
   const code = errorCode(detail);
   if (code && ERROR_MESSAGES[code]) return ERROR_MESSAGES[code];
   const raw = rawMessage(err);
+  const candidates = warehouseCandidatesOf(detail);
+  if (code === "warehouse_undecided" || candidates.length > 0) {
+    const listed = candidates.length ? candidates.join("、") : "";
+    const server = raw && !/unprocessable/i.test(raw) ? raw : "";
+    return {
+      what: "这个配送地址对应多个仓库，发票还不能确定派送仓",
+      why: server || (listed ? `同一个城市有多个仓库：${listed}` : "同一个城市有多个仓库代码。"),
+      action: listed ? `请选择仓库后再填写。候选：${listed}。` : "请选择仓库后再填写。",
+    };
+  }
   if (status >= 500 && (!raw || /internal server error/i.test(raw) || /^HTTP 5\d\d$/.test(raw))) {
     return SERVER_COPY;
   }

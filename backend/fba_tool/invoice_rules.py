@@ -183,6 +183,19 @@ def _invoice_unit(inv: Dict[str, Any], product: Dict[str, Any]) -> str:
     return str(product.get("declare_unit") or "").strip()
 
 
+def invoice_english_name(catalog_name: Any, fallback: Any = "") -> str:
+    """英文品名用产品库。产品库没有时才用领星/货件标题。"""
+    name = str(catalog_name or "").strip()
+    if name.lower() == "nan":
+        name = ""
+    if name:
+        return name
+    other = str(fallback or "").strip()
+    if other.lower() == "nan":
+        return ""
+    return other
+
+
 def invoice_fields(product: Dict[str, Any]) -> Dict[str, Any]:
     """产品库 → 发票字段。发票专用字段放在 extra_data.invoice（单位、每套个数、采购价、英文材质/用途、目的港 HS）。"""
     p = dict(product or {})
@@ -203,7 +216,7 @@ def invoice_fields(product: Dict[str, Any]) -> Dict[str, Any]:
         "sku": p.get("sku") or "",
         "fnsku": str(p.get("fnsku") or "").upper(),
         "asin": p.get("asin") or "",
-        "english_name": p.get("english_name") or "",
+        "english_name": invoice_english_name(p.get("english_name")),
         "chinese_name": p.get("chinese_name") or "",
         "brand": p.get("brand") or "",
         "model": p.get("model_name") or inv.get("model") or "无",

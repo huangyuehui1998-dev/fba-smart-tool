@@ -236,13 +236,11 @@ def build_invoice_line_items_workflow(
 
         box_range_val, box_range_src = _pick_source(step12_box_range, step4_box_range, "")
 
-        english_step4 = csv_row.get("title", "")
-        english_val, english_src = _pick_source(
-            "",
-            english_step4,
-            "",
-            _master_text(master, "english_name"),
-        )
+        from fba_tool.invoice_rules import invoice_english_name
+
+        catalog_english = _master_text(master, "english_name")
+        english_val = invoice_english_name(catalog_english, csv_row.get("title", ""))
+        english_src = "blue" if catalog_english else ("green" if english_val else "red")
 
         chinese_val, chinese_src = _pick_source(
             "",

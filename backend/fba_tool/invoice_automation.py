@@ -574,12 +574,13 @@ def build_invoice_draft(
     use_workflow_fill: bool = False,
     forwarder_id: str | None = None,
     parsed_shipment: dict | None = None,
+    warehouse: str = "",
 ) -> Tuple[InvoiceDraft, DeepseekUsageAccumulator | None]:
     usage_acc = DeepseekUsageAccumulator() if api_key else None
     if forwarder_id:
         from fba_tool.invoice_step45 import try_adapter_draft
 
-        adapted = try_adapter_draft(forwarder_id, csv_bytes, template_bytes, parsed_shipment)
+        adapted = try_adapter_draft(forwarder_id, csv_bytes, template_bytes, parsed_shipment, warehouse=warehouse)
         if adapted is not None:
             return adapted, usage_acc
     cfg = load_invoice_config()

@@ -39,6 +39,7 @@ def _seed(
     material: str = "塑料",
     purpose: str = "户外",
     declared_value: float | None = None,
+    english_name: str = "Fishing rod",
 ):
     from fba_tool.master_db import _connect, init_master_db, upsert_product
     from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
@@ -61,7 +62,7 @@ def _seed(
             "sku": sku,
             "fnsku": fnsku,
             "asin": asin,
-            "english_name": "Fishing rod",
+            "english_name": english_name,
             "chinese_name": "鱼竿",
             "brand": "Acme",
             "material": material,
@@ -563,6 +564,151 @@ def _body_mn(ws) -> list[str]:
         for merged in ws.merged_cells.ranges
         if merged.min_col == 13 and merged.max_col == 14 and merged.min_row >= 25
     )
+
+
+def _english_name_csv(title: str) -> bytes:
+    return "\n".join([
+        '"货件编号","FBAENNAME"',
+        '"货件名称","PLAIN"',
+        '"配送地址","STEP45VILLE, ZZ"',
+        '"箱子数量","1"',
+        "",
+        '"单件商品（1 箱）"',
+        '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量"',
+        f'"B5-EN","{title}","B0B5ENNAME","X00TESTEN1","新品","无","4","4"',
+        "",
+        '"","","","","","","箱号","FBAENNAMEU000001"',
+        '"","","","","","","包装箱重量（磅）：","10"',
+        '"","","","","","","包装箱长度（英寸）：","10"',
+        '"","","","","","","包装箱宽度（英寸）：","10"',
+        '"","","","","","","包装箱高度（英寸）：","10"',
+    ]).encode("utf-8")
+
+
+def test_qiluo_and_send_english_name_prefer_catalog():
+    """qiluo 与 SEND 都用产品库英文名。库里没有时才用货件标题，并且不写回产品库。"""
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import delete_product_by_sku, get_product_by_sku, upsert_product
+    from main import app
+
+    sku = "B5-EN"
+    title = "Lingxing Listing Title"
+    catalog = "Catalog Rod"
+    delete_product_by_sku(sku)
+    _seed(sku, "X00TESTEN1", "B0B5ENNAME", "型号乙", english_name=catalog)
+    raw = _english_name_csv(title)
+    client = TestClient(app)
+
+    def qiluo_english() -> str:
+        generated = client.post(
+            "/api/invoice/generate",
+            json={
+                "shipment_id": "FBAENNAME",
+                "forwarder_id": "qiluo",
+                "csv_base64": base64.b64encode(raw).decode(),
+            },
+        )
+        assert generated.status_code == 200, generated.text[:400]
+        cells = generated.json()["cells"]
+        named = [item.get("value") for item in cells if item.get("field_key") == "english_name"]
+        assert named, cells
+        return str(named[0])
+
+    def send_english() -> str:
+        exported = client.post(
+            "/api/invoice-export/export",
+            data={"forwarder_id": "send"},
+            files={"csv_file": ("en.csv", raw, "text/csv")},
+        )
+        assert exported.status_code == 200, exported.text[:400]
+        book = _book(exported.content)
+        try:
+            sheet = next(ws for ws in book.worksheets if "Invoice" in ws.title)
+            return str(sheet["G15"].value)
+        finally:
+            book.close()
+
+    try:
+        assert qiluo_english() == catalog
+        assert send_english() == catalog
+        stored = get_product_by_sku(sku) or {}
+        assert stored.get("english_name") == catalog
+
+        upsert_product({"sku": sku, "english_name": ""}, overwrite=True)
+        assert not str((get_product_by_sku(sku) or {}).get("english_name") or "").strip()
+        assert qiluo_english() == title
+        assert send_english() == title
+        assert not str((get_product_by_sku(sku) or {}).get("english_name") or "").strip()
+    finally:
+        delete_product_by_sku(sku)
+
+
+def _insert_warehouse(code: str):
+    from fba_tool.master_db import _connect
+
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        conn.execute("DELETE FROM fba_warehouse WHERE code = ?", (code,))
+        conn.execute(
+            """
+            INSERT INTO fba_warehouse
+                (code, name, company, address1, city, state, zip, country, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (code, code, "Amazon", "1 Test Road", "STEP45VILLE", "ZZ", "00000", "US", now),
+        )
+        conn.commit()
+
+
+def test_generate_multi_warehouse_422_names_candidates_in_chinese():
+    """同城多仓时生成接口返回可选仓库，文案是中文，指定仓库后不再 422。"""
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import _connect, delete_product_by_sku
+    from main import app
+
+    sku = "B4-WH"
+    _seed(sku, "X00TESTB4W", "B0B4WH0001", "型号乙")
+    _insert_warehouse("TST2")
+    raw = _csv("FBAB4WH", sku, "X00TESTB4W", "B0B4WH0001").decode("utf-8").replace(
+        '"货件名称","B13-DESENS"',
+        '"货件名称","PLAIN"',
+    ).encode("utf-8")
+    client = TestClient(app)
+    try:
+        generated = client.post(
+            "/api/invoice/generate",
+            json={
+                "shipment_id": "FBAB4WH",
+                "forwarder_id": "jiufang",
+                "csv_base64": base64.b64encode(raw).decode(),
+            },
+        )
+        assert generated.status_code == 422, generated.text[:500]
+        assert "Unprocessable" not in generated.text
+        detail = generated.json()["detail"]
+        assert detail["code"] == "warehouse_undecided"
+        assert "选择仓库" in detail["message"]
+        assert "TST1" in detail["warehouse_candidates"]
+        assert "TST2" in detail["warehouse_candidates"]
+
+        chosen = client.post(
+            "/api/invoice/generate",
+            json={
+                "shipment_id": "FBAB4WH",
+                "forwarder_id": "jiufang",
+                "warehouse": "TST2",
+                "csv_base64": base64.b64encode(raw).decode(),
+            },
+        )
+        assert chosen.status_code != 422, chosen.text[:500]
+        assert chosen.status_code == 200, chosen.text[:500]
+    finally:
+        delete_product_by_sku(sku)
+        with _connect() as conn:
+            conn.execute("DELETE FROM fba_warehouse WHERE code = ?", ("TST2",))
+            conn.commit()
 
 
 def test_jiufang_total_merge_follows_the_total_row(monkeypatch):

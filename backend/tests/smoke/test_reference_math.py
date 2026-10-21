@@ -196,7 +196,9 @@ def test_packaging_name_does_not_zero_box_total(monkeypatch, tmp_path):
 
     ship = parse_csv_shipment(csv_path.read_bytes(), file_name=csv_path.name)
     assert list(ship.box_specs["FBA箱号"]) == ["FBATEST01U000001"]
+    assert list(ship.box_specs["箱名"]) == ["P1 - B1"]
     assert ship.box_fba_ids[1] == "FBATEST01U000001"
+    assert ship.box_names[1] == "P1 - B1"
     spec = ship.box_specs.iloc[0]
     assert snapshot_box_id(spec, ship.box_fba_ids) == "FBATEST01U000001"
     # 规格列若仍被包装箱名称盖住，选择函数也要回退到真箱唛。
@@ -214,6 +216,63 @@ def test_packaging_name_does_not_zero_box_total(monkeypatch, tmp_path):
     assert product["rows"] == 1
     assert product["box_total"] == summary["box_total"]
     assert product["box_total"] != Decimal("0.00")
+
+
+def _sta_named_box_csv(name_before_id: bool) -> bytes:
+    """箱 34：真箱唛和 STA 箱名各一行。两种先后都要保住箱唛。"""
+    mark = '"","","","","","","箱号","FBATEST34U000034"'
+    name = '"","","","","","","包装箱名称","P1 - B34"'
+    labels = [name, mark] if name_before_id else [mark, name]
+    return "\n".join([
+        '"货件编号","FBATEST34"',
+        '"货件名称","S34"',
+        '"配送地址","STEP45VILLE, ZZ"',
+        '"箱子数量","34"',
+        "",
+        '"单件商品（1 箱）"',
+        '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量"',
+        '"S34-SKU","rod","B0S34TEST1","X00TESTS34","新品","无","1","1"',
+        "",
+        *labels,
+        '"","","","","","","包装箱重量（kg）：","10"',
+        '"","","","","","","包装箱长度（cm）：","10"',
+        '"","","","","","","包装箱宽度（cm）：","10"',
+        '"","","","","","","包装箱高度（cm）：","10"',
+    ]).encode("utf-8")
+
+
+@pytest.mark.parametrize("name_before_id", [False, True])
+def test_sta_box_name_stays_off_the_fba_box_id(name_before_id):
+    """包装箱名称不能写进 FBA 箱号。箱规对账、箱贴、快照都按原箱唛匹配。"""
+    from fba_tool.box_label_mapping import collect_amazon_boxes
+    from fba_tool.shipment_cross_check import _declared_specs_by_box
+    from fba_tool.shipment_parser import PdfShipment, parse_csv_shipment, snapshot_box_id
+    from fba_tool.shipment_serialize import csv_shipment_from_dict, csv_shipment_to_dict
+    from fba_tool.shipment_validator import ShipmentPair
+
+    mark, name = "FBATEST34U000034", "P1 - B34"
+    ship = parse_csv_shipment(_sta_named_box_csv(name_before_id), file_name="box34.csv")
+    assert ship.column_to_box
+    assert 34 in ship.column_to_box.values()
+    assert list(ship.box_specs["FBA箱号"]) == [mark]
+    assert list(ship.box_specs["箱名"]) == [name]
+    assert ship.box_fba_ids == {34: mark}
+    assert ship.box_names == {34: name}
+    assert name not in ship.box_fba_ids.values()
+    spec = ship.box_specs.iloc[0]
+    assert snapshot_box_id(spec, ship.box_fba_ids) == mark
+
+    pair = ShipmentPair(ship.shipment_id, ship.warehouse_code, ship, PdfShipment(ship.shipment_id, 0))
+    declared = _declared_specs_by_box([pair])
+    assert declared[(ship.shipment_id, 34)]["fba_box_id"] == mark
+    boxes = collect_amazon_boxes([pair])
+    assert [(box.amazon_box_no, box.fba_box_id) for box in boxes] == [(34, mark)]
+
+    restored = csv_shipment_from_dict(csv_shipment_to_dict(ship))
+    assert restored is not None
+    assert restored.box_fba_ids[34] == mark
+    assert restored.box_names[34] == name
+    assert snapshot_box_id(restored.box_specs.iloc[0], restored.box_fba_ids) == mark
 
 
 def test_entry_sheet_sku_cl2_is_not_a_net_source(tmp_path):
