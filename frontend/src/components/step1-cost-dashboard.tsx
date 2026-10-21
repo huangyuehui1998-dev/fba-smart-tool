@@ -169,6 +169,11 @@ export function Step1CostDashboard({
               {placement.fee_disclaimer || "估算区间，以 STA 报价为准（费率来源：第三方转录）"}
             </p>
           )}
+          {(placement?.pending_notes?.length ?? 0) > 0 && (
+            <p className="text-[11px] text-amber-800" data-testid="placement-pending-notes">
+              待核实：{placement?.pending_notes?.join("；")}
+            </p>
+          )}
 
           {placement && placement.total_units > 0 && (
             <p className="text-[11px] text-muted-foreground">

@@ -32,7 +32,7 @@ def test_small_oversize_has_split_option():
 def test_weight_only_fallback_large_standard():
     unit = compute_unit_placement_fees(0, 0, 0, 2.0)
     assert unit["size_class"] == "large_standard"
-    assert unit["billing_lb"] == round(kg_to_lb(2.0), 3)
+    assert unit["billing_lb"] == _engine.kg_to_lb_2dp(2.0)
     assert unit["volume_weight_applied"] is False
 
 

@@ -47,12 +47,15 @@ def test_gross_weight_blocks_standard_box():
 
 
 def test_single_oversize_exempt_from_gross_block():
-    # 单件超大箱：1 件，外箱 70cm 边，毛重可超 50lbs
+    # 单件 Small Bulky，箱子在 36×25×25 in 内，25kg 落在 50–65 lb，不阻断。
     gross = 25.0
     df = pd.DataFrame(
         [
             {
                 **_sku_row("OS-1", 1, 1, 70, 50, 40, 20.0, 0.5),
+                "单品长(cm)": 80.0,
+                "单品宽(cm)": 40.0,
+                "单品高(cm)": 25.0,
                 "单箱毛重(kg)": gross,
             }
         ]

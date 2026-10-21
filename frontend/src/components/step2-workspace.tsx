@@ -34,6 +34,13 @@ function SourceTag({ source }: { source?: string }) {
   if (source === "amazon") {
     return <Badge className="bg-red-600 text-white hover:bg-red-600">亚马逊</Badge>;
   }
+  if (source === "pending") {
+    return (
+      <Badge variant="outline" className="border-amber-400 text-amber-800">
+        待核实
+      </Badge>
+    );
+  }
   if (source === "internal") {
     return <Badge variant="secondary">内部</Badge>;
   }
@@ -114,6 +121,11 @@ export function Step2Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
       {fbaCompliance &&
         (sideWarningCount > 0 ||
           fbaCompliance.gross_violation_count > 0 ||
+          (fbaCompliance.side_violation_count ?? 0) > 0 ||
+          (fbaCompliance.box_weight_warnings?.length ?? 0) > 0 ||
+          (fbaCompliance.lift_notices?.length ?? 0) > 0 ||
+          (fbaCompliance.box_fit_warnings?.length ?? 0) > 0 ||
+          (fbaCompliance.pending_notes?.length ?? 0) > 0 ||
           fbaCompliance.box_count_warning ||
           (fbaCompliance.policy_findings?.length ?? 0) > 0) && (
         <div className="space-y-2">
@@ -155,7 +167,8 @@ export function Step2Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
                   ))}
                 </ul>
                 <p className="mt-2 text-[11px] text-amber-800/90">
-                  单边不得超过 {fbaCompliance.limits.max_side_cm} cm ({fbaCompliance.limits.max_side_in} in)
+                  多件箱最长边 {fbaCompliance.limits.max_longest_in ?? 36} in，另两边{" "}
+                  {fbaCompliance.limits.max_other_side_in ?? fbaCompliance.limits.max_side_in} in
                 </p>
               </AlertDescription>
             </Alert>
@@ -174,9 +187,81 @@ export function Step2Workspace({ onPrev, onNext }: { onPrev?: () => void; onNext
                   ))}
                 </ul>
                 <p className="mt-2 text-[11px] opacity-90">
-                  标准件单箱毛重上限 {fbaCompliance.limits.max_standard_gross_kg} kg (
-                  {fbaCompliance.limits.max_standard_gross_lb} lbs)。仅「单箱 1 件超大件」可豁免。
+                  多件箱超过 50 lb（{fbaCompliance.limits.max_standard_gross_kg} kg）阻断。单件超大箱在
+                  36×25×25 in 内可到 65 lb，并贴 Team Lift。
                 </p>
+              </AlertDescription>
+            </Alert>
+          )}
+          {(fbaCompliance.side_violation_count ?? 0) > 0 && (
+            <Alert variant="destructive">
+              <AlertTriangle className="h-4 w-4" />
+              <AlertTitle className="text-sm">箱子尺寸超过 36×25×25 in</AlertTitle>
+              <AlertDescription className="mt-1 text-xs">
+                <ul className="space-y-1">
+                  {fbaCompliance.box_side_violations?.map((v) => (
+                    <li key={v.box_no} className="flex items-start gap-2">
+                      <SourceTag source={v.source} />
+                      <span>{v.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          )}
+          {(fbaCompliance.box_weight_warnings?.length ?? 0) > 0 && (
+            <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+              <AlertTriangle className="h-4 w-4 !text-amber-600" />
+              <AlertTitle className="text-sm">内部余量，非亚马逊规定</AlertTitle>
+              <AlertDescription className="mt-1 text-xs">
+                <ul className="space-y-1">
+                  {fbaCompliance.box_weight_warnings?.map((w) => (
+                    <li key={w.box_no}>{w.message}</li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          )}
+          {(fbaCompliance.lift_notices?.length ?? 0) > 0 && (
+            <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+              <AlertTriangle className="h-4 w-4 !text-amber-600" />
+              <AlertTitle className="text-sm">Team Lift / Mechanical Lift</AlertTitle>
+              <AlertDescription className="mt-1 text-xs">
+                <ul className="space-y-1">
+                  {fbaCompliance.lift_notices?.map((n) => (
+                    <li key={`${n.box_no}-${n.label}`} className="flex items-start gap-2">
+                      <SourceTag source={n.source} />
+                      <span>{n.message}</span>
+                    </li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          )}
+          {(fbaCompliance.box_fit_warnings?.length ?? 0) > 0 && (
+            <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+              <AlertTitle className="text-sm">箱子明显长于商品</AlertTitle>
+              <AlertDescription className="mt-1 text-xs">
+                <ul className="space-y-1">
+                  {fbaCompliance.box_fit_warnings?.map((w) => (
+                    <li key={w.box_no}>{w.message}</li>
+                  ))}
+                </ul>
+              </AlertDescription>
+            </Alert>
+          )}
+          {(fbaCompliance.pending_notes?.length ?? 0) > 0 && (
+            <Alert className="border-amber-300 bg-amber-50 text-amber-950">
+              <AlertTitle className="flex items-center gap-2 text-sm">
+                <SourceTag source="pending" />
+                待核实
+              </AlertTitle>
+              <AlertDescription className="mt-1 text-xs">
+                <ul className="list-inside list-disc space-y-0.5">
+                  {fbaCompliance.pending_notes?.map((note) => (
+                    <li key={note}>{note}</li>
+                  ))}
+                </ul>
               </AlertDescription>
             </Alert>
           )}

@@ -36,7 +36,23 @@ export type FbaBoxGrossViolation = {
   limit_kg: number;
   limit_lb: number;
   exempt_oversize_single: boolean;
-  source?: "amazon" | "internal" | string;
+  source?: "amazon" | "internal" | "pending" | string;
+  message: string;
+};
+
+export type FbaBoxSideViolation = {
+  box_no: number;
+  max_side_cm?: number | null;
+  source?: string;
+  message: string;
+};
+
+export type FbaNotice = {
+  box_no: number;
+  gross_kg?: number;
+  label?: string;
+  source?: string;
+  level?: string;
   message: string;
 };
 
@@ -63,15 +79,23 @@ export type FbaCompliance = {
     max_standard_gross_lb: number;
     max_side_cm: number;
     max_side_in: number;
+    max_longest_in?: number;
+    max_other_side_in?: number;
     max_boxes_per_shipment: number;
     fee_disclaimer?: string;
   };
   carton_side_warnings: FbaCartonSideWarning[];
   box_gross_violations: FbaBoxGrossViolation[];
+  box_side_violations?: FbaBoxSideViolation[];
+  box_weight_warnings?: FbaNotice[];
+  box_fit_warnings?: FbaNotice[];
+  lift_notices?: FbaNotice[];
+  pending_notes?: string[];
   box_count_warning: FbaBoxCountWarning | null;
   policy_findings?: PolicyFinding[];
   summary_lines: string[];
   side_warning_count: number;
+  side_violation_count?: number;
   gross_violation_count: number;
 };
 

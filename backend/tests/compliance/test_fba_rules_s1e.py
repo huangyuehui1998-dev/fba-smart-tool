@@ -50,18 +50,30 @@ def _run(skus, boxes, gross):
 
 
 def test_single_item_oversize_carton_23kg_team_lift():
-    sku = SkuRow("OS", 1, 1, 70, 40, 30, 22.5, 0.5)
+    sku = SkuRow(
+        "OS",
+        1,
+        1,
+        70,
+        40,
+        30,
+        22.5,
+        0.5,
+        unit_length_cm=76.2,
+        unit_width_cm=50.8,
+        unit_height_cm=25.4,
+    )
     comp = _run([sku], [(1, "OS", 1)], {1: 23.0})
     assert comp["blocked"] is False
     assert comp["lift_notices"][0]["label"] == "Team Lift"
 
 
-def test_single_item_standard_size_23kg_counts_as_oversize():
-    """v8：箱内只有 1 件且箱重 > 22.68kg，直接算大件，不阻断，提示 Team Lift。"""
+def test_single_item_without_unit_dims_23kg_blocks():
+    """缺单品尺寸时不算单件超大，23kg 按多件箱在 50 lb 阻断。"""
     sku = SkuRow("STD", 1, 1, 40, 30, 20, 22.5, 0.5)
     comp = _run([sku], [(1, "STD", 1)], {1: 23.0})
-    assert comp["blocked"] is False
-    assert comp["lift_notices"][0]["label"] == "Team Lift"
+    assert comp["blocked"] is True
+    assert comp["lift_notices"] == []
 
 
 def test_single_item_mechanical_lift():

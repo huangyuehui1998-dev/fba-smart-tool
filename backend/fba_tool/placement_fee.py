@@ -2,13 +2,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
 
 from fba_tool.master_data_apply import build_placement_unit_rows
-from fba_tool.units import CM_TO_INCH, KG_TO_LB
+from fba_tool.units import CM_PER_IN, KG_TO_LB, LB_IN_KG
 
 # S1e：判定用精确系数（1 in = 2.54 cm，1 lb = 0.45359237 kg）
-CM_TO_IN = CM_TO_INCH
+# 139 只用于配置费选档。尺寸段帮助页里的除数未核实，不拿来做箱规阻断。
+CM_TO_IN = float(Decimal(1) / CM_PER_IN)
 DIM_WEIGHT_DIVISOR = 139.0
 
 FeeRange = Tuple[float, float]
@@ -38,10 +40,10 @@ LARGE_STANDARD_TIERS = _RATE_TABLES["large_standard"]
 SMALL_OVERSIZE_TIERS = _RATE_TABLES["small_oversize"]
 
 SIZE_CLASS_LABELS: Dict[str, str] = {
-    "small_standard": "小号标准",
-    "large_standard": "大号标准",
-    "small_oversize": "小号大件",
-    "large_oversize": "大号大件",
+    "small_standard": "Small standard",
+    "large_standard": "Large standard",
+    "small_oversize": "Small Bulky",
+    "large_oversize": "Large Bulky",
     "extra_large": "Extra-large",
 }
 
@@ -94,8 +96,14 @@ class PlacementFeeEngine:
         return float(weight_kg) * KG_TO_LB
 
     @staticmethod
+    def kg_to_lb_2dp(weight_kg: float) -> float:
+        """计费重量按磅保留 2 位，和 50.00 lb 边界同一套四舍五入。"""
+        pounds = Decimal(str(weight_kg)) / LB_IN_KG
+        return float(pounds.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+    @staticmethod
     def cm_to_in(value_cm: float) -> float:
-        return float(value_cm) * CM_TO_IN
+        return float(Decimal(str(value_cm)) / CM_PER_IN)
 
     @staticmethod
     def sorted_dims_in(l_cm: float, w_cm: float, h_cm: float) -> Tuple[float, float, float]:
@@ -109,7 +117,16 @@ class PlacementFeeEngine:
     def dimensional_weight_lb(longest_in: float, median_in: float, shortest_in: float) -> float:
         if longest_in <= 0 or median_in <= 0 or shortest_in <= 0:
             return 0.0
-        return (longest_in * median_in * shortest_in) / DIM_WEIGHT_DIVISOR
+        dim = (Decimal(str(longest_in)) * Decimal(str(median_in)) * Decimal(str(shortest_in))) / Decimal(str(DIM_WEIGHT_DIVISOR))
+        return float(dim.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+    def _weight_basis(self, size_class: Optional[str]) -> str:
+        if not size_class:
+            return "unit"
+        from fba_tool.policy import load_policy
+
+        basis = (load_policy().get("placement_fees") or {}).get("weight_basis") or {}
+        return str(basis.get(size_class) or "unit")
 
     def resolve_chargeable_weight(
         self,
@@ -119,7 +136,7 @@ class PlacementFeeEngine:
         h_cm: float,
         size_class: Optional[str],
     ) -> ChargeableWeight:
-        actual_lb = self.kg_to_lb(weight_kg)
+        actual_lb = self.kg_to_lb_2dp(weight_kg)
         has_dims = l_cm > 0 and w_cm > 0 and h_cm > 0
 
         if not has_dims:
@@ -132,11 +149,7 @@ class PlacementFeeEngine:
 
         longest, median, shortest = self.sorted_dims_in(l_cm, w_cm, h_cm)
         dim_lb = self.dimensional_weight_lb(longest, median, shortest)
-
-        if size_class == "small_standard":
-            billing_lb = actual_lb
-            volume_applied = False
-        elif size_class in {"large_standard", "small_oversize", "large_oversize"}:
+        if self._weight_basis(size_class) == "max_dim_unit":
             billing_lb = max(actual_lb, dim_lb)
             volume_applied = dim_lb > actual_lb
         else:
@@ -145,7 +158,7 @@ class PlacementFeeEngine:
 
         return ChargeableWeight(
             actual_lb=actual_lb,
-            dimensional_lb=round(dim_lb, 3) if has_dims else None,
+            dimensional_lb=dim_lb,
             billing_lb=billing_lb,
             volume_weight_applied=volume_applied,
         )
@@ -160,7 +173,7 @@ class PlacementFeeEngine:
         if l_cm <= 0 or w_cm <= 0 or h_cm <= 0:
             # 缺尺寸：按实重给出粗估分段（仅用于费用参考），compute_unit 会标注 low_confidence，
             # 提示运营补全外箱尺寸后才能得到精确费用。
-            actual_lb = self.kg_to_lb(weight_kg)
+            actual_lb = self.kg_to_lb_2dp(weight_kg)
             if actual_lb <= 0:
                 return None
             if actual_lb <= 1.0:
@@ -175,7 +188,7 @@ class PlacementFeeEngine:
 
         limits = size_limits()
         longest, median, shortest = self.sorted_dims_in(l_cm, w_cm, h_cm)
-        actual_lb = self.kg_to_lb(weight_kg)
+        actual_lb = self.kg_to_lb_2dp(weight_kg)
         dim_lb = self.dimensional_weight_lb(longest, median, shortest)
 
         small = limits["small_standard"]
@@ -392,10 +405,11 @@ class PlacementFeeEngine:
                 else "当前货件无可用大件 SKU，无法使用 2-3 仓拆分"
             )
 
-        from fba_tool.policy import fee_disclaimer
+        from fba_tool.policy import fee_disclaimer, pending_notes
 
         return {
             "total_units": total_units,
+            "pending_notes": pending_notes(),
             "eligible_units": eligible_units,
             "oversize_units": oversize_units,
             "ineligible_units": ineligible_units,

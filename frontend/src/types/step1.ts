@@ -118,6 +118,7 @@ export type PlacementSummary = {
   oversize_units: number;
   ineligible_units: number;
   fee_disclaimer?: string;
+  pending_notes?: string[];
   line_items: PlacementLineItem[];
   one_location: PlacementFeeRange & { enabled: boolean };
   split_2_3: PlacementOptionSummary;

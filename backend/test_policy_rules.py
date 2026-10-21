@@ -54,9 +54,6 @@ def test_dimension_boundaries():
     assert _eval_box(90, 60, 60, 10)["blocked"] is False
     assert _eval_box(92, 60, 60, 10)["blocked"] is True
     assert _eval_box(64, 64, 40, 10)["blocked"] is True
-    awd = _eval_box(70, 60, 60, 10, destination="AWD")
-    assert awd["blocked"] is True
-    assert awd["box_side_violations"][0]["source"] == "amazon"
 
 
 def test_weight_and_jewelry_boundaries():
@@ -147,8 +144,11 @@ def test_policy_metadata():
         item = rule(key)
         assert item["effective_date"] is None
         assert item["verified_at"] == "2026-10-20"
-    assert rule("fba_multi_longest_in")["source_type"] == "amazon_forum"
-    assert rule("awd_box_side_in")["source_type"] == "amazon_forum"
+    assert rule("fba_multi_longest_in")["source_type"] == "amazon_official"
+    assert "200141510" in rule("fba_multi_longest_in")["source_url"]
+    awd = rule("awd_box_side_in")
+    assert awd["source_type"] == "pending_verification"
+    assert "待核实" in awd["note"]
     assert map_category_name("珠宝") == "jewelry"
     assert map_category_name("Watch") == "watch"
     assert map_category_name("宠物垫") is None

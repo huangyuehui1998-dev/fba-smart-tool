@@ -45,10 +45,35 @@ def pounds_to_kg(pounds: Any) -> Decimal:
 
 
 def result_source(source_type: Optional[str]) -> str:
-    """合规结果标签：官方或亚马逊论坛算亚马逊，其余算内部。"""
-    if source_type in ("official", "amazon_forum"):
+    """合规结果标签：官方或亚马逊论坛算亚马逊，未核实的出处单独标出。"""
+    if source_type in ("official", "amazon_official", "amazon_official_derived", "amazon_forum"):
         return "amazon"
+    if source_type == "pending_verification":
+        return "pending"
     return "internal"
+
+
+def pending_notes() -> List[str]:
+    """未核实规则的界面文案。每条都带“待核实”，不作为阻断依据。"""
+    policy = load_policy()
+    notes: List[str] = []
+    for entry in policy.get("rules", {}).values():
+        if not isinstance(entry, dict) or entry.get("source_type") != "pending_verification":
+            continue
+        text = str(entry.get("note") or "").strip()
+        if text and "待核实" not in text:
+            text = f"{text} 待核实"
+        if text:
+            notes.append(text)
+    for entry in policy.get("unverified", {}).values():
+        if not isinstance(entry, dict):
+            continue
+        text = str(entry.get("note") or "").strip()
+        if text and "待核实" not in text:
+            text = f"{text} 待核实"
+        if text:
+            notes.append(text)
+    return notes
 
 
 def longest_limit_cm() -> Decimal:
@@ -69,6 +94,14 @@ def gross_block_kg() -> Decimal:
 
 def gross_warn_kg() -> Decimal:
     return _dec(rule_value("multi_box_weight_warn_kg"))
+
+
+def single_oversize_max_kg() -> Decimal:
+    return pounds_to_kg(rule_value("single_oversize_max_lb")).quantize(Decimal("0.01"))
+
+
+def mech_lift_kg() -> Decimal:
+    return pounds_to_kg(rule_value("mech_lift_lb")).quantize(Decimal("0.01"))
 
 
 def jewelry_block_kg() -> Decimal:
