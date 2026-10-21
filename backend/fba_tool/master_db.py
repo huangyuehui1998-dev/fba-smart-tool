@@ -243,6 +243,11 @@ def _migrate_schema(conn: sqlite3.Connection) -> None:
 
 
 def init_master_db() -> None:
+    from fba_tool.db_migrations import MigrationFailed, is_readonly, run_migrations
+
+    path = master_db_path()
+    if path.is_file() and is_readonly(path):
+        return
     with _connect() as conn:
         conn.execute(
             """
@@ -281,6 +286,14 @@ def init_master_db() -> None:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_product_master_fnsku ON product_master(fnsku)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_product_master_sid ON product_master(sid)")
         conn.commit()
+        # WAL 下改动只进 -wal，主文件字节不变。折进主文件后，复制品被 init 改写才能从大小/哈希上看出来。
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    try:
+        with _connect() as conn:
+            run_migrations(conn, str(path))
+            conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+    except MigrationFailed:
+        return
 
 
 def _ensure_lingxing_tables(conn: sqlite3.Connection) -> None:
@@ -595,6 +608,36 @@ def patch_product_field(sku: str, field: str, value: Any) -> Dict[str, Any]:
             or field_key in ("listing_price", "carton_gross_weight")) and str(value if value is not None else "").strip() != "":
         if _opt_float(value) is None:
             raise ValueError(f"{field_key} 必须是数字，收到「{value}」，未保存")
+    invoice_extra = {
+        "invoice_unit": "unit",
+        "pcs_per_set": "pcs_per_set",
+        "purchase_price": "purchase_price",
+        "material_en": "material_en",
+        "purpose_en": "purpose_en",
+        "dest_hs_code": "dest_hs_code",
+        "fob_unit_value": "fob_unit_value",
+    }
+    if field_key in invoice_extra:
+        existing = get_product_by_sku(key) or {"sku": key}
+        extra = _json_dict(existing.get("extra_data"))
+        inv = dict(extra.get("invoice") or {})
+        stored = invoice_extra[field_key]
+        if field_key in ("pcs_per_set", "purchase_price", "fob_unit_value"):
+            inv[stored] = _opt_float(value)
+        else:
+            inv[stored] = _opt_str(value)
+        if field_key == "purchase_price" and inv.get(stored) not in (None, ""):
+            inv["purchase_price_currency"] = "CNY"
+        if field_key == "fob_unit_value" and inv.get(stored) not in (None, ""):
+            inv.setdefault("fob_currency", "USD")
+        extra["invoice"] = inv
+        existing["extra_data"] = json.dumps(extra, ensure_ascii=False)
+        existing["sku"] = key
+        upsert_product(existing)
+        rec = get_product_by_sku(key)
+        if not rec:
+            raise ValueError(f"更新失败：{key}")
+        return rec
     if field_key in OWN_FIELDS:
         set_product_fields(key, {field_key: value}, SOURCE_MANUAL)
         rec = get_product_by_sku(key)
@@ -831,6 +874,14 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         "category": _col_str(row, "category") if "category" in keys else "",
         "carton_gross_weight": _col_float(row, "carton_gross_weight") if "carton_gross_weight" in keys else None,
         "field_sources": _json_dict(row["field_source_json"]) if "field_source_json" in keys else {},
+        "invoice_unit": "",
+        "pcs_per_set": None,
+        "purchase_price": None,
+        "purchase_price_currency": "",
+        "material_en": "",
+        "purpose_en": "",
+        "dest_hs_code": "",
+        "fob_unit_value": None,
         # S8-fix1 N1：D-12 正常价相关列（以前漏读，导致促销按正常价申报在真实链路上不生效）
         "regular_price": _col_float(row, "regular_price") if "regular_price" in keys else None,
         "regular_price_at": _col_str(row, "regular_price_at") if "regular_price_at" in keys else "",
@@ -841,6 +892,16 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
     for k in keys:
         if k not in out and k not in _ROW_SKIP:
             out[k] = row[k]
+    inv = _json_dict(out.get("extra_data")).get("invoice") or {}
+    if isinstance(inv, dict):
+        out["invoice_unit"] = inv.get("unit") or ""
+        out["pcs_per_set"] = inv.get("pcs_per_set")
+        out["purchase_price"] = inv.get("purchase_price")
+        out["purchase_price_currency"] = inv.get("purchase_price_currency") or ""
+        out["material_en"] = inv.get("material_en") or ""
+        out["purpose_en"] = inv.get("purpose_en") or ""
+        out["dest_hs_code"] = inv.get("dest_hs_code") or ""
+        out["fob_unit_value"] = inv.get("fob_unit_value")
     return out
 
 
@@ -966,464 +1027,29 @@ def list_skus_for_asin(asin: str) -> List[str]:
     return [str(r["sku"]).strip() for r in rows if str(r["sku"] or "").strip()]
 
 
-def replace_lingxing_shops(rows: List[Dict[str, Any]]) -> int:
-    synced_at = datetime.now(timezone.utc).isoformat()
-    with _connect() as conn:
-        conn.execute("DELETE FROM lingxing_shop")
-        for rec in rows:
-            sid = _opt_int(rec.get("sid"))
-            if sid is None:
-                continue
-            extra = rec.get("extra_json")
-            extra_text = extra if isinstance(extra, str) else (
-                json.dumps(extra, ensure_ascii=False) if extra else None
-            )
-            conn.execute(
-                """
-                INSERT INTO lingxing_shop (
-                    sid, name, country, country_code, seller_id, currency,
-                    platform_name, status, extra_json, synced_at
-                )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ON CONFLICT(sid) DO UPDATE SET
-                    name = excluded.name,
-                    country = excluded.country,
-                    country_code = excluded.country_code,
-                    seller_id = excluded.seller_id,
-                    currency = excluded.currency,
-                    platform_name = excluded.platform_name,
-                    status = excluded.status,
-                    extra_json = excluded.extra_json,
-                    synced_at = excluded.synced_at
-                """,
-                (
-                    sid,
-                    _opt_str(rec.get("name")),
-                    _opt_str(rec.get("country")),
-                    _opt_str(rec.get("country_code")),
-                    _opt_str(rec.get("seller_id")),
-                    _opt_str(rec.get("currency")),
-                    _opt_str(rec.get("platform_name")),
-                    _opt_int(rec.get("status")),
-                    extra_text,
-                    synced_at,
-                ),
-            )
-        conn.commit()
-    return len(rows)
 
+# 领星读写在 master_db_lingxing；放在文末，避免和 _connect 循环导入。
+from fba_tool.master_db_lingxing import (  # noqa: E402
+    LINGXING_SUCCESS_STATUSES,
+    add_lingxing_sync_diff,
+    create_lingxing_sync_run,
+    finish_lingxing_sync_run,
+    get_last_lingxing_sync_success_at,
+    get_latest_lingxing_sync_run,
+    get_lingxing_sync_run,
+    invoice_hints_from_master,
+    list_lingxing_preview_fields,
+    list_lingxing_preview_skus,
+    list_lingxing_shops,
+    list_lingxing_stock_alerts,
+    list_lingxing_sync_diffs,
+    list_lingxing_sync_runs,
+    mark_lingxing_sync_run_status,
+    replace_lingxing_asin_perf,
+    replace_lingxing_fba_stock,
+    replace_lingxing_preview,
+    replace_lingxing_replenish,
+    replace_lingxing_shops,
+    tag_lingxing_sync_run,
+)
 
-def replace_lingxing_fba_stock(rows: List[Dict[str, Any]], synced_at: str) -> int:
-    with _connect() as conn:
-        conn.execute("DELETE FROM lingxing_fba_stock")
-        conn.executemany(
-            """
-            INSERT INTO lingxing_fba_stock (
-                sku, asin, fnsku, sid, seller_name,
-                fulfillable, reserved, inbound_shipped, inbound_working, inbound_receiving,
-                unfulfillable, age_0_30, age_31_60, age_61_90, age_91_180,
-                total_cost, extra_json, synced_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    rec.get("sku"),
-                    rec.get("asin"),
-                    rec.get("fnsku"),
-                    rec.get("sid"),
-                    rec.get("seller_name"),
-                    rec.get("fulfillable"),
-                    rec.get("reserved"),
-                    rec.get("inbound_shipped"),
-                    rec.get("inbound_working"),
-                    rec.get("inbound_receiving"),
-                    rec.get("unfulfillable"),
-                    rec.get("age_0_30"),
-                    rec.get("age_31_60"),
-                    rec.get("age_61_90"),
-                    rec.get("age_91_180"),
-                    rec.get("total_cost"),
-                    rec.get("extra_json"),
-                    synced_at,
-                )
-                for rec in rows
-            ],
-        )
-        conn.commit()
-    return len(rows)
-
-
-def replace_lingxing_replenish(rows: List[Dict[str, Any]], synced_at: str) -> int:
-    with _connect() as conn:
-        conn.execute("DELETE FROM lingxing_replenish")
-        conn.executemany(
-            """
-            INSERT INTO lingxing_replenish (
-                sku, asin, sid, title, days_fba, qty_purchase, qty_local_to_fba,
-                sales_30, fulfillable, out_stock_date, extra_json, synced_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    rec.get("sku"),
-                    rec.get("asin"),
-                    rec.get("sid"),
-                    rec.get("title"),
-                    rec.get("days_fba"),
-                    rec.get("qty_purchase"),
-                    rec.get("qty_local_to_fba"),
-                    rec.get("sales_30"),
-                    rec.get("fulfillable"),
-                    rec.get("out_stock_date"),
-                    rec.get("extra_json"),
-                    synced_at,
-                )
-                for rec in rows
-            ],
-        )
-        conn.commit()
-    return len(rows)
-
-
-def replace_lingxing_asin_perf(rows: List[Dict[str, Any]], synced_at: str) -> int:
-    with _connect() as conn:
-        conn.execute("DELETE FROM lingxing_asin_perf")
-        conn.executemany(
-            """
-            INSERT INTO lingxing_asin_perf (
-                asin, title, amount, volume, gross_profit, spend, acos,
-                return_rate, sessions, extra_json, period_start, period_end, synced_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    rec.get("asin"),
-                    rec.get("title"),
-                    rec.get("amount"),
-                    rec.get("volume"),
-                    rec.get("gross_profit"),
-                    rec.get("spend"),
-                    rec.get("acos"),
-                    rec.get("return_rate"),
-                    rec.get("sessions"),
-                    rec.get("extra_json"),
-                    rec.get("period_start"),
-                    rec.get("period_end"),
-                    synced_at,
-                )
-                for rec in rows
-            ],
-        )
-        conn.commit()
-    return len(rows)
-
-
-def create_lingxing_sync_run() -> int:
-    started = datetime.now(timezone.utc).isoformat()
-    with _connect() as conn:
-        cur = conn.execute(
-            "INSERT INTO lingxing_sync_run (started_at, status) VALUES (?, ?)",
-            (started, "running"),
-        )
-        conn.commit()
-        return int(cur.lastrowid)
-
-
-def finish_lingxing_sync_run(
-    run_id: int,
-    status: str,
-    steps: Any,
-    counts: Any,
-    error: Optional[str] = None,
-) -> None:
-    finished = datetime.now(timezone.utc).isoformat()
-    with _connect() as conn:
-        conn.execute(
-            """
-            UPDATE lingxing_sync_run
-            SET finished_at = ?, status = ?, steps_json = ?, counts_json = ?, error = ?
-            WHERE id = ?
-            """,
-            (
-                finished,
-                status,
-                json.dumps(steps, ensure_ascii=False),
-                json.dumps(counts, ensure_ascii=False),
-                error,
-                run_id,
-            ),
-        )
-        conn.commit()
-
-
-def add_lingxing_sync_diff(run_id: int, kind: str, sku: str, message: str) -> None:
-    with _connect() as conn:
-        conn.execute(
-            """
-            INSERT INTO lingxing_sync_diff (run_id, kind, sku, message, created_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
-            (run_id, kind, sku, message, datetime.now(timezone.utc).isoformat()),
-        )
-        conn.commit()
-
-
-def list_lingxing_sync_diffs(run_id: int) -> List[Dict[str, Any]]:
-    with _connect() as conn:
-        rows = conn.execute(
-            "SELECT kind, sku, message FROM lingxing_sync_diff WHERE run_id = ? ORDER BY id",
-            (run_id,),
-        ).fetchall()
-    return [{"kind": r["kind"], "sku": r["sku"], "message": r["message"]} for r in rows]
-
-
-def get_latest_lingxing_sync_run() -> Optional[Dict[str, Any]]:
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM lingxing_sync_run ORDER BY id DESC LIMIT 1"
-        ).fetchone()
-    if not row:
-        return None
-    return {k: row[k] for k in row.keys()}
-
-
-def list_lingxing_shops() -> List[Dict[str, Any]]:
-    with _connect() as conn:
-        rows = conn.execute("SELECT * FROM lingxing_shop ORDER BY sid").fetchall()
-    return [{k: row[k] for k in row.keys()} for row in rows]
-
-
-def list_lingxing_stock_alerts(days_threshold: float = 14.0) -> List[Dict[str, Any]]:
-    """可售天数过低或建议本地发 FBA 的 SKU。不以「库存=0 的全部 Listing」当断货名单。"""
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT sku, asin, sid, title, days_fba, fulfillable, qty_local_to_fba, out_stock_date
-            FROM lingxing_replenish
-            WHERE (days_fba IS NOT NULL AND days_fba <= ?)
-               OR (qty_local_to_fba IS NOT NULL AND qty_local_to_fba > 0)
-            ORDER BY COALESCE(days_fba, 9999) ASC, sku
-            """,
-            (float(days_threshold),),
-        ).fetchall()
-    items = []
-    for r in rows:
-        days = r["days_fba"]
-        qty = r["qty_local_to_fba"]
-        if days is not None and float(days) <= 0:
-            message = "FBA 可售天数已耗尽（断货）"
-        elif days is not None and float(days) <= days_threshold:
-            message = f"可售天数约 {days} 天"
-        elif qty is not None and float(qty) > 0:
-            message = f"建议发往 FBA {qty} 件"
-        else:
-            message = "需要关注补货"
-        items.append(
-            {
-                "sku": r["sku"] or "",
-                "asin": r["asin"] or "",
-                "sid": r["sid"],
-                "title": r["title"] or "",
-                "days_fba": days,
-                "fulfillable": r["fulfillable"],
-                "qty_local_to_fba": qty,
-                "out_stock_date": r["out_stock_date"] or "",
-                "message": message,
-            }
-        )
-    return items
-
-
-def invoice_hints_from_master(master: Optional[Dict[str, Any]]) -> Dict[str, Any]:
-    """运行时发票/报关提示：只读 SQLite，不含产品信息表.csv。"""
-    if not master:
-        return {}
-    hints: Dict[str, Any] = {}
-    if master.get("chinese_name"):
-        hints["中文品名"] = master["chinese_name"]
-    if master.get("english_name"):
-        hints["英文品名"] = master["english_name"]
-    if master.get("hs_code"):
-        hints["海关编码"] = master["hs_code"]
-    if master.get("brand"):
-        hints["品牌"] = master["brand"]
-    if master.get("material"):
-        hints["材料"] = master["material"]
-    if master.get("purpose"):
-        hints["用途"] = master["purpose"]
-    from fba_tool.product_fields import resolve_declared_price
-
-    price, price_source = resolve_declared_price(master)
-    if price is not None:
-        hints["单个货值"] = price
-        hints["申报价来源"] = price_source
-    from fba_tool.product_fields import promo_info
-
-    _promo = promo_info(master)
-    if _promo:
-        hints["促销售价"] = _promo["listing_price"]  # D-12：促销期按正常价申报，导出时提示
-    dv = master.get("declared_value")
-    if price_source.startswith("lingxing") and dv not in (None, ""):
-        hints["历史申报价"] = dv
-        if (master.get("field_sources") or {}).get("declared_value") == "manual":
-            hints["手填申报价"] = dv  # 手填价没被采用，导出时提示（docs/用户决策记录.md D-2026-10-16-01）
-    if master.get("declare_unit"):
-        hints["declare_unit"] = master["declare_unit"]
-    if master.get("category"):
-        hints["品类"] = master["category"]
-    if master.get("model_name"):
-        hints["型号"] = master["model_name"]
-    if master.get("asin"):
-        hints["ASIN"] = master["asin"]
-    if master.get("fnsku"):
-        hints["FNSKU"] = master["fnsku"]
-    return hints
-
-
-LINGXING_SUCCESS_STATUSES = ("auto_applied", "auto_applied_partial", "preview_pending", "partial", "confirmed")
-
-
-def get_last_lingxing_sync_success_at() -> Optional[str]:
-    """上次成功同步（拉取成功，含手动拉取）的完成时间，存在 lingxing_sync_run.finished_at。"""
-    q = ",".join("?" * len(LINGXING_SUCCESS_STATUSES))
-    with _connect() as conn:
-        row = conn.execute(f"SELECT MAX(finished_at) FROM lingxing_sync_run WHERE status IN ({q}) AND finished_at IS NOT NULL",
-                           LINGXING_SUCCESS_STATUSES).fetchone()
-    return row[0] if row and row[0] else None
-
-
-def tag_lingxing_sync_run(run_id: int, trigger: str, attempt: int) -> None:
-    with _connect() as conn:
-        conn.execute("UPDATE lingxing_sync_run SET trigger = ?, attempt = ? WHERE id = ?", (trigger, int(attempt), int(run_id)))
-        conn.commit()
-
-
-def list_lingxing_sync_runs(limit: int = 50) -> List[Dict[str, Any]]:
-    """同步记录（新→旧），带各类差异条数，供界面“同步记录”表。"""
-    with _connect() as conn:
-        rows = conn.execute("SELECT * FROM lingxing_sync_run ORDER BY id DESC LIMIT ?", (int(limit),)).fetchall()
-        out = []
-        for r in rows:
-            d = {k: r[k] for k in r.keys()}
-            d["diff_counts"] = {k: n for k, n in conn.execute(
-                "SELECT kind, COUNT(*) FROM lingxing_sync_diff WHERE run_id = ? GROUP BY kind", (d["id"],)).fetchall()}
-            out.append(d)
-    return out
-
-
-def get_lingxing_sync_run(run_id: int) -> Optional[Dict[str, Any]]:
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM lingxing_sync_run WHERE id = ?",
-            (int(run_id),),
-        ).fetchone()
-    if not row:
-        return None
-    return {k: row[k] for k in row.keys()}
-
-
-def mark_lingxing_sync_run_status(run_id: int, status: str, error: Optional[str] = None) -> None:
-    with _connect() as conn:
-        if error is None:
-            conn.execute(
-                "UPDATE lingxing_sync_run SET status = ? WHERE id = ?",
-                (status, int(run_id)),
-            )
-        else:
-            conn.execute(
-                "UPDATE lingxing_sync_run SET status = ?, error = ? WHERE id = ?",
-                (status, error, int(run_id)),
-            )
-        conn.commit()
-
-
-def replace_lingxing_preview(
-    run_id: int,
-    sku_rows: List[Dict[str, Any]],
-    field_rows: List[Dict[str, Any]],
-) -> None:
-    with _connect() as conn:
-        conn.execute("DELETE FROM lingxing_sync_preview_field WHERE run_id = ?", (int(run_id),))
-        conn.execute("DELETE FROM lingxing_sync_preview_sku WHERE run_id = ?", (int(run_id),))
-        uniq_skus: Dict[str, Dict[str, Any]] = {}
-        for rec in sku_rows:
-            sku = str(rec.get("sku") or "").strip()
-            if sku:
-                uniq_skus[sku] = rec
-        conn.executemany(
-            """
-            INSERT INTO lingxing_sync_preview_sku (
-                run_id, sku, is_new, group_kind, mismatch_skus, remote_json
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    int(run_id),
-                    rec["sku"],
-                    1 if rec.get("is_new") else 0,
-                    rec.get("group_kind") or "unchanged",
-                    rec.get("mismatch_skus") or "",
-                    rec.get("remote_json") or "{}",
-                )
-                for rec in uniq_skus.values()
-            ],
-        )
-        conn.executemany(
-            """
-            INSERT INTO lingxing_sync_preview_field (
-                run_id, sku, field, local_value, remote_value, default_checked
-            ) VALUES (?, ?, ?, ?, ?, ?)
-            """,
-            [
-                (
-                    int(run_id),
-                    rec["sku"],
-                    rec["field"],
-                    rec.get("local_value"),
-                    rec.get("remote_value"),
-                    1 if rec.get("default_checked") else 0,
-                )
-                for rec in field_rows
-            ],
-        )
-        conn.commit()
-
-
-def list_lingxing_preview_skus(run_id: int) -> List[Dict[str, Any]]:
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT run_id, sku, is_new, group_kind, mismatch_skus, remote_json
-            FROM lingxing_sync_preview_sku
-            WHERE run_id = ?
-            ORDER BY group_kind, sku COLLATE NOCASE
-            """,
-            (int(run_id),),
-        ).fetchall()
-    return [{k: row[k] for k in row.keys()} for row in rows]
-
-
-def list_lingxing_preview_fields(run_id: int) -> List[Dict[str, Any]]:
-    with _connect() as conn:
-        rows = conn.execute(
-            """
-            SELECT sku, field, local_value, remote_value, default_checked
-            FROM lingxing_sync_preview_field
-            WHERE run_id = ?
-            ORDER BY id
-            """,
-            (int(run_id),),
-        ).fetchall()
-    return [
-        {
-            "sku": r["sku"],
-            "field": r["field"],
-            "local_value": r["local_value"] or "",
-            "remote_value": r["remote_value"] or "",
-            "default_checked": bool(r["default_checked"]),
-        }
-        for r in rows
-    ]

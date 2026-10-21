@@ -150,28 +150,50 @@ export function buildExportFieldsForInvoiceExport(
   return rows;
 }
 
+function excelRowOf(cell: string): number {
+  const match = /(\d+)$/.exec(cell);
+  return match ? Number(match[1]) : 0;
+}
+
+function identityOnRow(cells: InvoiceCellFill[] | undefined, row: number): { sku: string; fnsku: string } {
+  let sku = "";
+  let fnsku = "";
+  for (const cell of cells ?? []) {
+    if (excelRowOf(cell.cell) !== row) continue;
+    if (cell.field_key === "sku" && !sku) sku = String(cell.value ?? "").trim();
+    if (cell.field_key === "fnsku" && !fnsku) fnsku = String(cell.value ?? "").trim();
+  }
+  return { sku, fnsku };
+}
+
 export function missingRequiredFromCellMeta(
   cellMeta: Record<string, CellMeta>,
   getValue: (cell: string) => string,
+  cells?: InvoiceCellFill[],
 ): string[] {
   const FIELD_LABELS: Record<string, string> = {
     reference_id: "Reference ID / ID号",
     sku_image: "SKU图片",
   };
-  const requiredKeys = new Map<string, boolean>();
+  const requiredKeys = new Map<string, { ok: boolean; row: number }>();
   for (const [cell, meta] of Object.entries(cellMeta)) {
     if (!meta.required) continue;
     const key = meta.fieldKey ?? cell;
     const val = getValue(cell).trim();
+    const row = excelRowOf(cell);
     if (val) {
-      requiredKeys.set(key, true);
+      requiredKeys.set(key, { ok: true, row });
     } else if (!requiredKeys.has(key)) {
-      requiredKeys.set(key, false);
+      requiredKeys.set(key, { ok: false, row });
     }
   }
   return [...requiredKeys.entries()]
-    .filter(([, ok]) => !ok)
-    .map(([key]) => FIELD_LABELS[key] ?? key);
+    .filter(([, item]) => !item.ok)
+    .map(([key, item]) => {
+      const label = FIELD_LABELS[key] ?? key;
+      const id = identityOnRow(cells, item.row);
+      return `SKU ${id.sku || "未填"} · FNSKU ${id.fnsku || "未填"}：${label}`;
+    });
 }
 
 export function cloneSheets<T>(sheets: T[]): T[] {

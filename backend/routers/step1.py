@@ -110,17 +110,75 @@ def api_validate_input(body: InputRowsRequest):
     }
 
 
+def _carton_notices(rows):
+    try:
+        from fba_tool.carton_store import mixed_spec_notices
+
+        return mixed_spec_notices(rows)
+    except Exception:
+        return []
+
+
+def _specs_by_sku(rows):
+    try:
+        from fba_tool.carton_store import specs_by_sku
+
+        return specs_by_sku(rows)
+    except Exception:
+        return {}
+
+
 @router.post("/api/compute_preview")
 def api_compute_preview(body: ComputePreviewRequest):
     """计算预计整箱数、尾数、总净重/毛重，及总方数、总体积重。"""
     merged_rows, data_sources = apply_master_to_input_rows(body.rows)
     df = rows_to_df(merged_rows)
     computed = with_computed_columns(df)
+    from fba_tool.boxing import box_metrics, dataframe_to_sku_rows, generate_box_plan, plans_to_editor_df
+    from fba_tool.user_config import weight_limit_kg
+
+    sku_rows = dataframe_to_sku_rows(computed)
+    plans, _tail = generate_box_plan(sku_rows)
+    metrics = box_metrics(plans_to_editor_df(plans), sku_rows)
     ratio = float(body.throw_ratio if body.throw_ratio is not None else throw_ratio())
     totals = compute_step1_logistics_totals(df, throw_ratio_val=ratio)
     placement = compute_shipment_placement_fees(build_placement_unit_rows(body.rows))
+    warnings = check_gross_weight_consistency(computed)
+    limit = float(weight_limit_kg())
+    for row in df_to_records(metrics):
+        if int(row.get("SKU种类") or 0) > 1 and float(row.get("毛重(kg)") or 0) > limit:
+            warnings.append(
+                {
+                    "row_index": int(row["箱号"]),
+                    "sku": f"箱{int(row['箱号'])}",
+                    "kind": "mixed_over_limit",
+                    "requires_confirm": True,
+                    "suggested_gross_kg": None,
+                    "declared_kg": row.get("毛重(kg)"),
+                    "expected_kg": limit,
+                    "message": f"混装箱 {int(row['箱号'])} 毛重 {row.get('毛重(kg)')} kg 超过上限 {limit:g} kg",
+                }
+            )
+    from fba_tool.master_db import get_product_by_sku
+
+    gaps = []
+    for row in body.rows:
+        sku = str(row.get("SKU简称") or row.get("sku") or "").strip()
+        if not sku:
+            continue
+        product = get_product_by_sku(sku) or {}
+        missing = []
+        if not str(product.get("asin") or "").strip():
+            missing.append("asin")
+        if not any(str(product.get(key) or "").strip() for key in ("chinese_name", "english_name", "local_name")):
+            missing.append("name")
+        if not all(product.get(key) not in (None, "", 0) for key in ("unit_length", "unit_width", "unit_height")):
+            missing.append("unit_dims")
+        if missing:
+            gaps.append({"sku": sku, "missing": missing})
     return {
         "rows": df_to_records(computed),
+        "master_gaps": gaps,
         "merged_rows": merged_rows,
         "data_sources": data_sources,
         "total_cbm": totals["total_cbm"],
@@ -132,7 +190,10 @@ def api_compute_preview(body: ComputePreviewRequest):
         "revenue_ton": totals["revenue_ton"],
         "total_net_kg": totals["total_net_kg"],
         "total_gross_kg": totals["total_gross_kg"],
-        "weight_warnings": check_gross_weight_consistency(computed),
+        "box_metrics": df_to_records(metrics),
+        "weight_warnings": warnings,
+        "carton_spec_notices": _carton_notices(merged_rows),
+        "carton_specs_by_sku": _specs_by_sku(merged_rows),
         "cost_dashboard": {
             "placement": placement,
         },

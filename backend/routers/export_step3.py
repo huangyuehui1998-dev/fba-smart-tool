@@ -6,11 +6,18 @@ from fastapi import APIRouter, HTTPException
 from fba_tool.boxing import dataframe_to_sku_rows
 from fba_tool.excel_export import build_box_matrix
 from fba_tool.export_service import step3_export_bundle
+from fba_tool.step3_bundle import build_step3_zip, precheck_step3_sta
 from schemas import ExportStep3Request
-from utils.responses import xlsx_response
+from utils.responses import file_response, xlsx_response
 from utils.serialization import df_to_records, editor_to_df, rows_to_df_with_master
 
 router = APIRouter()
+
+
+def _check_weight(body) -> None:
+    from fba_tool.weight_gate import raise_if_weight_unconfirmed
+
+    raise_if_weight_unconfirmed(body.rows, body.confirm_weight_warnings, body.box_editor)
 
 
 def _check_not_oversold(editor_df, sku_rows) -> None:
@@ -42,6 +49,7 @@ def api_export_step3_preview(body: ExportStep3Request):
 @router.post("/api/export/step3/internal")
 def api_export_internal(body: ExportStep3Request):
     """导出内部留档表 (.xlsx)。"""
+    _check_weight(body)
     df = rows_to_df_with_master(body.rows)
     editor_df = editor_to_df(body.box_editor)
     sku_rows = dataframe_to_sku_rows(df)
@@ -53,9 +61,43 @@ def api_export_internal(body: ExportStep3Request):
 @router.post("/api/export/step3/amazon")
 def api_export_amazon(body: ExportStep3Request):
     """导出 Send to Amazon 模板 (.xlsx)。"""
+    _check_weight(body)
     df = rows_to_df_with_master(body.rows)
     editor_df = editor_to_df(body.box_editor)
     sku_rows = dataframe_to_sku_rows(df)
     _check_not_oversold(editor_df, sku_rows)
     _, _, amazon_bytes = step3_export_bundle(editor_df, sku_rows, body.fnsku_overrides)
+    if getattr(body, "fba_id", ""):
+        try:
+            from fba_tool.carton_store import snapshot_from_editor
+
+            snapshot_from_editor(body.fba_id, body.box_editor, body.rows)
+        except Exception:
+            pass
     return xlsx_response(amazon_bytes, "Send to Amazon表格.xlsx")
+
+
+def _editor_and_rows(body: ExportStep3Request):
+    df = rows_to_df_with_master(body.rows)
+    editor_df = editor_to_df(body.box_editor)
+    if editor_df.empty:
+        raise HTTPException(status_code=400, detail="装箱方案为空")
+    sku_rows = dataframe_to_sku_rows(df)
+    _check_not_oversold(editor_df, sku_rows)
+    return editor_df, sku_rows
+
+
+@router.post("/api/export/step3/bundle")
+def api_export_step3_bundle(body: ExportStep3Request):
+    """一键导出 STA、内部表、装箱单、实操单。"""
+    _check_weight(body)
+    editor_df, sku_rows = _editor_and_rows(body)
+    data = build_step3_zip(editor_df, sku_rows, body.fnsku_overrides)
+    return file_response(data, "Step3导出.zip", "application/zip")
+
+
+@router.post("/api/export/step3/sta_precheck")
+def api_sta_precheck(body: ExportStep3Request):
+    """预检即将导出的 STA：空的必填项、预处理取值不在下拉里。"""
+    editor_df, sku_rows = _editor_and_rows(body)
+    return {"highlights": precheck_step3_sta(editor_df, sku_rows, body.fnsku_overrides)}

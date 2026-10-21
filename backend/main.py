@@ -13,15 +13,15 @@ import os
 import sys
 
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 from fba_tool.app_paths import ensure_app_data_layout
 from fba_tool.master_db import init_master_db
+from fba_tool.strict_cors import StrictCORSMiddleware
 from security import install_access_control
-from settings import CORS_ALLOW_ORIGINS, CORS_ALLOW_ORIGIN_REGEX
+from settings import CORS_ALLOW_ORIGINS
 
 from routers.health import router as health_router
 from routers.config import router as config_router
@@ -40,6 +40,8 @@ from routers.lingxing import router as lingxing_router
 from routers.tickets import router as tickets_router
 from routers.invoice_templates import router as invoice_templates_router
 from routers.invoice_export import router as invoice_export_router
+from routers.carton import router as carton_router
+from routers.fx_rates import router as fx_rates_router
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +63,8 @@ _ROUTERS = (
     tickets_router,
     invoice_templates_router,
     invoice_export_router,
+    carton_router,
+    fx_rates_router,
 )
 
 
@@ -157,6 +161,12 @@ def _mount_frontend_spa(app: FastAPI) -> None:
 
 
 def create_app() -> FastAPI:
+    from security import access_token, bind_host, check_bind_safety
+
+    check_bind_safety(bind_host(), access_token())
+    from fba_tool.log_redact import install_redacting_logs
+
+    install_redacting_logs()
     ensure_app_data_layout()
     init_master_db()
     try:
@@ -172,16 +182,38 @@ def create_app() -> FastAPI:
         version="1.2.0",
     )
 
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=CORS_ALLOW_ORIGINS,
-        allow_origin_regex=CORS_ALLOW_ORIGIN_REGEX,
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    app.add_middleware(StrictCORSMiddleware, allow_origins=CORS_ALLOW_ORIGINS)
 
     install_access_control(app)
+
+    @app.middleware("http")
+    async def reject_unsafe_history_ids(request, call_next):
+        from fba_tool.history_guard import history_task_suffix, safe_history_path
+
+        raw = request.scope.get("raw_path") or b""
+        text = raw.decode("latin-1", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        suffix = history_task_suffix(text or request.url.path)
+        if suffix:
+            try:
+                safe_history_path(suffix)
+            except ValueError:
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": {"code": "INVALID_TASK_ID", "message": "任务编号不合法"}},
+                )
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def reject_writes_when_db_is_newer(request, call_next):
+        if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith("/api/"):
+            from fba_tool.db_migrations import is_readonly
+
+            if is_readonly():
+                return JSONResponse(
+                    status_code=409,
+                    content={"code": "DB_NEWER_THAN_APP", "message": "数据库版本高于当前程序，已只读打开"},
+                )
+        return await call_next(request)
 
     for router in _ROUTERS:
         app.include_router(router)
@@ -211,8 +243,6 @@ app = create_app()
 if __name__ == "__main__":
     import uvicorn
 
-    from security import access_token, bind_host, check_bind_safety
+    from security import bind_host
 
-    _host = bind_host()
-    check_bind_safety(_host, access_token())
-    uvicorn.run("main:app", host=_host, port=int(os.environ.get("FBA_PORT", "8000")), reload=True)
+    uvicorn.run("main:app", host=bind_host(), port=int(os.environ.get("FBA_PORT", "8000")), reload=True)

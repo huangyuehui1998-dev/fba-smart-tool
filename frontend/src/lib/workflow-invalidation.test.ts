@@ -5,7 +5,9 @@ import {
   clearStageStale,
   clearStaleFrom,
   createEmptyStaleness,
+  effectiveStaleness,
   getOfficialFilesForStage,
+  stalenessFromInputHash,
   getStaleOfficialFileLabels,
   getStaleStageLabels,
   hasAnyStale,
@@ -13,6 +15,7 @@ import {
   isOfficialExportBlocked,
   isStepStale,
   parseStaleness,
+  type WorkflowOutputPresence,
 } from "./workflow-invalidation";
 
 describe("createEmptyStaleness", () => {
@@ -123,9 +126,9 @@ describe("hasAnyStale", () => {
 describe("getStaleStageLabels", () => {
   it("returns Chinese labels for stale stages", () => {
     const labels = getStaleStageLabels(invalidateFrom("boxing"));
-    expect(labels).toContain("Step 3 导出");
-    expect(labels).toContain("Step 4 回传校验");
-    expect(labels).not.toContain("Step 2 排箱");
+    expect(labels).toContain("第 3 步 导出");
+    expect(labels).toContain("第 4 步 货件校验");
+    expect(labels).not.toContain("第 2 步 排箱");
   });
 });
 
@@ -161,5 +164,116 @@ describe("official export blocking", () => {
     expect(parsed.export).toBe(true);
     expect(parsed.validation).toBe(true);
     expect(parsed.boxing).toBe(false);
+  });
+});
+
+const emptyOutputs = (): WorkflowOutputPresence => ({
+  boxEditorCount: 0,
+  step3MatrixCount: 0,
+  routingSnapshotCount: 0,
+  step4Ok: false,
+  step4StatusLineCount: 0,
+  hasInvoiceDraft: false,
+  invoiceSessionCount: 0,
+  hasCustomsSession: false,
+});
+
+describe("effectiveStaleness", () => {
+  it("hides stale marks when downstream stages have no output", () => {
+    const raw = invalidateFrom("validation");
+    const visible = effectiveStaleness(raw, emptyOutputs());
+    expect(raw.invoice).toBe(true);
+    expect(raw.customs).toBe(true);
+    expect(visible.invoice).toBe(false);
+    expect(visible.customs).toBe(false);
+    expect(isStepStale(4.5, visible)).toBe(false);
+    expect(isStepStale(5, visible)).toBe(false);
+  });
+
+  it("keeps the invoice stale after an upstream change once a draft exists", () => {
+    const raw = invalidateFrom("input");
+    const visible = effectiveStaleness(raw, {
+      ...emptyOutputs(),
+      hasInvoiceDraft: true,
+    });
+    expect(visible.invoice).toBe(true);
+    expect(visible.customs).toBe(false);
+  });
+
+  it("uses saved routing snapshots, not the forwarder table, as routing output", () => {
+    const raw = invalidateFrom("export");
+    const withoutSnapshots = effectiveStaleness(raw, {
+      ...emptyOutputs(),
+      step3MatrixCount: 2,
+    });
+    expect(withoutSnapshots.routing).toBe(false);
+    const withSnapshots = effectiveStaleness(raw, {
+      ...emptyOutputs(),
+      routingSnapshotCount: 1,
+    });
+    expect(withSnapshots.routing).toBe(true);
+  });
+
+  it("restores raw marks from a history snapshot and masks stages that were never produced", () => {
+    const restored = parseStaleness({
+      boxing: true,
+      export: true,
+      routing: true,
+      validation: true,
+      invoice: true,
+      customs: true,
+    });
+    const visible = effectiveStaleness(restored, {
+      ...emptyOutputs(),
+      boxEditorCount: 4,
+      step4Ok: true,
+      invoiceSessionCount: 1,
+    });
+    expect(visible.boxing).toBe(true);
+    expect(visible.export).toBe(false);
+    expect(visible.routing).toBe(false);
+    expect(visible.validation).toBe(true);
+    expect(visible.invoice).toBe(true);
+    expect(visible.customs).toBe(false);
+  });
+});
+
+describe("stalenessFromInputHash", () => {
+  const afterStep4 = (): WorkflowOutputPresence => ({
+    ...emptyOutputs(),
+    boxEditorCount: 2,
+    step3MatrixCount: 2,
+    step4Ok: true,
+    step4StatusLineCount: 3,
+    hasCustomsSession: true,
+  });
+
+  it("does not show 当前结果已过期 inputs when the hash still matches", () => {
+    const raw = invalidateFrom("boxing");
+    const visible = effectiveStaleness(raw, afterStep4());
+    const quiet = stalenessFromInputHash(
+      visible,
+      { invoice: "same", customs: "same", validation: "same" },
+      "same",
+      afterStep4(),
+      true,
+    );
+    expect(quiet.invoice).toBe(false);
+    expect(quiet.customs).toBe(false);
+    expect(isStepStale(4.5, quiet)).toBe(false);
+    expect(isStepStale(5, quiet)).toBe(false);
+  });
+
+  it("marks invoice and customs stale after a step1 input change and lists them", () => {
+    const drifted = stalenessFromInputHash(
+      createEmptyStaleness(),
+      { invoice: "before", customs: "before", validation: "before" },
+      "after",
+      afterStep4(),
+      true,
+    );
+    expect(isStepStale(5, drifted)).toBe(true);
+    expect(isStepStale(4.5, drifted)).toBe(true);
+    expect(getStaleStageLabels(drifted).join("、")).toContain("报关");
   });
 });

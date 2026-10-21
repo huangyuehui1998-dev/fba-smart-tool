@@ -24,6 +24,7 @@ import { DEFAULT_THROW_RATIO, DEFAULT_WEIGHT_LIMIT_KG } from "@/constants";
 import { fetchConfigLimits } from "@/lib/api/workflow";
 import { saveTaskHistory } from "@/lib/api/task-history";
 import { EMPTY_ROW, type Row } from "@/lib/step1-rows";
+import { DEFAULT_TRANSPORT_MODE, type TransportMode } from "@/lib/transport-mode";
 import {
   applyTaskHistorySnapshot,
   buildTaskHistorySnapshot,
@@ -57,14 +58,18 @@ import {
   loadStoredProjectHandle,
   storeProjectHandle,
 } from "@/lib/fbox-handle-store";
+import { canonicalInputRows, sha256HexOfText } from "@/lib/stage-input-hash";
 import {
   clearStaleFrom,
   createEmptyStaleness,
+  effectiveStaleness,
   invalidateFrom,
   clearStageStale,
+  stalenessFromInputHash,
   type WorkflowStage,
   type WorkflowStaleness,
 } from "@/lib/workflow-invalidation";
+import { saveTaskFileAfterHistory } from "@/lib/task-save-feedback";
 import { inferHighestReached } from "@/lib/workflow-steps";
 
 interface WorkflowContextValue {
@@ -106,6 +111,8 @@ interface WorkflowContextValue {
   setStep3BoxCount: (n: number) => void;
   step3SkuCount: number;
   setStep3SkuCount: (n: number) => void;
+  transportMode: TransportMode;
+  setTransportMode: (mode: TransportMode) => void;
 
   csvFiles: File[];
   setCsvFiles: Dispatch<SetStateAction<File[]>>;
@@ -184,8 +191,10 @@ interface WorkflowContextValue {
   /** Step 4.5 等在存档前将表格最新值刷入快照 */
   registerSnapshotFlush: (fn: () => void) => () => void;
 
-  /** 各阶段下游产物是否因上游变更而过期 */
+  /** 各阶段下游产物是否因上游变更而过期（已按是否有产物屏蔽） */
   staleness: WorkflowStaleness;
+  /** Step 3.5 已保存的刷仓快照数。过期判断只用这个数，不用货代表行数。 */
+  setRoutingSnapshotCount: (count: number) => void;
   /** 上游数据变更时标记下游过期（T1 失效链） */
   markStale: (stage: WorkflowStage) => void;
   /** 阶段重算/校验通过后清除该阶段及下游过期标记 */
@@ -232,6 +241,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [step3Matrix, setStep3Matrix] = useState<Record<string, unknown>[]>([]);
   const [step3BoxCount, setStep3BoxCount] = useState(0);
   const [step3SkuCount, setStep3SkuCount] = useState(0);
+  const [transportMode, setTransportMode] = useState<TransportMode>(DEFAULT_TRANSPORT_MODE);
 
   const [csvFiles, setCsvFiles] = useState<File[]>([]);
   const [pdfFiles, setPdfFiles] = useState<File[]>([]);
@@ -257,7 +267,17 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const [invoiceSyncLinkedEdits, setInvoiceSyncLinkedEdits] = useState(true);
   const [customsSession, setCustomsSession] = useState<WorkflowContextValue["customsSession"]>(null);
   const [staleness, setStaleness] = useState<WorkflowStaleness>(() => createEmptyStaleness());
+  const [recordedInputHashes, setRecordedInputHashes] = useState<Partial<Record<WorkflowStage, string>>>({});
+  const [currentInputHash, setCurrentInputHash] = useState<string | null>(null);
+  const currentInputHashRef = useRef<string | null>(null);
+  const inputHashSeed = useRef(0);
+  const appliedInputHashSeed = useRef(-1);
+  const step4HashBaselined = useRef(false);
+  const [routingSnapshotCount, setRoutingSnapshotCountState] = useState(0);
   const [highestReachedStep, setHighestReachedStep] = useState(1);
+  const setRoutingSnapshotCount = useCallback((count: number) => {
+    setRoutingSnapshotCountState(count);
+  }, []);
 
   const markStale = useCallback((stage: WorkflowStage) => {
     setStaleness((prev) => invalidateFrom(stage, prev));
@@ -269,6 +289,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 
   const clearStageStaleFn = useCallback((stage: WorkflowStage) => {
     setStaleness((prev) => clearStageStale(stage, prev));
+    const hex = currentInputHashRef.current;
+    if (hex) setRecordedInputHashes((prev) => ({ ...prev, [stage]: hex }));
   }, []);
 
   const resetStaleness = useCallback(() => {
@@ -304,6 +326,10 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setInvoicePoByShipment({});
     setCustomsSession(null);
     setStaleness(createEmptyStaleness());
+    setRecordedInputHashes({});
+    inputHashSeed.current += 1;
+    step4HashBaselined.current = false;
+    setRoutingSnapshotCountState(0);
     setHighestReachedStep(1);
   }, []);
 
@@ -327,6 +353,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
   const dismissArchivedToast = useCallback(() => setShowArchivedToast(false), []);
 
   const restoreLocalStorageDraft = useCallback(() => {
+    inputHashSeed.current += 1;
+    step4HashBaselined.current = false;
     const snapshot = loadWorkflowSnapshot();
     if (!snapshot || !snapshotHasData(snapshot)) return;
     const { step: resolvedStep, clamped } = resolveRestorableStep(snapshot);
@@ -341,6 +369,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setStep3Matrix(snapshot.step3Matrix ?? []);
     setStep3BoxCount(snapshot.step3BoxCount ?? 0);
     setStep3SkuCount(snapshot.step3SkuCount ?? 0);
+    setTransportMode(snapshot.transportMode ?? DEFAULT_TRANSPORT_MODE);
     const reached = inferHighestReached({
       step: resolvedStep,
       highestReachedStep: snapshot.highestReachedStep,
@@ -376,6 +405,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     step3Matrix,
     step3BoxCount,
     step3SkuCount,
+    transportMode,
     metrics,
     tailPool,
     hasOverweight,
@@ -413,6 +443,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     step3Matrix,
     step3BoxCount,
     step3SkuCount,
+    transportMode,
     metrics,
     tailPool,
     hasOverweight,
@@ -456,6 +487,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setStep3Matrix([]);
     setStep3BoxCount(0);
     setStep3SkuCount(0);
+    setTransportMode(DEFAULT_TRANSPORT_MODE);
     setCsvFiles([]);
     setPdfFiles([]);
     setStep4Ok(false);
@@ -477,12 +509,18 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setInvoiceSyncLinkedEdits(true);
     setCustomsSession(null);
     setStaleness(createEmptyStaleness());
+    setRecordedInputHashes({});
+    inputHashSeed.current += 1;
+    step4HashBaselined.current = false;
+    setRoutingSnapshotCountState(0);
     setHighestReachedStep(1);
     },
     [],
   );
 
   const applyWorkflowSnapshot = useCallback((applied: ReturnType<typeof applyTaskHistorySnapshot>) => {
+    inputHashSeed.current += 1;
+    step4HashBaselined.current = false;
     setTaskId(applied.taskId);
     setTaskName(applied.taskName || autoTaskName());
     setStep(applied.step);
@@ -494,6 +532,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     setStep3Matrix(applied.step3Matrix);
     setStep3BoxCount(applied.step3BoxCount);
     setStep3SkuCount(applied.step3SkuCount);
+    setTransportMode(applied.transportMode);
     setMetrics(applied.metrics);
     setTailPool(applied.tailPool);
     setHasOverweight(applied.hasOverweight);
@@ -626,34 +665,37 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     }
 
     const project = buildFboxFromSource(source);
+    setFboxSaveStatus("saving");
+    fboxSaveRef.current?.cancel();
 
     try {
-      setFboxSaveStatus("saving");
-      fboxSaveRef.current?.cancel();
-
-      const handle = projectFileHandleRef.current;
-      if (handle && fboxWritable) {
-        await writeFboxToHandle(handle, project);
-        setFboxSaveStatus("saved");
-        return projectFileName ?? handle.name;
-      }
-
-      const { handle: newHandle, name } = await pickSaveNewFbox(source.taskName || autoTaskName());
-      await writeFboxToHandle(newHandle, project);
-      await bindProjectHandle(newHandle, name);
-      const displayName = name.replace(/\.fbox$/i, "") || source.taskName;
-      setTaskName(displayName);
+      const savedName = await saveTaskFileAfterHistory({
+        saveHistory: () => saveCurrentTaskToHistory(source.taskName),
+        writeFile: async () => {
+          const handle = projectFileHandleRef.current;
+          if (handle && fboxWritable) {
+            await writeFboxToHandle(handle, project);
+            return projectFileName ?? handle.name;
+          }
+          const { handle: newHandle, name } = await pickSaveNewFbox(source.taskName || autoTaskName());
+          await writeFboxToHandle(newHandle, project);
+          await bindProjectHandle(newHandle, name);
+          const displayName = name.replace(/\.fbox$/i, "") || source.taskName;
+          setTaskName(displayName);
+          return name;
+        },
+      });
       setFboxSaveStatus("saved");
-      return name;
+      return savedName;
     } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") {
+      if (err instanceof Error && err.message === "已取消保存") {
         setFboxSaveStatus(projectFileHandleRef.current ? "saved" : "idle");
-        throw new Error("已取消保存");
+        throw err;
       }
       setFboxSaveStatus("error");
       throw err;
     }
-  }, [flushSnapshotPending, bindProjectHandle, fboxWritable, projectFileName]);
+  }, [flushSnapshotPending, bindProjectHandle, fboxWritable, projectFileName, saveCurrentTaskToHistory]);
 
   const resetWorkflow = useCallback(async () => {
     const source = snapshotSourceRef.current;
@@ -774,6 +816,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
         step3Matrix,
         step3BoxCount,
         step3SkuCount,
+        transportMode,
       };
       if (snapshotHasData(snapshot)) {
         saveWorkflowSnapshot(snapshot);
@@ -798,6 +841,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     step3Matrix,
     step3BoxCount,
     step3SkuCount,
+    transportMode,
   ]);
 
   useEffect(() => {
@@ -821,6 +865,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
     step3Matrix,
     step3BoxCount,
     step3SkuCount,
+    transportMode,
     metrics,
     tailPool,
     hasOverweight,
@@ -844,6 +889,73 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       customsSession,
       highestReachedStep,
       staleness,
+  ]);
+
+  useEffect(() => {
+    let cancel = false;
+    void sha256HexOfText(canonicalInputRows(inputRows)).then((hex) => {
+      if (cancel) return;
+      currentInputHashRef.current = hex;
+      setCurrentInputHash(hex);
+      if (appliedInputHashSeed.current !== inputHashSeed.current) {
+        setRecordedInputHashes({
+          export: hex,
+          routing: hex,
+          validation: hex,
+          invoice: hex,
+          customs: hex,
+        });
+        appliedInputHashSeed.current = inputHashSeed.current;
+        step4HashBaselined.current = false;
+      }
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [inputRows]);
+
+  useEffect(() => {
+    if (!step4Ok || !currentInputHash || step4HashBaselined.current) return;
+    setRecordedInputHashes({
+      export: currentInputHash,
+      routing: currentInputHash,
+      validation: currentInputHash,
+      invoice: currentInputHash,
+      customs: currentInputHash,
+    });
+    step4HashBaselined.current = true;
+  }, [step4Ok, currentInputHash]);
+
+  const visibleStaleness = useMemo(() => {
+    const outputs = {
+      boxEditorCount: boxEditorApi.length,
+      step3MatrixCount: step3Matrix.length,
+      routingSnapshotCount,
+      step4Ok,
+      step4StatusLineCount: step4StatusLines.length,
+      hasInvoiceDraft: invoiceDraft != null,
+      invoiceSessionCount: Object.keys(invoiceSessionsByShipment).length,
+      hasCustomsSession: customsSession != null,
+    };
+    return stalenessFromInputHash(
+      effectiveStaleness(staleness, outputs),
+      recordedInputHashes,
+      currentInputHash,
+      outputs,
+      step4Ok,
+    );
+  }, [
+    staleness,
+    recordedInputHashes,
+    currentInputHash,
+    boxEditorApi.length,
+    step3Matrix.length,
+    routingSnapshotCount,
+    step4Ok,
+    step4StatusLines.length,
+    invoiceDraft,
+    invoiceSessionsByShipment,
+    customsSession,
   ]);
 
   const value = useMemo(
@@ -882,6 +994,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       setStep3BoxCount,
       step3SkuCount,
       setStep3SkuCount,
+      transportMode,
+      setTransportMode,
       csvFiles,
       setCsvFiles,
       pdfFiles,
@@ -931,7 +1045,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       fboxWritable,
       loadFboxFromDrop,
       registerSnapshotFlush,
-      staleness,
+      staleness: visibleStaleness,
+      setRoutingSnapshotCount,
       markStale,
       clearStaleFrom: clearStaleFromStage,
       clearStageStale: clearStageStaleFn,
@@ -943,7 +1058,8 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       step,
       taskName,
       taskId,
-      staleness,
+      visibleStaleness,
+      setRoutingSnapshotCount,
       markStale,
       clearStaleFromStage,
       clearStageStaleFn,
@@ -968,6 +1084,7 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
       step3Matrix,
       step3BoxCount,
       step3SkuCount,
+      transportMode,
       csvFiles,
       pdfFiles,
       step4Ok,

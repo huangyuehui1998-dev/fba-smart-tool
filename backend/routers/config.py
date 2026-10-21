@@ -147,12 +147,23 @@ def api_history_files():
 
 
 @router.get("/api/history/files/download")
-def api_history_file_download(kind: str, name: str):
-    """下载单个历史测试文件，供前端构造 File 对象。"""
-    kind_norm = kind.lower().strip()
+def api_history_file_download(name: str | None = None, kind: str | None = None):
+    """下载单个历史测试文件，供前端构造 File 对象。
+
+    文件名先校验。缺 kind 或路径穿越都在进业务之前返回 400，不再让 FastAPI 报 422。
+    """
+    from fba_tool.history_guard import safe_history_filename
+
+    try:
+        safe_name = safe_history_filename(name or "")
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "INVALID_FILE_NAME", "message": "文件名不合法"},
+        ) from exc
+    kind_norm = (kind or "").lower().strip()
     if kind_norm not in ("csv", "pdf"):
         raise HTTPException(status_code=400, detail="kind 须为 csv 或 pdf")
-    safe_name = _safe_template_filename(name)
     media = "text/csv" if kind_norm == "csv" else "application/pdf"
     path = resolve_history_file(kind_norm, safe_name)
     if path is not None:
@@ -208,3 +219,26 @@ def get_limits():
         "throw_ratio": throw_ratio(),
         "input_columns": INPUT_COLUMNS,
     }
+
+
+@router.put("/api/settings/deepseek-key")
+def put_deepseek_key(body: dict):
+    """Key 只在 Windows 上用 DPAPI 落盘。响应里没有原文。"""
+    import sys
+
+    from fba_tool.deepseek_secret import save_key
+
+    if sys.platform != "win32":
+        raise HTTPException(status_code=422, detail="非 Windows 环境不能保存 DeepSeek Key")
+    key = str((body or {}).get("key") or "").strip()
+    if not key:
+        raise HTTPException(status_code=422, detail="Key 不能为空")
+    save_key(key)
+    return {"status": "已设置"}
+
+
+@router.get("/api/settings/deepseek-key")
+def get_deepseek_key():
+    from fba_tool.deepseek_secret import status
+
+    return {"status": status()}

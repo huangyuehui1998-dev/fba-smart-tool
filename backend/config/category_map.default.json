@@ -1,0 +1,14 @@
+{
+  "verified_at": "2026-10-20",
+  "map": {
+    "珠宝": "jewelry",
+    "首饰": "jewelry",
+    "Jewelry": "jewelry",
+    "jewelry": "jewelry",
+    "手表": "watch",
+    "Watch": "watch",
+    "watch": "watch",
+    "其他": "other",
+    "other": "other"
+  }
+}

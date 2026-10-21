@@ -1,6 +1,6 @@
 # 亚马逊 FBA 智能装箱与货件处理工具 — 后端
 
-> S7（2026-10-16）：旧 Streamlit 入口已归档到 `legacy_streamlit/`；现在只有 FastAPI + React 一套。
+> 现行只有 FastAPI + React。旧 Streamlit 目录已从仓库删除。
 
 FastAPI + `fba_tool/` 业务模块，为 React 前端提供 `/api/*` 接口。
 
@@ -29,7 +29,7 @@ API 文档：`http://127.0.0.1:8002/docs`
 
 ```powershell
 cd frontend
-npm install
+npm ci
 $env:FBA_BACKEND_PORT="8002"
 npm run dev
 ```
@@ -56,7 +56,6 @@ backend/
 ├── schemas/             # Pydantic 请求/响应契约
 ├── templates/           # Excel 样表（可替换）
 ├── config/              # 出厂配置：*.default.json（首次运行复制到 app_data/config/，之后只改那边）+ 规则配置
-├── legacy_streamlit/    # 已归档的旧 Streamlit 版（不再维护、不打包）
 └── tests/ + test_*.py   # 单元/集成测试
 ```
 

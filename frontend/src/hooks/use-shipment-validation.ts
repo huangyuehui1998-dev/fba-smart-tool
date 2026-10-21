@@ -23,6 +23,8 @@ import {
   type LogisticsProfile,
 } from "@/lib/forwarder-table";
 import { isOfficialExportBlocked, STALE_DOWNLOAD_HINT } from "@/lib/workflow-invalidation";
+import type { WarehouseWarning } from "@/lib/warehouse-choice";
+import { applyWarehouseChoice, type WarehouseChoice } from "@/lib/warehouse-choice";
 
 type DownloadKind = "worker_packing" | "forwarder" | "shipping_sheet" | "thermal_labels" | null;
 
@@ -35,6 +37,8 @@ export function useShipmentValidation() {
   const {
     csvFiles,
     pdfFiles,
+    taskId,
+    taskName,
     throwRatio,
     setThrowRatio,
     boxEditorApi,
@@ -82,6 +86,7 @@ export function useShipmentValidation() {
   const [workerPackingLoading, setWorkerPackingLoading] = useState(false);
   const [workerPackingSuccess, setWorkerPackingSuccess] = useState(false);
   const [crossCheckOk, setCrossCheckOk] = useState(false);
+  const [warehouseWarnings, setWarehouseWarnings] = useState<WarehouseWarning[]>([]);
 
   const warehouses = useMemo(() => {
     if (workerPackingWarehouses.length) return workerPackingWarehouses;
@@ -165,6 +170,7 @@ export function useShipmentValidation() {
             return next.length > 12 ? next.slice(-12) : next;
           });
         },
+        { taskId, taskName },
       );
       setProgress(85);
       setStep4StatusLines(res.status_lines);
@@ -173,6 +179,7 @@ export function useShipmentValidation() {
       setBoxLabelMapping(res.box_label_mapping ?? []);
       setMappingOk(res.mapping_ok ?? null);
       setCrossCheckOk(Boolean(res.cross_check_ok));
+      setWarehouseWarnings(res.warehouse_warnings ?? []);
       setWorkerPackingSuccess(false);
       if (res.actual_placement_fee) {
         setActualPlacementFee(res.actual_placement_fee);
@@ -248,7 +255,6 @@ export function useShipmentValidation() {
     try {
       await downloadWorkerPackingList(workerPackingPreview, warehouses);
       setWorkerPackingSuccess(true);
-      setCrossCheckOk(true);
     } catch (err) {
       const errors = err instanceof ApiError ? extractApiErrors(err) : [formatApiError(err)];
       setCrossCheckModalErrors(errors);
@@ -321,6 +327,13 @@ export function useShipmentValidation() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [workerPackingPreview, warehouses]);
 
+  const chooseWarehouse = useCallback(
+    (warning: WarehouseWarning, choice: WarehouseChoice) => {
+      setForwarder(applyWarehouseChoice(forwarder, warning, choice));
+    },
+    [forwarder, setForwarder],
+  );
+
   return {
     // 校验态
     validating,
@@ -352,6 +365,8 @@ export function useShipmentValidation() {
     displayErrors,
     forwarderDisplay,
     displayLogisticsProfile,
+    warehouseWarnings,
+    forwarder,
     // 操作
     handleValidate,
     handleWorkerPackingDownload,
@@ -361,5 +376,6 @@ export function useShipmentValidation() {
     downloadWorkerPacking,
     changePackingMode,
     resetValidation,
+    chooseWarehouse,
   };
 }

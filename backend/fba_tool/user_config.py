@@ -7,13 +7,13 @@ from pathlib import Path
 from typing import Any, Dict
 
 from fba_tool.app_paths import resolve_config_read, resolve_config_write, user_config_dir
+from fba_tool.units import CM_TO_INCH, INCH_TO_CM, KG_TO_LB, LB_TO_KG
 
 SETTINGS_FILE = user_config_dir() / "user_settings.json"
 FORMULAS_FILE = user_config_dir() / "formulas.json"
 
 DEFAULT_SETTINGS: Dict[str, Any] = {
     "parameters": {
-        "amazon_max_boxes": 130,
         # FBA 标准件单箱毛重红线为 50 lb ≈ 22.68 kg（见 fba_compliance.FBA_MAX_STANDARD_GROSS_KG）。
         # 排箱上限默认 22.5 kg，预留约 0.18 kg 安全余量，防止仓库磅秤误差导致拒收。
         "weight_limit_kg": 22.5,
@@ -24,10 +24,10 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         #   与此货代系数是两套独立体系，勿混用。
         "throw_ratio": 6000,
         "volume_divisor": 6000,
-        "kg_to_lb_factor": 2.20462,
-        "lb_to_kg_factor": 0.453592,
-        "cm_to_inch_factor": 0.393701,
-        "inch_to_cm_factor": 2.54,
+        "kg_to_lb_factor": KG_TO_LB,
+        "lb_to_kg_factor": LB_TO_KG,
+        "cm_to_inch_factor": CM_TO_INCH,
+        "inch_to_cm_factor": INCH_TO_CM,
         "internal_gross_lb_factor": 2.2,
         "sta_box_prefix": "P1 - B",
         "sta_condition_default": "NewItem",
@@ -42,6 +42,7 @@ DEFAULT_SETTINGS: Dict[str, Any] = {
         # S9-step3 #6：价格上限（美元）。领星售价 / 常规价 / 导入价超过它当作无效、不写入；申报价校验也用它。
         # 100000 美元：D-14，用户确认 2026-10-17。
         "price_max": 100000,
+        "invoice_unit_fallback_declare_unit": True,
     },
     "factory_warehouse_columns": {},
     "forwarder_column_map": {},
@@ -178,10 +179,6 @@ def render_formula(template: str, **ctx) -> str:
         val = merged.get(k, "")
         return str(val)
     return re.sub(r"\{(\w+)\}", repl, template)
-
-
-def amazon_max_boxes() -> int:
-    return int(param("amazon_max_boxes", 130))
 
 
 def weight_limit_kg() -> float:

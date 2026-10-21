@@ -27,6 +27,10 @@ backend/_export_test/
 backend/static/
 .dev/
 
+# 真实批次和冒烟报告不进仓库
+fba_tool/realdata/
+smoke_report.json
+
 # 疑似真实业务数据（真实 FBA 货件号）
 backend/tests/golden/*.json
 backend/_sta_compare.json

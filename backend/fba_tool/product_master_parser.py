@@ -40,7 +40,9 @@ PRODUCT_MASTER_REGEX_MAP: Dict[str, str] = {
 
     "brand": r"品牌",
 
-    "declared_value": r"售价\(客户到手价格\)|产品成本|申报单价",
+    "declared_value": r"售价\(客户到手价格\)|申报单价",
+
+    "product_cost_cny": r"产品成本",
 
     "fnsku": r"美国站[-_]?FNSKU|FNSKU",
 
@@ -374,6 +376,12 @@ def parse_business_product_master(
 
         raise ValueError("未在表头中找到 SKU 列，请确认上传的是产品信息主表")
 
+    # 说明字段只进返回的映射报告，不能当源列名去索引 DataFrame。
+    report_extra: Dict[str, str] = {}
+    if "产品成本" in str(col_map.get("product_cost_cny") or ""):
+        report_extra["product_cost_currency"] = "CNY"
+        report_extra["column_note"] = "产品成本→product_cost_cny（CNY）"
+
 
 
     mapped_data: Dict[str, pd.Series] = {}
@@ -397,6 +405,10 @@ def parse_business_product_master(
     if "declared_value" in clean.columns:
 
         clean["declared_value"] = pd.to_numeric(clean["declared_value"], errors="coerce")
+
+    if "product_cost_cny" in clean.columns:
+
+        clean["product_cost_cny"] = pd.to_numeric(clean["product_cost_cny"], errors="coerce")
 
 
 
@@ -448,7 +460,7 @@ def parse_business_product_master(
 
                 continue
 
-            if field == "declared_value":
+            if field in ("declared_value", "product_cost_cny"):
 
                 rec[field] = _opt_float(val)
 
@@ -466,7 +478,9 @@ def parse_business_product_master(
 
 
 
-    return records, {k: v for k, v in col_map.items()}
+    report = {k: v for k, v in col_map.items()}
+    report.update(report_extra)
+    return records, report
 
 
 

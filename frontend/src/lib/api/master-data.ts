@@ -32,6 +32,13 @@ export type MasterProduct = {
   local_name?: string;
   listing_price?: number | null;
   declare_unit?: string;
+  invoice_unit?: string;
+  pcs_per_set?: number | null;
+  purchase_price?: number | null;
+  material_en?: string;
+  purpose_en?: string;
+  dest_hs_code?: string;
+  fob_unit_value?: number | null;
   carton_gross_weight?: number | null;
   customs_config_missing?: string[];
   customs_config_status?: string;
@@ -101,6 +108,25 @@ export function uploadMasterProductInfo(file: File) {
   const form = new FormData();
   form.append("file", file);
   return apiUpload<MasterProductInfoUploadResponse>("/api/master-data/upload/product-info", form);
+}
+
+export function updateCustomsRuleProfile(body: Record<string, unknown>) {
+  return apiPostJson<Record<string, unknown>>("/api/master-data/customs-rule-profile", body);
+}
+
+export function fetchCustomsRuleProfile() {
+  return apiFetchJson<Record<string, unknown>>("/api/master-data/customs-rule-profile");
+}
+
+export function uploadRetailPrices(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return apiUpload<{
+    parsed_count: number;
+    imported_count: number;
+    unmatched_count: number;
+    warnings?: string[];
+  }>("/api/master-data/retail-prices/upload", form);
 }
 
 export function patchMasterSkuField(sku: string, field: MasterPatchableField, value: unknown) {

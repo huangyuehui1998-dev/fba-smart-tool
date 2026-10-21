@@ -2,49 +2,54 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional, Tuple
 
 from fba_tool.master_data_apply import build_placement_unit_rows
+from fba_tool.units import CM_PER_IN, KG_TO_LB, LB_IN_KG
 
 # S1e：判定用精确系数（1 in = 2.54 cm，1 lb = 0.45359237 kg）
-CM_TO_IN = 1 / 2.54
-KG_TO_LB = 1 / 0.45359237
+# 139 只用于配置费选档。尺寸段帮助页里的除数未核实，不拿来做箱规阻断。
+CM_TO_IN = float(Decimal(1) / CM_PER_IN)
 DIM_WEIGHT_DIVISOR = 139.0
 
 FeeRange = Tuple[float, float]
 WeightTier = Tuple[float, float, Dict[str, FeeRange]]
 
-# 大号标准尺寸 — 无 2-3 仓选项
-LARGE_STANDARD_TIERS: List[WeightTier] = [
-    (0.0, 0.75, {"1_loc": (0.20, 0.40), "5_loc": (0.0, 0.0)}),
-    (0.75, 1.5, {"1_loc": (0.24, 0.50), "5_loc": (0.0, 0.0)}),
-    (1.5, 3.0, {"1_loc": (0.34, 0.60), "5_loc": (0.0, 0.0)}),
-    (3.0, 5.0, {"1_loc": (0.38, 0.76), "5_loc": (0.0, 0.0)}),
-    (5.0, 7.0, {"1_loc": (0.40, 0.98), "5_loc": (0.0, 0.0)}),
-    (7.0, 10.0, {"1_loc": (0.42, 1.20), "5_loc": (0.0, 0.0)}),
-    (10.0, 15.0, {"1_loc": (0.44, 1.50), "5_loc": (0.0, 0.0)}),
-    (15.0, 20.0, {"1_loc": (0.55, 1.90), "5_loc": (0.0, 0.0)}),
-]
 
-# 小号大件尺寸 — 含 2-3 仓选项
-SMALL_OVERSIZE_TIERS: List[WeightTier] = [
-    (0.0, 5.0, {"1_loc": (1.10, 1.60), "2_3_loc": (0.55, 1.10), "5_loc": (0.0, 0.0)}),
-    (5.0, 12.0, {"1_loc": (1.75, 2.40), "2_3_loc": (0.65, 1.75), "5_loc": (0.0, 0.0)}),
-    (12.0, 28.0, {"1_loc": (2.74, 3.50), "2_3_loc": (0.81, 2.19), "5_loc": (0.0, 0.0)}),
-    (28.0, 42.0, {"1_loc": (3.95, 4.95), "2_3_loc": (1.05, 2.83), "5_loc": (0.0, 0.0)}),
-    (42.0, 50.0, {"1_loc": (4.80, 5.95), "2_3_loc": (1.23, 3.32), "5_loc": (0.0, 0.0)}),
-]
+def _tiers_from_policy() -> Dict[str, List[WeightTier]]:
+    from fba_tool.policy import placement_classes
+
+    tables: Dict[str, List[WeightTier]] = {}
+    for name, rows in placement_classes().items():
+        tiers: List[WeightTier] = []
+        for row in rows:
+            high = row.get("high")
+            fees: Dict[str, FeeRange] = {}
+            for key in ("1_loc", "2_3_loc", "5_loc"):
+                if key in row and row[key] is not None:
+                    pair = row[key]
+                    fees[key] = (float(pair[0]), float(pair[1]))
+            tiers.append((float(row.get("low") or 0), float("inf") if high is None else float(high), fees))
+        tables[name] = tiers
+    return tables
+
+
+_RATE_TABLES = _tiers_from_policy()
+LARGE_STANDARD_TIERS = _RATE_TABLES["large_standard"]
+SMALL_OVERSIZE_TIERS = _RATE_TABLES["small_oversize"]
 
 SIZE_CLASS_LABELS: Dict[str, str] = {
-    "small_standard": "小号标准",
-    "large_standard": "大号标准",
-    "small_oversize": "小号大件",
-    "large_oversize": "大号大件",
+    "small_standard": "Small standard",
+    "large_standard": "Large standard",
+    "small_oversize": "Small Bulky",
+    "large_oversize": "Large Bulky",
+    "extra_large": "Extra-large",
 }
 
 STANDARD_SIZE_CLASSES = frozenset({"small_standard", "large_standard"})
-FEE_SUPPORTED_CLASSES = frozenset({"large_standard", "small_oversize"})
-OVERSIZE_CLASSES = frozenset({"small_oversize", "large_oversize"})
+FEE_SUPPORTED_CLASSES = frozenset(_RATE_TABLES)
+OVERSIZE_CLASSES = frozenset({"small_oversize", "large_oversize", "extra_large"})
 
 SPLIT_DISABLED_REASON_STANDARD = "标准尺寸商品不支持部分拆分入库"
 
@@ -84,18 +89,21 @@ class PlacementFeeEngine:
     """2026 入库配置服务费计算引擎。"""
 
     def __init__(self) -> None:
-        self._rate_tables: Dict[str, List[WeightTier]] = {
-            "large_standard": LARGE_STANDARD_TIERS,
-            "small_oversize": SMALL_OVERSIZE_TIERS,
-        }
+        self._rate_tables = _RATE_TABLES
 
     @staticmethod
     def kg_to_lb(weight_kg: float) -> float:
         return float(weight_kg) * KG_TO_LB
 
     @staticmethod
+    def kg_to_lb_2dp(weight_kg: float) -> float:
+        """计费重量按磅保留 2 位，和 50.00 lb 边界同一套四舍五入。"""
+        pounds = Decimal(str(weight_kg)) / LB_IN_KG
+        return float(pounds.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+    @staticmethod
     def cm_to_in(value_cm: float) -> float:
-        return float(value_cm) * CM_TO_IN
+        return float(Decimal(str(value_cm)) / CM_PER_IN)
 
     @staticmethod
     def sorted_dims_in(l_cm: float, w_cm: float, h_cm: float) -> Tuple[float, float, float]:
@@ -109,7 +117,16 @@ class PlacementFeeEngine:
     def dimensional_weight_lb(longest_in: float, median_in: float, shortest_in: float) -> float:
         if longest_in <= 0 or median_in <= 0 or shortest_in <= 0:
             return 0.0
-        return (longest_in * median_in * shortest_in) / DIM_WEIGHT_DIVISOR
+        dim = (Decimal(str(longest_in)) * Decimal(str(median_in)) * Decimal(str(shortest_in))) / Decimal(str(DIM_WEIGHT_DIVISOR))
+        return float(dim.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP))
+
+    def _weight_basis(self, size_class: Optional[str]) -> str:
+        if not size_class:
+            return "unit"
+        from fba_tool.policy import load_policy
+
+        basis = (load_policy().get("placement_fees") or {}).get("weight_basis") or {}
+        return str(basis.get(size_class) or "unit")
 
     def resolve_chargeable_weight(
         self,
@@ -119,7 +136,7 @@ class PlacementFeeEngine:
         h_cm: float,
         size_class: Optional[str],
     ) -> ChargeableWeight:
-        actual_lb = self.kg_to_lb(weight_kg)
+        actual_lb = self.kg_to_lb_2dp(weight_kg)
         has_dims = l_cm > 0 and w_cm > 0 and h_cm > 0
 
         if not has_dims:
@@ -132,11 +149,7 @@ class PlacementFeeEngine:
 
         longest, median, shortest = self.sorted_dims_in(l_cm, w_cm, h_cm)
         dim_lb = self.dimensional_weight_lb(longest, median, shortest)
-
-        if size_class == "small_standard":
-            billing_lb = actual_lb
-            volume_applied = False
-        elif size_class in {"large_standard", "small_oversize", "large_oversize"}:
+        if self._weight_basis(size_class) == "max_dim_unit":
             billing_lb = max(actual_lb, dim_lb)
             volume_applied = dim_lb > actual_lb
         else:
@@ -145,7 +158,7 @@ class PlacementFeeEngine:
 
         return ChargeableWeight(
             actual_lb=actual_lb,
-            dimensional_lb=round(dim_lb, 3) if has_dims else None,
+            dimensional_lb=dim_lb,
             billing_lb=billing_lb,
             volume_weight_applied=volume_applied,
         )
@@ -160,7 +173,7 @@ class PlacementFeeEngine:
         if l_cm <= 0 or w_cm <= 0 or h_cm <= 0:
             # 缺尺寸：按实重给出粗估分段（仅用于费用参考），compute_unit 会标注 low_confidence，
             # 提示运营补全外箱尺寸后才能得到精确费用。
-            actual_lb = self.kg_to_lb(weight_kg)
+            actual_lb = self.kg_to_lb_2dp(weight_kg)
             if actual_lb <= 0:
                 return None
             if actual_lb <= 1.0:
@@ -169,24 +182,50 @@ class PlacementFeeEngine:
                 return "large_standard"
             if actual_lb <= 50.0:
                 return "small_oversize"
-            return None
+            return "extra_large"
 
+        from fba_tool.policy import size_limits
+
+        limits = size_limits()
         longest, median, shortest = self.sorted_dims_in(l_cm, w_cm, h_cm)
-        actual_lb = self.kg_to_lb(weight_kg)
+        actual_lb = self.kg_to_lb_2dp(weight_kg)
         dim_lb = self.dimensional_weight_lb(longest, median, shortest)
 
-        if longest <= 15 and median <= 12 and shortest <= 0.75 and actual_lb <= 1.0:
+        small = limits["small_standard"]
+        if (
+            longest <= small["longest"]
+            and median <= small["median"]
+            and shortest <= small["shortest"]
+            and actual_lb <= small["weight_lb"]
+        ):
             return "small_standard"
 
         billing_lb = max(actual_lb, dim_lb)
-
-        if longest <= 18 and median <= 14 and shortest <= 8 and billing_lb <= 20:
+        large = limits["large_standard"]
+        bulky = limits["small_oversize"]
+        large_bulky = limits["large_oversize"]
+        if (
+            longest <= large["longest"]
+            and median <= large["median"]
+            and shortest <= large["shortest"]
+            and billing_lb <= large["weight_lb"]
+        ):
             return "large_standard"
-        if longest <= 37 and median <= 28 and shortest <= 20 and billing_lb <= 50:
+        if (
+            longest <= bulky["longest"]
+            and median <= bulky["median"]
+            and shortest <= bulky["shortest"]
+            and billing_lb <= bulky["weight_lb"]
+        ):
             return "small_oversize"
-        if longest <= 59 and median <= 33 and shortest <= 33 and billing_lb <= 50:
+        if (
+            longest <= large_bulky["longest"]
+            and median <= large_bulky["median"]
+            and shortest <= large_bulky["shortest"]
+            and billing_lb <= large_bulky["weight_lb"]
+        ):
             return "large_oversize"
-        return None
+        return "extra_large"
 
     @staticmethod
     def _match_weight_tier(billing_lb: float, tiers: List[WeightTier]) -> Optional[Dict[str, FeeRange]]:
@@ -228,12 +267,8 @@ class PlacementFeeEngine:
             reason = None
             low_confidence = False
             if not has_dims:
-                reason = "外箱尺寸缺失，无法精确判定尺寸分段，费用暂不估算（请补全长/宽/高）"
+                reason = "单品包装尺寸缺失"
                 low_confidence = True
-            elif size_class == "small_standard":
-                reason = "当前政策费率表未覆盖小号标准尺寸"
-            elif size_class == "large_oversize":
-                reason = "超出当前费率表支持的大件分段"
             elif not size_class:
                 reason = "无法判定尺寸分段或超出 50 lb 上限"
             return {
@@ -274,6 +309,8 @@ class PlacementFeeEngine:
                 "ineligible_reason": "计费重量超出该尺寸分段费率表上限",
             }
 
+        from fba_tool.policy import fee_disclaimer
+
         one_loc = fees.get("1_loc")
         split_23 = fees.get("2_3_loc")
         opt_5 = fees.get("5_loc", (0.0, 0.0))
@@ -293,6 +330,8 @@ class PlacementFeeEngine:
             "split_2_3": None if is_standard else (self._fee_dict(*split_23) if split_23 else None),
             "optimized_5": self._fee_dict(*opt_5),
             "ineligible_reason": None,
+            "fee_disclaimer": fee_disclaimer(),
+            "fee_note": "Extra-large：配置费 $0" if size_class == "extra_large" else None,
         }
 
     def compute_shipment(self, rows: List[Dict[str, Any]]) -> Dict[str, Any]:
@@ -366,11 +405,15 @@ class PlacementFeeEngine:
                 else "当前货件无可用大件 SKU，无法使用 2-3 仓拆分"
             )
 
+        from fba_tool.policy import fee_disclaimer, pending_notes
+
         return {
             "total_units": total_units,
+            "pending_notes": pending_notes(),
             "eligible_units": eligible_units,
             "oversize_units": oversize_units,
             "ineligible_units": ineligible_units,
+            "fee_disclaimer": fee_disclaimer(),
             "line_items": line_items,
             "one_location": {
                 "enabled": eligible_units > 0,
@@ -440,8 +483,29 @@ def _scenario_line_totals(line_items: List[Dict[str, Any]], scenario: str) -> Tu
     return round(total_min, 2), round(total_max, 2)
 
 
+# 第13–15批公开仓码。表里没有的码再查 fba_warehouse.region。
+WAREHOUSE_REGIONS.update({
+    "CLT2": "美东",
+    "LAS1": "美西",
+    "LAX9": "美西",
+    "TEB9": "美东",
+})
+
+
 def warehouse_region(code: str) -> str:
-    return WAREHOUSE_REGIONS.get(str(code or "").strip().upper(), "其他")
+    key = str(code or "").strip().upper()
+    if not key:
+        return "其他"
+    try:
+        from fba_tool.warehouse_db import get_warehouse
+
+        row = get_warehouse(key) or {}
+        region = str(row.get("region") or "").strip()
+        if region:
+            return region
+    except Exception:  # noqa: BLE001
+        pass
+    return WAREHOUSE_REGIONS.get(key, "其他")
 
 
 def compute_locked_placement_fee(

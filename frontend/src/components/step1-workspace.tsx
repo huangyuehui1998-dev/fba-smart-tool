@@ -1,3 +1,5 @@
+import { useState } from "react";
+import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import {
   Sparkles,
   Download,
@@ -32,6 +34,8 @@ import { Step1CostDashboard } from "@/components/step1-cost-dashboard";
 import { emptyComputed, type ComputedDisplay } from "@/lib/step1-rows";
 import { usePreventBrowserFileDrop } from "@/hooks/use-prevent-browser-file-drop";
 import { useStep1Logic } from "@/hooks/use-step1-logic";
+import { MasterDataGapBanner } from "@/components/master-data-gap-banner";
+import { step1FixHint, summarizeStep1Issues, visibleStep1Indexes } from "@/lib/step1-issues";
 
 const EDITABLE_COLS = [
   { key: "sku", label: "SKU简称", w: "min-w-[120px]" },
@@ -56,6 +60,9 @@ const COMPUTED_COLS = [
 export function Step1Workspace({ onNext }: { onNext?: () => void }) {
   usePreventBrowserFileDrop();
 
+  const [onlyIssues, setOnlyIssues] = useState(false);
+  const [fixRow, setFixRow] = useState<number | null>(null);
+  const [fixUnit, setFixUnit] = useState("");
   const {
     rows,
     text,
@@ -68,6 +75,11 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
     actualPlacementFee,
     validationErrors,
     weightWarnings,
+    masterGaps,
+    weightConfirmOpen,
+    keepDeclaredWeights,
+    useCalculatedWeights,
+    applyUnitWeightFix,
     parseAction,
     previewLoading,
     error,
@@ -76,6 +88,9 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
     excelInputId,
     totals: { totalFullBoxes, totalNet, totalGross },
     update,
+    applySpec,
+    cartonSpecsBySku,
+    cartonSpecNotices,
     addRow,
     removeRow,
     handleParseLocal,
@@ -84,8 +99,12 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
     handleDownloadTemplate,
   } = useStep1Logic();
 
+  const issueSummary = summarizeStep1Issues(validationErrors, weightWarnings);
+  const shownIndexes = visibleStep1Indexes(rows.length, issueSummary, onlyIssues);
+
   return (
     <div className="space-y-6 pb-32">
+      <MasterDataGapBanner gaps={masterGaps} />
       {(error || success) && (
         <div className="space-y-2">
           {error && (
@@ -247,9 +266,40 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
         </Card>
       </div>
 
+      {cartonSpecNotices.length > 0 && (
+        <div className="space-y-1 text-xs text-amber-800">
+          {cartonSpecNotices.map((notice) => (
+            <p key={notice}>{notice}</p>
+          ))}
+        </div>
+      )}
+
       <Card className="shadow-sm">
-        <CardHeader className="flex flex-row items-center justify-between pb-3">
-          <CardTitle className="text-base">可编辑数据网格</CardTitle>
+        <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
+          <div className="flex flex-wrap items-center gap-2">
+            <CardTitle className="text-base">可编辑数据网格</CardTitle>
+            <button
+              type="button"
+              data-testid="issue-count-block"
+              className="rounded border border-red-200 bg-red-50 px-2 py-0.5 text-xs text-red-800"
+              onClick={() => setOnlyIssues(true)}
+            >
+              阻断 {issueSummary.blockCount}
+            </button>
+            <button
+              type="button"
+              data-testid="issue-count-warn"
+              className="rounded border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs text-amber-900"
+              onClick={() => setOnlyIssues((on) => !on)}
+            >
+              警告 {issueSummary.warnCount}
+            </button>
+            {onlyIssues && (
+              <button type="button" className="text-xs text-muted-foreground underline" onClick={() => setOnlyIssues(false)}>
+                显示全部
+              </button>
+            )}
+          </div>
           <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
             {previewLoading && (
               <span className="flex items-center gap-1 text-primary">
@@ -290,36 +340,72 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {rows.map((r, i) => {
+                {shownIndexes.map((i) => {
+                  const r = rows[i]!;
                   const c = computed[i] ?? emptyComputed();
+                  const blocked = issueSummary.blockRows.has(i);
+                  const warned = issueSummary.warnRows.has(i);
+                  const hint = step1FixHint(i, validationErrors, weightWarnings);
+                  const specOptions = cartonSpecsBySku[r.sku] ?? [];
                   return (
-                    <TableRow key={i} className="hover:bg-transparent">
+                    <TableRow
+                      key={i}
+                      data-testid="step1-grid-row"
+                      className={cn(
+                        "hover:bg-transparent",
+                        blocked && "bg-red-50",
+                        !blocked && warned && "bg-amber-50",
+                      )}
+                    >
                       <TableCell className="text-center text-xs text-muted-foreground">
                         {i + 1}
+                        {hint ? (
+                          <div className="mt-1 text-[10px] leading-tight text-amber-800">{hint}</div>
+                        ) : null}
                       </TableCell>
                       {EDITABLE_COLS.map((col) => (
                         <TableCell key={col.key} className="p-1">
-                          {col.key === "sku" && r.dataSource ? (
+                          {col.key === "sku" && (r.dataSource || specOptions.length > 1) ? (
                             <div className="flex min-w-[120px] flex-col gap-1">
                               <Input
                                 value={r[col.key]}
                                 onChange={(e) => update(i, col.key, e.target.value)}
                                 className="h-8 border-transparent bg-transparent px-2 text-xs shadow-none focus-visible:border-input focus-visible:bg-background"
                               />
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "w-fit px-1.5 py-0 text-[10px] font-normal",
-                                  r.dataSource === "official"
-                                    ? "border-emerald-300 bg-emerald-50 text-emerald-800"
-                                    : "border-amber-300 bg-amber-50 text-amber-800",
-                                )}
-                              >
-                                {r.dataSource === "official" ? "🟢 外箱主数据" : "🟡 手填外箱"}
-                              </Badge>
+                              {specOptions.length > 1 ? (
+                                <select
+                                  data-testid="carton-spec-select"
+                                  className="h-7 rounded border border-input bg-background px-1 text-[10px]"
+                                  value={String(specOptions.find((spec) => String(spec.qty_per_carton) === r.perBox)?.id ?? specOptions[0].id)}
+                                  onChange={(event) => {
+                                    const chosen = specOptions.find((spec) => String(spec.id) === event.target.value);
+                                    if (chosen) applySpec(i, chosen);
+                                  }}
+                                >
+                                  {specOptions.map((spec) => (
+                                    <option key={spec.id} value={spec.id}>
+                                      {spec.spec_name}
+                                    </option>
+                                  ))}
+                                </select>
+                              ) : null}
+                              {r.dataSource ? (
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "w-fit px-1.5 py-0 text-[10px] font-normal",
+                                    r.dataSource === "official"
+                                      ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+                                      : "border-amber-300 bg-amber-50 text-amber-800",
+                                  )}
+                                >
+                                  {r.dataSource === "official" ? "🟢 外箱主数据" : "🟡 手填外箱"}
+                                </Badge>
+                              ) : null}
                             </div>
                           ) : (
                             <Input
+                              id={col.key === "unitKg" ? `step1-unit-kg-${i}` : undefined}
                               value={r[col.key]}
                               onChange={(e) => update(i, col.key, e.target.value)}
                               className="h-8 border-transparent bg-transparent px-2 text-xs shadow-none focus-visible:border-input focus-visible:bg-background"
@@ -375,17 +461,80 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
           <AlertTriangle className="h-4 w-4 !text-amber-600" />
           <AlertTitle className="text-sm font-semibold">单箱毛重与理论值不符</AlertTitle>
           <AlertDescription className="mt-1 text-xs">
-            <ul className="list-inside list-disc space-y-0.5">
+            <ul className="list-inside list-disc space-y-1">
               {weightWarnings.map((w) => (
-                <li key={`${w.row_index}-${w.sku}`}>{w.message}</li>
+                <li key={`${w.row_index}-${w.sku}-${w.kind}`}>
+                  {w.message}
+                  {(w.kind === "suspect_unit_in_gross" || w.kind === "unit_weight_missing") && (
+                    <span className="ml-2 inline-flex gap-1">
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() => document.getElementById(`step1-unit-kg-${w.row_index}`)?.focus()}
+                      >
+                        去填单个重量
+                      </button>
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() => {
+                          setFixRow(w.row_index);
+                          setFixUnit("");
+                        }}
+                      >
+                        一键修正
+                      </button>
+                      <button type="button" className="underline" onClick={keepDeclaredWeights}>
+                        保留录入值
+                      </button>
+                    </span>
+                  )}
+                  {w.requires_confirm && w.kind !== "suspect_unit_in_gross" && w.kind !== "unit_weight_missing" && (
+                    <span className="ml-2 inline-flex gap-1">
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={useCalculatedWeights}
+                        disabled={w.suggested_gross_kg == null}
+                      >
+                        使用计算值
+                      </button>
+                      <button type="button" className="underline" onClick={keepDeclaredWeights}>
+                        保留录入值
+                      </button>
+                    </span>
+                  )}
+                </li>
               ))}
             </ul>
+            {weightConfirmOpen && (
+              <p className="mt-2 text-[11px] font-medium">这批录入的毛重还没确认。改动后会再要求确认一次。</p>
+            )}
             <p className="mt-2 text-[11px] text-amber-800/90">
-              不阻断流程。但录入毛重会直接用于申报与货代计费，建议复磅后再继续。
+              单重缺失时不会把空箱重当成建议值。疑似单件重填进毛重时，阈值是内部经验值。内部阈值，非官方规定。导出前仍要确认。
             </p>
           </AlertDescription>
         </Alert>
       )}
+      <ConfirmDialog
+        open={fixRow != null}
+        title="按单重重算毛重"
+        description="输入单个重量后，单箱毛重改为 装量 × 单重 + 皮重。"
+        confirmLabel="写入"
+        onCancel={() => setFixRow(null)}
+        onConfirm={() => {
+          if (fixRow != null) applyUnitWeightFix(fixRow, fixUnit);
+          setFixRow(null);
+        }}
+      >
+        <Input
+          autoFocus
+          inputMode="decimal"
+          placeholder="单个重量 kg"
+          value={fixUnit}
+          onChange={(e) => setFixUnit(e.target.value)}
+        />
+      </ConfirmDialog>
 
       {validationErrors.length > 0 && (
         <Alert className="border-red-200 bg-red-50 text-red-900">
@@ -405,7 +554,7 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
         </Alert>
       )}
 
-      <div className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <div data-bottom-bar className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <div className="flex items-center justify-between gap-4">
           <div className="flex flex-wrap items-center gap-2">
             <StatBadge

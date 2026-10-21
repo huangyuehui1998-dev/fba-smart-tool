@@ -18,7 +18,7 @@ from fba_tool.app_paths import bundled_config_dir
 
 TEXT_FIELDS = ("batch", "ticket_no", "order_no", "declare_mode", "warehouse_code", "region", "forwarder", "channel", "lcl_no")
 INT_FIELDS = ("box_count", "total_qty")
-FLOAT_FIELDS = ("gross_kg", "net_kg", "chargeable_kg", "unit_freight", "total_freight")
+FLOAT_FIELDS = ("gross_kg", "net_kg", "chargeable_kg", "unit_freight", "total_freight", "sta_placement_fee")
 DATE_FIELDS = (
     "etd", "eta_expected", "delivered_at", "amazon_received_at",
     "export_date", "declare_date", "invoice_date", "contract_date", "shipment_deadline", "entrust_date",

@@ -213,6 +213,13 @@ def listing_to_product(row: Dict[str, Any], synced_at: str) -> Optional[Dict[str
         "listing_price_basis": (mapped or {}).get("listing_price_basis"),
         "regular_price": _price_or_none(row.get("regular_price")),  # D-12：常规价，用来识别促销
     }
+    from fba_tool.policy import map_category_name
+
+    mapped_category = map_category_name(
+        pick_field(row, "category_name", "category", "cid_name", "product_category", "品类")
+    )
+    if mapped_category:
+        rec["category"] = mapped_category
     issues = _price_issues(mapped, row)
     if issues:
         rec["price_issues"] = issues

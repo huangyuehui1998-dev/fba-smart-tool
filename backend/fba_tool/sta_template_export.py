@@ -15,6 +15,7 @@ from openpyxl import Workbook
 
 from fba_tool.models import SkuRow
 from fba_tool.product_catalog import lookup_sta_product_name
+from fba_tool.units import CM_PER_IN, kg_to_lb
 from fba_tool.user_config import label, render_formula
 
 # 0-based 列索引
@@ -22,8 +23,7 @@ IDX_DEATH_COL = 10  # K 列
 IDX_FIRST_BOX = 11  # L 列
 BASE_COL_COUNT = 11  # A~K
 
-STA_LB_PER_KG = 2.2046
-STA_CM_PER_INCH = 2.54
+STA_CM_PER_INCH = float(CM_PER_IN)
 
 INSTRUCTION_TEXT = "请在下方提供此装箱组的包装箱详情。如果您有任何疑问，请参阅说明表。"
 PACK_GROUP_TEXT = "装箱组：1"
@@ -64,7 +64,7 @@ def _matrix_max_box(box_matrix: pd.DataFrame) -> int:
 
 
 def _kg_to_lb(kg: float) -> float:
-    return round(float(kg) * STA_LB_PER_KG, 2)
+    return kg_to_lb(kg, 2)
 
 
 def _cm_to_in(cm: float) -> float:
@@ -107,26 +107,17 @@ def _per_box_metrics_imperial(
         box_no = int(box_no)
         if box_no < 1 or box_no > max_box:
             continue
-        net = 0.0
-        max_l = max_w = max_h = 0.0
-        tare = 0.0
-        full_gross = None
-        has_dim = False
+        from fba_tool.box_weight import box_gross_kg, outer_dims_cm
+
+        lines = []
         for _, row in group.iterrows():
             sku = sku_map.get(str(row["SKU简称"]))
             if not sku:
                 continue
-            qty = int(row["数量"])
-            net += sku.unit_weight_kg * qty
-            if sku.length_cm or sku.width_cm or sku.height_cm:
-                has_dim = True
-            max_l = max(max_l, sku.length_cm)
-            max_w = max(max_w, sku.width_cm)
-            max_h = max(max_h, sku.height_cm)
-            tare = max(tare, sku.carton_tare_kg)
-            if len(group) == 1 and qty == sku.carton_qty and sku.carton_gross_kg is not None:
-                full_gross = float(sku.carton_gross_kg)
-        gross_kg = full_gross if full_gross is not None else round(net + tare, 2)
+            lines.append((sku.sku, int(row["数量"])))
+        max_l, max_w, max_h = outer_dims_cm(lines, sku_map)
+        has_dim = any(v > 0 for v in (max_l, max_w, max_h))
+        gross_kg = round(box_gross_kg(lines, sku_map), 2)
         result[box_no] = {
             "weight_lb": _kg_to_lb(gross_kg) if gross_kg else "",
             "width_in": _cm_to_in(max_w) if has_dim and max_w else "",

@@ -5,9 +5,8 @@ import {
   createRootRouteWithContext,
   useRouter,
   HeadContent,
-  Scripts,
 } from "@tanstack/react-router";
-import { useEffect, useLayoutEffect, type ReactNode } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
@@ -87,50 +86,35 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { property: "og:type", content: "website" },
     ],
     links: [
+      { rel: "icon", href: "/favicon.ico", sizes: "any" },
       {
         rel: "icon",
         type: "image/svg+xml",
         href: "/favicon.svg",
       },
+      { rel: "manifest", href: "/manifest.webmanifest" },
       {
         rel: "stylesheet",
         href: appCss,
       },
     ],
   }),
-  shellComponent: RootDocument,
   component: RootComponent,
   notFoundComponent: NotFoundComponent,
   errorComponent: ErrorComponent,
 });
 
-function RootDocument({ children }: { children: ReactNode }) {
-  // 必须在文档提交之后再改 <html>。模块加载时改 class / color-scheme 会让水合对不上。
+function RootComponent() {
+  const { queryClient } = Route.useRouteContext();
   useLayoutEffect(() => {
     applyTheme(loadThemePreference());
   }, []);
 
   return (
-    <html lang="zh-CN">
-      <head>
-        <HeadContent />
-      </head>
-      <body>
-        <div id="root">{children}</div>
-        <Scripts />
-      </body>
-    </html>
-  );
-}
-
-function RootComponent() {
-  const { queryClient } = Route.useRouteContext();
-
-  return (
     <QueryClientProvider client={queryClient}>
+      <HeadContent />
       <WorkflowProvider>
         <Toaster richColors position="top-center" />
-        {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
         <Outlet />
       </WorkflowProvider>
     </QueryClientProvider>

@@ -14,6 +14,8 @@ import {
 import { averageUnitPrice, patchCustomsLine, recomputeCustomsTotals } from "@/lib/customs-totals";
 import { fetchExporters, type ExporterProfile } from "@/lib/api/exporters";
 import { isOfficialExportBlocked, STALE_DOWNLOAD_HINT } from "@/lib/workflow-invalidation";
+import { ApiError } from "@/lib/api/client";
+import { explainApiError, type ErrorCopy } from "@/lib/error-messages";
 
 function buildPreviewSig(
   source: CustomsSource,
@@ -49,6 +51,8 @@ export function useCustoms() {
   const [exporting, setExporting] = useState(false);
   const [exportFormat, setExportFormat] = useState<"xlsx" | "xls">("xlsx");
   const [error, setError] = useState<string | null>(null);
+  const [fxNotice, setFxNotice] = useState<ErrorCopy | null>(null);
+  const [declarationDate, setDeclarationDate] = useState(customsSession?.data?.dates?.declare_date ?? "");
   const [activeTab, setActiveTab] = useState(customsSession?.activeTab ?? "declaration");
 
   const buildWorkflowJson = useCallback(
@@ -159,27 +163,52 @@ export function useCustoms() {
     if (!canPreview) return;
     setLoading(true);
     setError(null);
+    setFxNotice(null);
     try {
       const res = await previewCustoms({
         source,
         exporter_id: exporterId || undefined,
         order_no: orderNo.trim(),
-        workflow_json: buildWorkflowJson(),
+        workflow_json: {
+          ...buildWorkflowJson(),
+          fx_snapshot: data
+            ? {
+                fx_rate: data.fx_rate,
+                fx_rate_type: data.fx_rate_type,
+                fx_applicable_month: data.fx_applicable_month,
+                fx_source_url: data.fx_source_url,
+                fx_publish_date: data.fx_publish_date,
+              }
+            : undefined,
+        },
         invoice_draft: source === "invoice" ? (invoiceDraft as unknown as Record<string, unknown>) : null,
         selected_shipment_ids: selectedIds,
+        declaration_date: declarationDate,
+        fx_snapshot: data
+          ? {
+              fx_rate: data.fx_rate,
+              fx_rate_type: data.fx_rate_type,
+              fx_applicable_month: data.fx_applicable_month,
+              fx_source_url: data.fx_source_url,
+              fx_publish_date: data.fx_publish_date,
+            }
+          : undefined,
       });
       setData(recomputeCustomsTotals(res.data));
       setPreviewSig(buildPreviewSig(source, orderNo, exporterId, selectedIds));
       clearStageStale("customs");
       toast.success("报关资料预览已生成");
     } catch (e) {
+      if (e instanceof ApiError && (e.detail as { code?: string } | undefined)?.code === "FX_RATE_REQUIRED") {
+        setFxNotice(explainApiError(e));
+      }
       const msg = formatApiError(e);
       setError(msg);
       toast.error(msg);
     } finally {
       setLoading(false);
     }
-  }, [canPreview, source, exporterId, orderNo, buildWorkflowJson, invoiceDraft, selectedIds, staleness.validation, clearStageStale]);
+  }, [canPreview, source, exporterId, orderNo, buildWorkflowJson, invoiceDraft, selectedIds, staleness.validation, clearStageStale, data, declarationDate]);
 
   const patchData = useCallback((patch: Partial<CustomsPackageData>) => {
     setData((prev) => (prev ? recomputeCustomsTotals({ ...prev, ...patch }) : prev));
@@ -254,6 +283,9 @@ export function useCustoms() {
     setExportFormat,
     error,
     setError,
+    fxNotice,
+    declarationDate,
+    setDeclarationDate,
     canPreview,
     runPreview,
     runExport,

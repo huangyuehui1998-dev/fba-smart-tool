@@ -44,17 +44,36 @@ def _build_from_request(body: CustomsPreviewRequest | CustomsExportRequest) -> C
 
     profile = _resolve_profile(body.exporter_id)
     step1_rows = wf.get("input_rows") or wf.get("rows") or []
-    return build_customs_data(
-        pairs,
-        step1_rows,
-        profile,
-        source=body.source,
-        invoice_draft=body.invoice_draft,
-        order_no=body.order_no,
-        dates=body.dates,
-        overrides=body.overrides,
-        selected_shipment_ids=selected_ids,
-    )
+    dates = dict(body.dates or {})
+    declaration_date = str(getattr(body, "declaration_date", "") or dates.get("declare_date") or "")
+    if declaration_date:
+        dates["declare_date"] = declaration_date
+    fx_snapshot = getattr(body, "fx_snapshot", None) or wf.get("fx_snapshot")
+    try:
+        return build_customs_data(
+            pairs,
+            step1_rows,
+            profile,
+            source=body.source,
+            invoice_draft=body.invoice_draft,
+            order_no=body.order_no,
+            dates=dates,
+            overrides=body.overrides,
+            selected_shipment_ids=selected_ids,
+            declaration_date=declaration_date,
+            fx_snapshot=fx_snapshot if isinstance(fx_snapshot, dict) else None,
+        )
+    except Exception as exc:
+        from fba_tool.declared_value import FxRateRequired, MissingPrice
+
+        if isinstance(exc, MissingPrice):
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": exc.message, "missing": exc.missing},
+            ) from exc
+        if isinstance(exc, FxRateRequired):
+            raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
+        raise
 
 
 @router.post("/api/customs/preview")
@@ -65,6 +84,9 @@ def api_customs_preview(body: CustomsPreviewRequest):
 
 @router.post("/api/customs/export")
 def api_customs_export(body: CustomsExportRequest):
+    from fba_tool.weight_gate import raise_if_weight_unconfirmed
+
+    raise_if_weight_unconfirmed(body.weight_rows, body.confirm_weight_warnings)
     if body.data:
         from fba_tool.customs_package import CustomsLineItem, apply_overrides
 
@@ -98,3 +120,29 @@ def api_customs_export(body: CustomsExportRequest):
     if fmt == "xls":
         return file_response(out, name, "application/vnd.ms-excel")
     return xlsx_response(out, name)
+
+
+@router.post("/api/declared-value/quote")
+def api_declared_value_quote(body: dict):
+    from fba_tool.declared_value import FxRateRequired, InvalidFx, MissingPrice, quote_declared_value
+
+    try:
+        return quote_declared_value(
+            body.get("lines") or [],
+            str(body.get("basis") or "retail"),
+            body.get("fx"),
+            month=str(body.get("month") or ""),
+            min_retail_ratio=body.get("min_declared_ratio_of_retail") or "0.30",
+            fob_domestic_cost_rate=body.get("fob_domestic_cost_rate") or 0,
+        )
+    except MissingPrice as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": exc.message, "missing": exc.missing},
+        ) from exc
+    except FxRateRequired as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
+    except InvalidFx as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

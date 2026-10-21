@@ -28,8 +28,6 @@ CORS_ALLOW_ORIGINS = [
 
 ]
 
-CORS_ALLOW_ORIGIN_REGEX = r"https?://(127\.0\.0\.1|localhost)(:\d+)?"
-
 
 
 # 导出文件 MIME 类型
@@ -62,21 +60,16 @@ DEFAULT_VOLUME_DIVISOR = 6000
 
 DEFAULT_WEIGHT_LIMIT_KG = 22.5
 
-DEFAULT_AMAZON_MAX_BOXES = 130
-
 DEFAULT_MAX_MIXED_ITEMS_PER_BOX = 40
 
 
 
-# 单位换算（与 user_settings 默认值一致）
+# 单位换算（与 fba_tool.units 同一套系数）
 
-KG_TO_LB_FACTOR = 2.20462
-
-LB_TO_KG_FACTOR = 0.453592
-
-CM_TO_INCH_FACTOR = 0.393701
-
-INCH_TO_CM_FACTOR = 2.54
+from fba_tool.units import CM_TO_INCH as CM_TO_INCH_FACTOR
+from fba_tool.units import INCH_TO_CM as INCH_TO_CM_FACTOR
+from fba_tool.units import KG_TO_LB as KG_TO_LB_FACTOR
+from fba_tool.units import LB_TO_KG as LB_TO_KG_FACTOR
 
 
 

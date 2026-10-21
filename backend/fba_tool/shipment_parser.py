@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import csv
 import io
+import logging
 import re
 from collections import defaultdict
 from dataclasses import dataclass, field
@@ -23,6 +24,9 @@ from fba_tool.warehouse_codes import (
     is_valid_warehouse_code,
     normalize_code as normalize_warehouse_code,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class PdfTextError(Exception):
@@ -54,6 +58,7 @@ class PdfBoxPage:
     is_mixed: bool = False
     raw_text: str = ""
     warehouse_code: str = ""
+    ignored_tokens: List[str] = field(default_factory=list)
 
 
 def format_box_u_label(box_no: int) -> str:
@@ -232,14 +237,8 @@ def _parse_pdf_page_text(text: str, page_index: int) -> Optional[PdfBoxPage]:
     fnsku_m = FNSKU_RE.search(text)
     fnsku = fnsku_m.group(1).upper() if fnsku_m else ""
 
-    warehouse_code = ""
-    for m in WAREHOUSE_STRICT_RE.finditer(text.upper()):
-        cand = m.group(1)
-        if cand.startswith("FBA") or cand in WAREHOUSE_BLACKLIST:
-            continue
-        if re.match(r"^[A-Z]{2,3}\d{1,2}$", cand) or re.match(r"^[A-Z]{4}$", cand):
-            warehouse_code = cand
-            break
+    warehouse_code, _wh_warnings = warehouse_from_label_text(text)
+    ignored = _ignored_warehouse_tokens(text)
 
     return PdfBoxPage(
         page_index=page_index,
@@ -252,6 +251,7 @@ def _parse_pdf_page_text(text: str, page_index: int) -> Optional[PdfBoxPage]:
         is_mixed=is_mixed,
         raw_text=text,
         warehouse_code=warehouse_code,
+        ignored_tokens=ignored,
     )
 
 
@@ -422,11 +422,19 @@ def _extract_box_specs(
         if normalized["实重(kg)"] <= 0:
             continue
 
+        declared_in = None
+        declared_lb = None
+        if str(length_unit).lower() in {"in", "inch", "inches", "英寸"}:
+            declared_in = [l_raw, w_raw, h_raw]
+        if str(weight_unit).lower() in {"lb", "lbs", "pound", "pounds", "磅"}:
+            declared_lb = wt_raw
         records.append({
             "仓库代码": warehouse,
             "箱号": true_box,
             **normalized,
             "FBA箱号": fba_ids.get(col_idx, ""),
+            "declared_in": declared_in,
+            "declared_lb": declared_lb,
         })
     return records
 
@@ -485,28 +493,39 @@ def _fba_suffix_to_box_no(cell: str) -> int:
     return int(m2.group(1)) if m2 else 0
 
 
-def _extract_pdf_sku(text: str) -> str:
-    lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
-    sku_lines: List[str] = []
+def join_wrapped_sku(text: str, known_skus: Optional[List[str]] = None) -> str:
+    """Single SKU 下一行以 - 结尾时和后一行拼接，也能对上 CSV 里的 SKU。"""
+    lines = [ln.strip() for ln in str(text or "").splitlines() if ln.strip()]
     capture = False
+    parts: List[str] = []
     for ln in lines:
         upper = ln.upper()
         if "SINGLE SKU" in upper or upper.startswith("SKU"):
             capture = True
+            parts = []
             continue
-        if capture:
-            if re.search(r"(?:QTY|数量|P1\s*-)", ln, flags=re.I):
-                break
-            if re.match(r"^J-[A-Z0-9\-]+$", ln, flags=re.I) or re.match(r"^\d+PCS-FBA$", ln, flags=re.I):
-                sku_lines.append(ln)
-            elif sku_lines:
-                break
-    if sku_lines:
-        joined = "".join(sku_lines).replace(" ", "")
-        if joined.endswith("-FBA") or "PCS" in joined.upper():
-            return joined
-    m = re.search(r"(J-[A-Z0-9\-]+(?:\d+PCS-FBA))", text.replace("\n", ""), flags=re.I)
-    return m.group(1) if m else ""
+        if not capture:
+            continue
+        if re.search(r"(?:QTY|数量|P1\s*-)", ln, flags=re.I):
+            break
+        parts.append(ln.replace(" ", ""))
+        joined = "".join(parts)
+        if known_skus:
+            for sku in known_skus:
+                if joined.upper() == str(sku).upper():
+                    return str(sku)
+        if not ln.endswith("-"):
+            break
+    joined = "".join(parts)
+    if joined.endswith("-FBA") or "PCS" in joined.upper():
+        return joined
+    flat = re.sub(r"\s+", "", text or "")
+    match = re.search(r"(J-[A-Z0-9\-]+(?:\d+PCS-FBA))", flat, flags=re.I)
+    return match.group(1) if match else ""
+
+
+def _extract_pdf_sku(text: str) -> str:
+    return join_wrapped_sku(text)
 
 
 def _extract_pdf_qty(text: str) -> int:
@@ -555,31 +574,123 @@ def _warehouse_from_name(text: str) -> str:
     return ""
 
 
-def resolve_optimal_warehouse(csv_warehouse: str, pdf_name: str, pdf_pages: List[PdfBoxPage]) -> str:
-    """多源投票机制确定最终仓库代码（方案 D）"""
-    candidates = {}
-    
-    pdf_text_cands = {}
+def _is_known_warehouse(code: str) -> bool:
+    from fba_tool.warehouse_codes import known_warehouse_codes
+
+    return str(code or "").strip().upper() in known_warehouse_codes()
+
+
+_ADDRESS_HINT_RE = re.compile(r"\b(?:RD|ROAD|ST|STREET|AVE|AVENUE|BLVD|DR|DRIVE|LN|LANE|PKWY|HWY)\b", re.I)
+_STREET_NOISE = {"ROAD", "STREET", "AVENUE", "SUITE", "DRIVE", "LANE", "BLVD", "PARKWAY", "FLOOR", "UNIT", "CHARLOTTE"}
+
+
+def _ignored_warehouse_tokens(text: str) -> List[str]:
+    """不在白名单里的 4 字母片段只记调试日志，不写进仓码，也不进接口文案。"""
+    ignored: List[str] = []
+    for match in WAREHOUSE_STRICT_RE.finditer(str(text or "").upper()):
+        cand = match.group(1)
+        if len(cand) != 4 or not cand.isalpha() or cand in WAREHOUSE_BLACKLIST:
+            continue
+        if cand.startswith("FBA") or _is_known_warehouse(cand):
+            continue
+        if cand not in ignored:
+            ignored.append(cand)
+    if ignored:
+        logger.debug("箱唛忽略非仓码 %s", ",".join(ignored))
+    return ignored
+
+
+def warehouse_from_label_text(text: str) -> Tuple[str, List[str]]:
+    """箱唛仓码：先用已知仓码，再用地址库对地址行。街道名里的 4 个字母不当仓码。"""
+    warnings: List[str] = []
+    found: List[str] = []
+    for match in WAREHOUSE_STRICT_RE.finditer(str(text or "").upper()):
+        cand = match.group(1)
+        if cand.startswith("FBA") or cand in WAREHOUSE_BLACKLIST:
+            continue
+        if _is_known_warehouse(cand):
+            found.append(cand)
+    if found:
+        with_digit = [code for code in found if any(ch.isdigit() for ch in code)]
+        return (with_digit[0] if with_digit else found[0]), warnings
+
+    matched = _warehouse_from_address_library(text)
+    if matched:
+        return matched, warnings
+    if _ADDRESS_HINT_RE.search(str(text or "")):
+        warnings.append("箱唛地址没有匹配到仓库，未从街道名猜测仓码")
+    return "", warnings
+
+
+def _warehouse_from_address_library(text: str) -> str:
+    """地址行里的门牌/街道能唯一对上地址库时，返回那个仓码。"""
+    try:
+        from fba_tool.warehouse_db import list_warehouses
+
+        rows = list_warehouses("", limit=2000)
+    except Exception:
+        return ""
+    text_u = str(text or "").upper()
+    hits: List[str] = []
+    for row in rows:
+        addr = " ".join(str(row.get(key) or "") for key in ("address1", "address2", "city", "zip")).upper()
+        tokens = [
+            tok
+            for tok in re.findall(r"[A-Z0-9]{4,}", addr)
+            if tok not in _STREET_NOISE
+        ]
+        numbers = [tok for tok in tokens if any(ch.isdigit() for ch in tok)]
+        names = [tok for tok in tokens if tok.isalpha() and len(tok) >= 4]
+        if numbers and names and numbers[0] in text_u and any(name in text_u for name in names):
+            hits.append(str(row.get("code") or "").upper())
+    unique = [code for code in dict.fromkeys(hits) if code]
+    return unique[0] if len(unique) == 1 else ""
+
+
+def resolve_warehouse_with_warnings(
+    csv_warehouse: str,
+    pdf_name: str,
+    pdf_pages: List[PdfBoxPage],
+) -> Tuple[str, List[str]]:
+    """只在已知仓码之间投票。街道碎片（如 DOWD）不能压过 CSV 上的仓码。"""
+    warnings: List[str] = []
+    ignored: set[str] = set()
+    candidates: Dict[str, int] = {}
+    pdf_text_cands: Dict[str, int] = {}
     for page in pdf_pages:
-        if getattr(page, "warehouse_code", ""):
-            cand = page.warehouse_code
-            pdf_text_cands[cand] = pdf_text_cands.get(cand, 0) + 1
+        cand = str(getattr(page, "warehouse_code", "") or "").strip().upper()
+        if not cand:
+            continue
+        if not _is_known_warehouse(cand):
+            if cand not in ignored:
+                logger.debug("箱唛忽略非仓码 %s", cand)
+                ignored.add(cand)
+            continue
+        pdf_text_cands[cand] = pdf_text_cands.get(cand, 0) + 1
     if pdf_text_cands:
-        best_pdf_cand = sorted(pdf_text_cands.items(), key=lambda x: x[1], reverse=True)[0][0]
-        candidates[best_pdf_cand] = candidates.get(best_pdf_cand, 0) + 5
-        
-    if csv_warehouse and csv_warehouse != "UNKN":
-        candidates[csv_warehouse] = candidates.get(csv_warehouse, 0) + 4
-        
-    pdf_file_cand = _warehouse_from_name(pdf_name)
+        best_pdf = sorted(pdf_text_cands.items(), key=lambda item: item[1], reverse=True)[0][0]
+        candidates[best_pdf] = candidates.get(best_pdf, 0) + 5
+
+    csv_code = str(csv_warehouse or "").strip().upper()
+    if csv_code and csv_code != "UNKN" and _is_known_warehouse(csv_code):
+        candidates[csv_code] = candidates.get(csv_code, 0) + 4
+    elif csv_code and csv_code != "UNKN":
+        warnings.append(f"CSV 仓库代码 {csv_code} 不在已知仓库表里")
+
+    pdf_file_cand = _warehouse_from_filename(pdf_name)
     if pdf_file_cand:
         candidates[pdf_file_cand] = candidates.get(pdf_file_cand, 0) + 3
-        
+
     if not candidates:
-        return "UNKN"
-        
-    best_warehouse = sorted(candidates.items(), key=lambda x: x[1], reverse=True)[0][0]
-    return best_warehouse
+        return "UNKN", warnings
+    best = sorted(candidates.items(), key=lambda item: item[1], reverse=True)[0][0]
+    return best, warnings
+
+
+def resolve_optimal_warehouse(csv_warehouse: str, pdf_name: str, pdf_pages: List[PdfBoxPage]) -> str:
+    """多源投票。未知的 4 字母街道碎片不参与。"""
+    code, _warnings = resolve_warehouse_with_warnings(csv_warehouse, pdf_name, pdf_pages)
+    return code
 
 
 _UUID_RE = re.compile(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}|\bwf[0-9a-fA-F-]{8,}", re.I)

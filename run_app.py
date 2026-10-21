@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-FBA Smart Tool V3.2 — 一键启动器（单机版）
+FBA Smart Tool 一键启动器（单机版）。产品版本见 fba_tool.app_version.APP_VERSION。
 
 双击或在命令行运行本脚本：
   1. 初始化 app_data/ 业务数据目录
@@ -72,9 +72,10 @@ _INSTANCE_MUTEX_HANDLE = None
 
 
 def _data_dir() -> Path:
-    """S8 D9：和后端 app_paths.app_data_dir() 同一规则——FBA_APP_DATA_DIR 优先，否则 <程序目录>/app_data。"""
-    override = os.environ.get("FBA_APP_DATA_DIR", "").strip()
-    return Path(override) if override else PROJECT_ROOT / "app_data"
+    """和 app_paths.app_data_dir() 同一规则。"""
+    from fba_tool.app_paths import app_data_dir
+
+    return app_data_dir()
 
 
 def _no_browser() -> bool:
@@ -205,7 +206,9 @@ def _run_server_with_port_retry(app) -> None:
         _write_saved_port(port)
         url = f"http://{HOST}:{port}/"
         print("=" * 56)
-        print("  FBA Smart Tool V3.2 — 一键启动")
+        from fba_tool.app_version import APP_VERSION
+
+        print(f"  FBA Smart Tool {APP_VERSION} — 一键启动")
         print(f"  数据目录: {_data_dir()}")
         print(f"  服务地址: {url}")
         print("  关闭本窗口即停止服务")

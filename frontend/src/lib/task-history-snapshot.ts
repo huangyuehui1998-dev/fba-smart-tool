@@ -8,6 +8,7 @@ import type {
 } from "@/lib/api/workflow";
 import type { ActualPlacementFee } from "@/lib/api/step1";
 import { DEFAULT_THROW_RATIO } from "@/constants";
+import { DEFAULT_TRANSPORT_MODE, normalizeTransportMode, type TransportMode } from "@/lib/transport-mode";
 import { cellMetaFromFills } from "@/lib/invoice-spreadsheet";
 import {
   cloneInvoiceSessions,
@@ -27,9 +28,16 @@ export interface CustomsSessionSnapshot {
   activeTab: string;
 }
 
+export function batchFromTaskName(name: string): string {
+  const found = /第\s*(\d+)\s*批/.exec(name || "");
+  return found?.[1] ?? "";
+}
+
 export interface TaskHistorySnapshot {
   task_id: string;
   task_name: string;
+  /** 任务名里的「第N批」。文件名没有批次时，校验仍用这个值。 */
+  batch?: string;
   step: number;
   saved_at?: string;
   input_df: ReturnType<typeof rowsToApi>;
@@ -72,6 +80,7 @@ export interface TaskHistorySnapshot {
   react_customs_session?: CustomsSessionSnapshot | null;
   react_highest_reached_step?: number;
   react_staleness?: WorkflowStaleness;
+  react_transport_mode?: TransportMode;
 }
 
 export interface WorkflowSnapshotSource {
@@ -109,6 +118,7 @@ export interface WorkflowSnapshotSource {
   customsSession: CustomsSessionSnapshot | null;
   highestReachedStep: number;
   staleness: WorkflowStaleness;
+  transportMode: TransportMode;
 }
 
 export function newTaskId(): string {
@@ -172,6 +182,7 @@ export function buildTaskHistorySnapshot(source: WorkflowSnapshotSource): TaskHi
   return {
     task_id: source.taskId,
     task_name: source.taskName,
+    batch: batchFromTaskName(source.taskName),
     step: source.step,
     saved_at: new Date().toISOString(),
     input_df: rowsToApi(source.inputRows).filter((r) => String(r.SKU简称 || "").trim()),
@@ -219,6 +230,7 @@ export function buildTaskHistorySnapshot(source: WorkflowSnapshotSource): TaskHi
       : null,
     react_highest_reached_step: source.highestReachedStep,
     react_staleness: { ...source.staleness },
+    react_transport_mode: normalizeTransportMode(source.transportMode),
   };
 }
 
@@ -257,6 +269,7 @@ export interface AppliedTaskHistory {
   customsSession: CustomsSessionSnapshot | null;
   highestReachedStep: number;
   staleness: WorkflowStaleness;
+  transportMode: TransportMode;
 }
 
 export function applyTaskHistorySnapshot(snapshot: Record<string, unknown>): AppliedTaskHistory {
@@ -346,5 +359,6 @@ export function applyTaskHistorySnapshot(snapshot: Record<string, unknown>): App
     customsSession,
     highestReachedStep,
     staleness,
+    transportMode: normalizeTransportMode(snapshot.react_transport_mode ?? DEFAULT_TRANSPORT_MODE),
   };
 }

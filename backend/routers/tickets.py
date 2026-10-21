@@ -34,3 +34,19 @@ def api_tickets(batch: str = ""):
 
     items = list_tickets(batch)
     return {"items": items, "count": len(items)}
+
+
+@router.post("/api/tickets/sta-placement-fee")
+def api_sta_placement_fee(body: dict):
+    """录入 STA 页面实际配置费，并与估算区间比较。"""
+    from fba_tool.declared_value import record_sta_placement_fee
+
+    try:
+        return record_sta_placement_fee(
+            str(body.get("fba_id") or ""),
+            body.get("entered"),
+            body.get("estimate_min"),
+            body.get("estimate_max"),
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc

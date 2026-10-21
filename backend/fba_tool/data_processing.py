@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import re
 import unicodedata
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -311,9 +312,23 @@ def with_computed_columns(df: pd.DataFrame) -> pd.DataFrame:
     work["预计整箱数"] = np.where(qty > 0, total // qty, 0)
     work["尾数"] = np.where(qty > 0, total % qty, 0)
     work["预计总净重(kg)"] = (work["发货总数"] * work["单个重量(kg)"]).round(3)
-    work["预计总毛重(kg)"] = (
-        work["预计总净重(kg)"] + (work["预计整箱数"] * work["空纸箱重(kg)"])
-    ).round(3)
+    from fba_tool.box_weight import carton_gross_kg
+
+    totals = []
+    for _, row in work.iterrows():
+        full = int(row["预计整箱数"])
+        rem = int(row["尾数"])
+        per = int(row["单箱装量"])
+        unit = float(row["单个重量(kg)"] or 0)
+        tare = float(row["空纸箱重(kg)"] or 0)
+        declared = row["单箱毛重(kg)"]
+        gross = 0.0
+        if full > 0 and per > 0:
+            gross += carton_gross_kg(per, unit, tare, declared, per) * full
+        if rem > 0:
+            gross += carton_gross_kg(rem, unit, tare, None, per)
+        totals.append(round(gross, 3))
+    work["预计总毛重(kg)"] = totals
     return work
 
 
@@ -381,7 +396,10 @@ def validate_step1(df: pd.DataFrame) -> List[Tuple[int, str]]:
             continue
         for col in required:
             val = row.get(col, "")
-            if col in {"发货总数", "单箱装量"}:
+            if col == "单箱装量":
+                if not _is_positive_int(val):
+                    errors.append((idx, col))
+            elif col == "发货总数":
                 if _to_int(val) <= 0:
                     errors.append((idx, col))
             elif col in {"箱长(cm)", "箱宽(cm)", "箱高(cm)"}:
@@ -394,17 +412,104 @@ def validate_step1(df: pd.DataFrame) -> List[Tuple[int, str]]:
 
 # 录入毛重与理论毛重的可接受偏差；超过即提示核对（软告警，不阻断）
 GROSS_WEIGHT_TOLERANCE = 0.08
+# 疑似把单件重填进毛重：比较用字符串构造的 Decimal，容差固定 0.01kg。
+SUSPECT_UNIT_TOLERANCE_KG = Decimal("0.01")
+DEFAULT_SUSPECT_UNIT_WEIGHT_KG = Decimal("0.5")
+SUSPECT_THRESHOLD_NOTE = "内部阈值，非官方规定"
+
+
+def _unit_weight_missing(value: Any) -> bool:
+    """单重为空或 0 视同缺失。"""
+    if value is None:
+        return True
+    try:
+        if pd.isna(value):
+            return True
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, str) and not value.strip():
+        return True
+    return _to_float(value) <= 0
+
+
+def _is_positive_int(value: Any) -> bool:
+    """单箱装量必须是正整数。2.5、0、空都不是。"""
+    if isinstance(value, bool) or value is None:
+        return False
+    try:
+        if pd.isna(value):
+            return False
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, int):
+        return value > 0
+    if isinstance(value, float):
+        return value > 0 and value == int(value)
+    text = str(value).strip()
+    if not text:
+        return False
+    try:
+        number = float(text)
+    except ValueError:
+        return False
+    return number > 0 and number == int(number)
+
+
+def _as_decimal(value: Any) -> Decimal:
+    """由字符串构造。float 先转成它自己的十进制文本，避免二进制误差再进比较。"""
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, bool) or value is None:
+        return Decimal("0")
+    try:
+        if pd.isna(value):
+            return Decimal("0")
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, float):
+        return Decimal(str(value))
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none"}:
+        return Decimal("0")
+    return Decimal(text)
+
+
+def gross_is_suspect_unit(gross: Any, qty: Any, tare: Any, suspect: Any) -> bool:
+    """单箱毛重不超过 装量 × 阈值 + 皮重 + 0.01 时，怀疑毛重格里填的是单件重。"""
+    limit = (
+        _as_decimal(qty) * _as_decimal(suspect)
+        + _as_decimal(tare)
+        + SUSPECT_UNIT_TOLERANCE_KG
+    )
+    return _as_decimal(gross) <= limit
+
+
+def suspect_unit_weight_kg() -> Decimal:
+    try:
+        from fba_tool.warehouse_db import get_default_rule_profile
+
+        profile = get_default_rule_profile() or {}
+        raw = profile.get("suspect_unit_weight_kg")
+        if raw in (None, ""):
+            return DEFAULT_SUSPECT_UNIT_WEIGHT_KG
+        return _as_decimal(raw)
+    except Exception:
+        return DEFAULT_SUSPECT_UNIT_WEIGHT_KG
 
 
 def check_gross_weight_consistency(
     df: pd.DataFrame,
     tolerance: float = GROSS_WEIGHT_TOLERANCE,
+    suspect_kg: Any = None,
 ) -> List[Dict[str, Any]]:
-    """录入单箱毛重 vs 理论值（单箱装量 × 单个重量 + 空纸箱重）。
+    """单箱毛重三档：
 
-    毛重是申报给亚马逊和货代的计费依据，而 validate_step1 不校验任何重量列，
-    且 box_metrics 在整箱场景会直接采信录入毛重。录错就是实打实的重量差异费。
+    1a 单重缺失且录了毛重：要确认，不给建议值（空箱重不是建议毛重）。
+    1b 单重有值但毛重空着：只警告。
+    规则 2 两边都有且不一致：要确认，并给出计算值。
+    tolerance 保留给旧调用方，不再把小偏差静默掉。
     """
+    del tolerance  # 不一致就要确认，不再按 8% 静默
     warnings: List[Dict[str, Any]] = []
     if df.empty:
         return warnings
@@ -414,32 +519,98 @@ def check_gross_weight_consistency(
         if not sku:
             continue
         declared = _to_optional_float(row.get("单箱毛重(kg)"))
-        if declared is None or declared <= 0:
-            continue
-
+        unit_missing = _unit_weight_missing(row.get("单个重量(kg)"))
         per_box = _to_int(row.get("单箱装量"))
         unit_kg = _to_float(row.get("单个重量(kg)"))
         tare_kg = _to_float(row.get("空纸箱重(kg)"))
         expected = round(per_box * unit_kg + tare_kg, 3)
-        if expected <= 0:
+
+        if unit_missing and declared is not None and declared > 0:
+            threshold = DEFAULT_SUSPECT_UNIT_WEIGHT_KG if suspect_kg is None else _as_decimal(suspect_kg)
+            if suspect_kg is None:
+                threshold = suspect_unit_weight_kg()
+            suspect = gross_is_suspect_unit(declared, per_box, tare_kg, threshold)
+            missing_message = (
+                f"SKU {sku} 录了单箱毛重 {declared:g} kg，但单个重量为空。"
+                f"请补单重，或确认沿用录入毛重。不要把空箱重当成建议毛重"
+            )
+            warnings.append(
+                {
+                    "row_index": int(idx),
+                    "sku": sku,
+                    "kind": "unit_weight_missing",
+                    "requires_confirm": True,
+                    "suggested_gross_kg": None,
+                    "declared_kg": round(declared, 3),
+                    "expected_kg": expected,
+                    "diff_kg": None,
+                    "deviation_pct": None,
+                    "suspect_unit_weight_kg": float(threshold),
+                    "threshold_note": SUSPECT_THRESHOLD_NOTE,
+                    "message": missing_message,
+                }
+            )
+            if suspect:
+                warnings.append(
+                    {
+                        "row_index": int(idx),
+                        "sku": sku,
+                        "kind": "suspect_unit_in_gross",
+                        "requires_confirm": True,
+                        "suggested_gross_kg": None,
+                        "declared_kg": round(declared, 3),
+                        "expected_kg": expected,
+                        "diff_kg": None,
+                        "deviation_pct": None,
+                        "suspect_unit_weight_kg": float(threshold),
+                        "threshold_note": SUSPECT_THRESHOLD_NOTE,
+                        "message": (
+                            f"SKU {sku} 疑似把单件重填进了单箱毛重（{declared:g} kg）。"
+                            f"{SUSPECT_THRESHOLD_NOTE} {threshold:g} kg"
+                        ),
+                    }
+                )
             continue
 
+        if not unit_missing and (declared is None or declared <= 0):
+            warnings.append(
+                {
+                    "row_index": int(idx),
+                    "sku": sku,
+                    "kind": "gross_missing",
+                    "requires_confirm": False,
+                    "suggested_gross_kg": expected,
+                    "declared_kg": None,
+                    "expected_kg": expected,
+                    "diff_kg": None,
+                    "deviation_pct": None,
+                    "message": (
+                        f"SKU {sku} 没有填单箱毛重。按「单箱装量 × 单个重量 + 空纸箱重」"
+                        f"可算出 {expected:g} kg"
+                    ),
+                }
+            )
+            continue
+
+        if declared is None or expected <= 0:
+            continue
+        if abs(declared - expected) <= 0.001:
+            continue
         deviation = abs(declared - expected) / expected
-        if deviation <= tolerance:
-            continue
-
         warnings.append(
             {
                 "row_index": int(idx),
                 "sku": sku,
+                "kind": "gross_mismatch",
+                "requires_confirm": True,
+                "suggested_gross_kg": expected,
                 "declared_kg": round(declared, 3),
                 "expected_kg": expected,
                 "diff_kg": round(declared - expected, 3),
                 "deviation_pct": round(deviation * 100, 1),
                 "message": (
                     f"SKU {sku} 录入单箱毛重 {declared:g} kg，按「单箱装量 × 单个重量 + 空纸箱重」"
-                    f"应为 {expected:g} kg，偏差 {deviation * 100:.1f}%。"
-                    f"毛重申报不符会产生重量差异费与货代账单争议，请核对"
+                    f"应为 {expected:g} kg，偏差 {deviation * 100:.1f}%。请确认用哪一个"
                 ),
             }
         )

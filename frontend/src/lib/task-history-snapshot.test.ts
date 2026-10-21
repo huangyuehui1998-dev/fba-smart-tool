@@ -1,7 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { applyTaskHistorySnapshot } from "./task-history-snapshot";
+import { applyTaskHistorySnapshot, batchFromTaskName } from "./task-history-snapshot";
 import { createEmptyStaleness, invalidateFrom } from "./workflow-invalidation";
+
+describe("batchFromTaskName", () => {
+  it("reads 第N批 and ignores a name without a batch", () => {
+    expect(batchFromTaskName("海运第13批-CL2")).toBe("13");
+    expect(batchFromTaskName("第 14 批")).toBe("14");
+    expect(batchFromTaskName("CL2")).toBe("");
+  });
+});
 
 describe("applyTaskHistorySnapshot", () => {
   it("restores highest reached step and staleness", () => {

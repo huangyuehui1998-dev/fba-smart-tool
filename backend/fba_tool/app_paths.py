@@ -49,15 +49,118 @@ def runtime_root() -> Path:
     return project_root()
 
 
-def app_data_dir() -> Path:
-    """统一业务数据根目录：<project_root>/app_data/
+def _dir_has_data(path: Path) -> bool:
+    if not path.is_dir():
+        return False
+    return any(path.iterdir())
 
-    环境变量 FBA_APP_DATA_DIR 可改到别处（测试用临时目录，保证跑测试不碰真实 app_data）。
+
+def _localappdata_root() -> Path | None:
+    base = os.environ.get("LOCALAPPDATA", "").strip()
+    if not base:
+        return None
+    return Path(base)
+
+
+def tool_state_dir() -> Path | None:
+    root = _localappdata_root()
+    if root is None:
+        return None
+    return root / "FBA_Smart_Tool"
+
+
+def last_data_dir_file() -> Path | None:
+    state = tool_state_dir()
+    if state is None:
+        return None
+    return state / "last_data_dir.txt"
+
+
+def _read_last_data_dir() -> Path | None:
+    pointer = last_data_dir_file()
+    if pointer is None or not pointer.is_file():
+        return None
+    text = pointer.read_text(encoding="utf-8").strip()
+    return Path(text) if text else None
+
+
+def _remember_data_dir(path: Path) -> None:
+    pointer = last_data_dir_file()
+    if pointer is None:
+        return
+    pointer.parent.mkdir(parents=True, exist_ok=True)
+    pointer.write_text(str(path.resolve()), encoding="utf-8")
+
+
+def _exe_has_legacy_payload(root: Path) -> bool:
+    return (root / "fba_master.db").is_file() or (root / "config").is_dir()
+
+
+def app_data_dir() -> Path:
+    """数据目录：FBA_APP_DATA_DIR → portable.flag → 已有 app_data 或旧版旁路文件 → %LOCALAPPDATA%。
+
+    没设 LOCALAPPDATA 时（开发机、当前测试）仍用 <程序目录>/app_data，避免写到用户主目录。
     """
     override = os.environ.get("FBA_APP_DATA_DIR", "").strip()
-    path = Path(override) if override else project_root() / "app_data"
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    if override:
+        path = Path(override)
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+    root = project_root()
+    beside = root / "app_data"
+    if (root / "portable.flag").is_file():
+        beside.mkdir(parents=True, exist_ok=True)
+        return beside
+    if _dir_has_data(beside) or _exe_has_legacy_payload(root):
+        beside.mkdir(parents=True, exist_ok=True)
+        if _dir_has_data(beside):
+            _remember_data_dir(beside)
+        return beside
+    state = tool_state_dir()
+    if state is not None:
+        path = state / "app_data"
+        path.mkdir(parents=True, exist_ok=True)
+        remembered = _read_last_data_dir()
+        if remembered is not None and remembered.resolve() != path.resolve() and _dir_has_data(remembered) and not _dir_has_data(path):
+            return path
+        _remember_data_dir(path)
+        return path
+    beside.mkdir(parents=True, exist_ok=True)
+    return beside
+
+
+def legacy_import_status() -> dict:
+    current = app_data_dir()
+    remembered = _read_last_data_dir()
+    candidate = ""
+    if not _dir_has_data(current) and remembered is not None and remembered.resolve() != current.resolve() and _dir_has_data(remembered):
+        candidate = str(remembered)
+    return {
+        "data_dir": str(current),
+        "needs_import": bool(candidate),
+        "legacy_dir": candidate,
+        "message": f"检测到旧数据目录 {candidate}，是否导入" if candidate else "",
+    }
+
+
+def import_legacy_data_dir() -> dict:
+    """把旧目录复制到当前数据目录，不移动。"""
+    status = legacy_import_status()
+    if not status["needs_import"]:
+        return {"copied": 0, "legacy_dir": ""}
+    source = Path(status["legacy_dir"])
+    dest = Path(status["data_dir"])
+    copied = 0
+    for path in source.rglob("*"):
+        if not path.is_file():
+            continue
+        target = dest / path.relative_to(source)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if not target.exists():
+            shutil.copy2(path, target)
+            copied += 1
+    _remember_data_dir(dest)
+    return {"copied": copied, "legacy_dir": str(source), "data_dir": str(dest)}
 
 
 def user_config_dir() -> Path:

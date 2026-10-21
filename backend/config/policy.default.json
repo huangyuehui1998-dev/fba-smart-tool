@@ -1,0 +1,532 @@
+{
+  "verified_at": "2026-10-20",
+  "fee_disclaimer": "估算区间，以 STA 报价为准（费率来源：Seller Central GC3Q44PBK8BXQW3Z，2026-01-15 起）",
+  "rules": {
+    "fba_multi_longest_in": {
+      "value": 36,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
+      "effective_date": "2025-06-20",
+      "verified_at": "2026-10-20",
+      "note": "多件箱最长边 36.00 in。Shipping and routing requirements。"
+    },
+    "fba_multi_other_side_in": {
+      "value": 25,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
+      "effective_date": "2025-06-20",
+      "verified_at": "2026-10-20",
+      "note": "多件箱另两边 25.00 in。"
+    },
+    "awd_box_side_in": {
+      "value": 25,
+      "source_type": "pending_verification",
+      "source_url": "",
+      "effective_date": "2025-06-20",
+      "verified_at": "2026-10-20",
+      "note": "AWD 25×25×25 in 未在 200141510 核实。待核实。"
+    },
+    "multi_box_weight_lb": {
+      "value": 50,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "多件箱重量上限 50lb（22.68kg）阻断。22.5kg 是内部预警。"
+    },
+    "multi_box_weight_warn_kg": {
+      "value": 22.5,
+      "source_type": "internal",
+      "source_url": "",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "内部余量，非亚马逊规定"
+    },
+    "team_lift_lb": {
+      "value": 50,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "单件超过 50lb 提示贴 Team Lift。"
+    },
+    "mech_lift_lb": {
+      "value": 100,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "单件超过 100lb 提示贴 Mech Lift。"
+    },
+    "jewelry_watch_lb": {
+      "value": 40,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "product_master.category 为 jewelry 或 watch 时单箱不得超过 40lb。"
+    },
+    "max_units_per_box": {
+      "value": 150,
+      "source_type": "amazon_forum",
+      "source_url": "https://sellercentral.amazon.com/seller-forums/discussions",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "亚马逊员工回复：每箱可售件数不超过 150。无官方生效日。"
+    },
+    "mixed_units_warn": {
+      "value": 40,
+      "source_type": "internal",
+      "source_url": "",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "混装件数上限，只提示，标签为内部。"
+    },
+    "boxes_spd_partnered": {
+      "value": 200,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "Partnered Carrier 指南。超出后提示拆货件，不沿用 130 箱。"
+    },
+    "boxes_spd_own": {
+      "value": null,
+      "source_type": "pending_verification",
+      "source_url": "",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "未找到官方出处。2024-06 S2A 指南曾写合作 30 / 非合作 15，与现指南冲突，待核实。不做数量判断。"
+    },
+    "boxes_ltl": {
+      "value": 5000,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "LTL/FTL 单票 5000 箱，超出阻断。"
+    },
+    "low_multi_box_lb": {
+      "value": 2,
+      "source_type": "internal",
+      "source_url": "",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "多件箱毛重低于 2lb 时导出前确认。无亚马逊出处。"
+    },
+    "box_longer_than_item_in": {
+      "value": 4,
+      "source_type": "internal",
+      "source_url": "",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "箱子最长边比商品长超过该英寸数时提示箱子明显长于商品。原文只说 not significantly longer。"
+    },
+    "single_oversize_max_lb": {
+      "value": 65,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
+      "effective_date": null,
+      "verified_at": "2026-10-20",
+      "note": "单件超大箱在 36×25×25 in 以内时，箱重可以超过 50 lb，但不得超过 65 lb。"
+    }
+  },
+  "size_limits_in": {
+    "small_standard": {
+      "longest": 15,
+      "median": 12,
+      "shortest": 0.75,
+      "weight_lb": 1,
+      "source_type": "amazon_official",
+      "weight_source_type": "amazon_official_derived",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/GC3Q44PBK8BXQW3Z",
+      "verified_at": "2026-10-20",
+      "note": "Small standard 最大 15×12×0.75 in。重量上限 16 oz 由费率表重量档推出。"
+    },
+    "large_standard": {
+      "longest": 18,
+      "median": 14,
+      "shortest": 8,
+      "weight_lb": 20,
+      "source_type": "amazon_official",
+      "weight_source_type": "amazon_official_derived",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/GC3Q44PBK8BXQW3Z",
+      "verified_at": "2026-10-20",
+      "note": "Large standard 最大 18×14×8 in。重量上限 20 lb 由费率表重量档推出。"
+    },
+    "small_oversize": {
+      "longest": 37,
+      "median": 28,
+      "shortest": 20,
+      "weight_lb": 50,
+      "source_type": "amazon_official",
+      "weight_source_type": "amazon_official_derived",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/GC3Q44PBK8BXQW3Z",
+      "verified_at": "2026-10-20",
+      "note": "Small Bulky 最大 37×28×20 in。重量上限 50 lb 由费率表重量档推出。"
+    },
+    "large_oversize": {
+      "longest": 59,
+      "median": 33,
+      "shortest": 33,
+      "weight_lb": 50,
+      "source_type": "amazon_official",
+      "weight_source_type": "amazon_official_derived",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/GC3Q44PBK8BXQW3Z",
+      "verified_at": "2026-10-20",
+      "note": "Large Bulky 最大 59×33×33 in。重量上限 50 lb 由费率表重量档推出。"
+    }
+  },
+  "placement_fees": {
+    "source_type": "amazon_official",
+    "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/GC3Q44PBK8BXQW3Z",
+    "effective_date": "2026-01-15",
+    "verified_at": "2026-10-20",
+    "note": "入仓 45 天后按实收数量收费。2026-01-15 起的官方表。",
+    "classes": {
+      "small_standard": [
+        {
+          "low": 0,
+          "high": 0.5,
+          "1_loc": [
+            0.14,
+            0.32
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 0.5,
+          "high": 1.0,
+          "1_loc": [
+            0.16,
+            0.32
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        }
+      ],
+      "large_standard": [
+        {
+          "low": 0,
+          "high": 0.75,
+          "1_loc": [
+            0.2,
+            0.4
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 0.75,
+          "high": 1.5,
+          "1_loc": [
+            0.24,
+            0.5
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 1.5,
+          "high": 3.0,
+          "1_loc": [
+            0.34,
+            0.6
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 3.0,
+          "high": 5.0,
+          "1_loc": [
+            0.38,
+            0.76
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 5.0,
+          "high": 7.0,
+          "1_loc": [
+            0.4,
+            0.98
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 7.0,
+          "high": 10.0,
+          "1_loc": [
+            0.42,
+            1.2
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 10.0,
+          "high": 15.0,
+          "1_loc": [
+            0.44,
+            1.5
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 15.0,
+          "high": 20.0,
+          "1_loc": [
+            0.55,
+            1.9
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        }
+      ],
+      "small_oversize": [
+        {
+          "low": 0,
+          "high": 5.0,
+          "1_loc": [
+            1.1,
+            1.6
+          ],
+          "2_3_loc": [
+            0.55,
+            1.1
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 5.0,
+          "high": 12.0,
+          "1_loc": [
+            1.75,
+            2.4
+          ],
+          "2_3_loc": [
+            0.65,
+            1.75
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 12.0,
+          "high": 28.0,
+          "1_loc": [
+            2.74,
+            3.5
+          ],
+          "2_3_loc": [
+            0.81,
+            2.19
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 28.0,
+          "high": 42.0,
+          "1_loc": [
+            3.95,
+            4.95
+          ],
+          "2_3_loc": [
+            1.05,
+            2.83
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 42.0,
+          "high": 50.0,
+          "1_loc": [
+            4.8,
+            5.95
+          ],
+          "2_3_loc": [
+            1.23,
+            3.32
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        }
+      ],
+      "large_oversize": [
+        {
+          "low": 0,
+          "high": 5.0,
+          "1_loc": [
+            1.3,
+            1.8
+          ],
+          "2_3_loc": [
+            0.55,
+            1.25
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 5.0,
+          "high": 12.0,
+          "1_loc": [
+            2.1,
+            2.9
+          ],
+          "2_3_loc": [
+            0.65,
+            1.8
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 12.0,
+          "high": 28.0,
+          "1_loc": [
+            3.4,
+            4.1
+          ],
+          "2_3_loc": [
+            0.81,
+            2.3
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 28.0,
+          "high": 42.0,
+          "1_loc": [
+            4.7,
+            5.6
+          ],
+          "2_3_loc": [
+            1.05,
+            2.95
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        },
+        {
+          "low": 42.0,
+          "high": 50.0,
+          "1_loc": [
+            5.5,
+            6.5
+          ],
+          "2_3_loc": [
+            1.23,
+            3.5
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        }
+      ],
+      "extra_large": [
+        {
+          "low": 0,
+          "high": null,
+          "1_loc": [
+            0,
+            0
+          ],
+          "2_3_loc": [
+            0,
+            0
+          ],
+          "5_loc": [
+            0,
+            0
+          ]
+        }
+      ]
+    },
+    "weight_basis": {
+      "small_standard": "unit",
+      "large_standard": "max_dim_unit",
+      "small_oversize": "max_dim_unit",
+      "large_oversize": "max_dim_unit",
+      "extra_large": "max_dim_unit"
+    }
+  },
+  "unverified": {
+    "length_plus_girth_in": {
+      "value": 130,
+      "source_type": "pending_verification",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/201105770",
+      "verified_at": null,
+      "note": "长+围长 130 in。Product size tiers 页面未渲染出正文。待核实。不作为阻断依据。"
+    },
+    "dimensional_weight_divisor": {
+      "value": 139,
+      "source_type": "pending_verification",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/201105770",
+      "verified_at": null,
+      "note": "体积重除数 139。待核实。不作为阻断依据。"
+    },
+    "extra_large_weight_bands_lb": {
+      "value": "0-50/50-70/70-150/150+",
+      "source_type": "pending_verification",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/201105770",
+      "verified_at": null,
+      "note": "Extra-large 重量分档。待核实。不作为阻断依据。"
+    },
+    "bulky_min_side_in": {
+      "value": 2,
+      "source_type": "pending_verification",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/201105770",
+      "verified_at": null,
+      "note": "Bulky 最小宽高 2 in。待核实。不作为阻断依据。"
+    }
+  }
+}

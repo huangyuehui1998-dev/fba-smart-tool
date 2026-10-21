@@ -42,17 +42,35 @@ export interface ComputePreviewResponse {
   total_gross_kg?: number;
   weight_warnings?: GrossWeightWarning[];
   cost_dashboard?: CostDashboard;
+  master_gaps?: { sku: string; missing: string[] }[];
+  carton_spec_notices?: string[];
+  carton_specs_by_sku?: Record<string, CartonSpecChoice[]>;
+}
+
+export interface CartonSpecChoice {
+  id: number;
+  spec_name: string;
+  qty_per_carton: number;
+  length_cm: number;
+  width_cm: number;
+  height_cm: number;
+  gross_kg: number;
+  is_default: boolean;
 }
 
 /** 录入单箱毛重与「装量×单件重+空箱重」不符，可能引发重量差异费。 */
 export interface GrossWeightWarning {
   row_index: number;
   sku: string;
-  declared_kg: number;
+  declared_kg: number | null;
   expected_kg: number;
-  diff_kg: number;
-  deviation_pct: number;
+  diff_kg: number | null;
+  deviation_pct: number | null;
   message: string;
+  kind?: "unit_weight_missing" | "suspect_unit_in_gross" | "gross_missing" | "gross_mismatch" | "mixed_over_limit";
+  threshold_note?: string;
+  requires_confirm?: boolean;
+  suggested_gross_kg?: number | null;
 }
 
 export interface ValidationErrorItem {
@@ -100,6 +118,8 @@ export type PlacementSummary = {
   eligible_units: number;
   oversize_units: number;
   ineligible_units: number;
+  fee_disclaimer?: string;
+  pending_notes?: string[];
   line_items: PlacementLineItem[];
   one_location: PlacementFeeRange & { enabled: boolean };
   split_2_3: PlacementOptionSummary;

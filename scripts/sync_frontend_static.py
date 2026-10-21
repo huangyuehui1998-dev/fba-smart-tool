@@ -131,13 +131,17 @@ def _fix_vite_chunk_paths(dest: Path) -> None:
 
 
 def _ensure_index_html(dest: Path) -> None:
+    """Vite SPA 直接产出带 #root 的 index.html。旧的 _shell.html 仍可包一层。"""
+    index = dest / "index.html"
+    if index.is_file() and 'id="root"' in index.read_text(encoding="utf-8", errors="replace"):
+        return
     shell = dest / "_shell.html"
     if shell.is_file():
         raw = shell.read_text(encoding="utf-8", errors="surrogateescape").replace("\x00", "")
         shell.write_text(raw, encoding="utf-8")
         _build_index_html(dest, shell)
         return
-    raise FileNotFoundError("未找到 _shell.html，请先 npm run build")
+    raise FileNotFoundError("未找到带 #root 的 index.html，请先 npm run build")
 
 
 def _sync_tree_inplace(src: Path, dest: Path) -> None:
@@ -212,13 +216,10 @@ def main() -> int:
 
     index = DEST / "index.html"
     content = index.read_text(encoding="utf-8")
-    if "$_TSR" not in content:
-        print("错误：index.html 缺少 $_TSR", file=sys.stderr)
-        return 1
     if "ssr:!0" in content or "ssr:true" in content:
         print("错误：index.html 仍含 ssr:true", file=sys.stderr)
         return 1
-    if '<div id="root">' not in content:
+    if 'id="root"' not in content:
         print("错误：index.html 缺少 #root", file=sys.stderr)
         return 1
 

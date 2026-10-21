@@ -1,39 +1,29 @@
 """S1d 访问安全：默认只监听本机；可选访问口令。
 
 环境变量：
-- FBA_HOST：监听地址，默认 127.0.0.1。设成非本机地址（如 0.0.0.0）时必须同时设置 FBA_ACCESS_TOKEN，否则拒绝启动。
+- FBA_HOST：监听地址，默认 127.0.0.1。设成非本机地址时必须同时设置 FBA_ACCESS_TOKEN，否则拒绝启动。
 - FBA_ACCESS_TOKEN：访问口令，默认不启用。启用后 /api/*（/api/health、/api/auth/login 除外）
   需要请求头 X-Access-Token 或登录得到的 cookie。
 
-登录方式（任选其一，登录后写入 HttpOnly cookie，前端无需改动）：
-1. 推荐：浏览器打开 /api/auth/login（不带参数），在页面输入口令提交（POST，口令不进 URL）；
-   脚本可 POST /api/auth/login，JSON {"token": "..."} 或表单 token=...。
-2. 兼容：GET /api/auth/login?token=口令。
-   ⚠ 注意：URL 方式会让口令出现在浏览器历史、uvicorn 访问日志和代理日志里，
-   可能被记录下来；只建议在本机临时使用，优先用 POST。
+登录只接受 POST /api/auth/login（JSON {"token": "..."} 或表单 token=...）。
+口令不进 URL，避免出现在浏览器历史和访问日志里。GET 登录返回 405。
 """
 from __future__ import annotations
 
+import hashlib
 import hmac
 import os
+import time
 from typing import Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 
-COOKIE_NAME = "fba_access"
+COOKIE_NAME = "fba_session"
 HEADER_NAME = "X-Access-Token"
+SESSION_TTL_SECONDS = 12 * 60 * 60
 _LOOPBACK = {"127.0.0.1", "localhost", "::1"}
 _EXEMPT = {"/api/health", "/api/auth/login"}
-
-
-_LOGIN_PAGE = """<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><title>FBA 助手登录</title></head>
-<body style="font-family:sans-serif;max-width:360px;margin:80px auto">
-<h3>请输入访问口令</h3>
-<form method="post" action="/api/auth/login">
-<input type="password" name="token" autofocus style="width:100%;padding:8px" autocomplete="current-password">
-<button type="submit" style="margin-top:12px;padding:8px 16px">登录</button>
-</form></body></html>"""
 
 
 def bind_host() -> str:
@@ -61,6 +51,31 @@ def _ok(given: Optional[str], token: str) -> bool:
     return bool(given) and hmac.compare_digest(given.encode("utf-8"), token.encode("utf-8"))
 
 
+def issue_session_value(token: str, now: Optional[int] = None) -> str:
+    """cookie 值是过期时间加 HMAC，不包含口令原文。"""
+    exp = int(now if now is not None else time.time()) + SESSION_TTL_SECONDS
+    mac = hmac.new(token.encode("utf-8"), str(exp).encode("utf-8"), hashlib.sha256).hexdigest()
+    value = f"{exp}.{mac}"
+    if token and token in value:
+        raise RuntimeError("会话 cookie 包含了口令原文")
+    return value
+
+
+def session_is_valid(value: Optional[str], token: str, now: Optional[int] = None) -> bool:
+    if not value or "." not in value or token in value:
+        return False
+    exp_text, mac = value.split(".", 1)
+    try:
+        exp = int(exp_text)
+    except ValueError:
+        return False
+    current = int(now if now is not None else time.time())
+    if exp <= current:
+        return False
+    expected = hmac.new(token.encode("utf-8"), exp_text.encode("utf-8"), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(mac, expected)
+
+
 def install_access_control(app: FastAPI) -> None:
     """注册登录端点与口令中间件。口令在安装时读取；未设置则不拦截。"""
     token = access_token()
@@ -71,7 +86,13 @@ def install_access_control(app: FastAPI) -> None:
         if not _ok(given, token):
             return JSONResponse({"detail": {"message": "访问口令错误"}}, status_code=401)
         resp = RedirectResponse("/", status_code=303) if redirect else JSONResponse({"ok": True, "enabled": True})
-        resp.set_cookie(COOKIE_NAME, token, httponly=True, samesite="strict")
+        resp.set_cookie(
+            COOKIE_NAME,
+            issue_session_value(token),
+            httponly=True,
+            samesite="strict",
+            max_age=SESSION_TTL_SECONDS,
+        )
         return resp
 
     @app.post("/api/auth/login", include_in_schema=False)
@@ -86,12 +107,9 @@ def install_access_control(app: FastAPI) -> None:
             body = {}
         return _login_response((body or {}).get("token"), redirect=False)
 
-    @app.get("/api/auth/login", include_in_schema=False)
-    async def _login_get(token: str = ""):
-        if not token:
-            return HTMLResponse(_LOGIN_PAGE)
-        # 兼容 URL 传口令；口令可能进入访问日志，推荐用页面 POST
-        return _login_response(token, redirect=True)
+    @app.api_route("/api/auth/login", methods=["GET"], include_in_schema=False)
+    async def _login_get():
+        return JSONResponse({"detail": "GET 登录已关闭，请用 POST"}, status_code=405)
 
     if token is None:
         return
@@ -105,13 +123,14 @@ def install_access_control(app: FastAPI) -> None:
             or path in _EXEMPT
         ):
             return await call_next(request)
-        given = request.headers.get(HEADER_NAME) or request.cookies.get(COOKIE_NAME)
-        if not _ok(given, token):
-            return JSONResponse(
-                {"detail": {"message": "需要访问口令：请先在浏览器打开 /api/auth/login 输入口令"}},
-                status_code=401,
-            )
-        return await call_next(request)
+        header = request.headers.get(HEADER_NAME)
+        cookie = request.cookies.get(COOKIE_NAME)
+        if _ok(header, token) or session_is_valid(cookie, token):
+            return await call_next(request)
+        return JSONResponse(
+            {"detail": {"message": "需要访问口令：请 POST /api/auth/login"}},
+            status_code=401,
+        )
 
 
 # ---- S2-7：访问日志屏蔽 ?token= ----

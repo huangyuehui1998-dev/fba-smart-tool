@@ -433,7 +433,8 @@ export function AppSidebar({
   }, [taskName]);
 
   useEffect(() => {
-    setDeepseekKey(localStorage.getItem(DEEPSEEK_KEY_STORAGE) ?? "");
+    localStorage.removeItem(DEEPSEEK_KEY_STORAGE);
+    setDeepseekKey("");
     const storedModel = localStorage.getItem(DEEPSEEK_MODEL_STORAGE);
     if (DEEPSEEK_MODEL_OPTIONS.some((m) => m.value === storedModel)) {
       setDeepseekModel(storedModel as DeepseekModel);
@@ -454,8 +455,11 @@ export function AppSidebar({
   }, []);
 
   const saveDeepseekKey = (value: string) => {
-    setDeepseekKey(value);
-    localStorage.setItem(DEEPSEEK_KEY_STORAGE, value);
+    void fetch("/api/settings/deepseek-key", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: value }),
+    }).finally(() => setDeepseekKey(""));
   };
 
   const saveDeepseekModel = (value: DeepseekModel) => {
@@ -611,6 +615,20 @@ export function AppSidebar({
                 activeProps={{ className: "border-primary/30 bg-primary/10 text-primary" }}
               >
                 🧰 PDF 标签处理
+              </Link>
+              <Link
+                to="/carton-compare"
+                className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/60"
+                activeProps={{ className: "border-primary/30 bg-primary/10 text-primary" }}
+              >
+                箱规对比
+              </Link>
+              <Link
+                to="/about"
+                className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/60"
+                activeProps={{ className: "border-primary/30 bg-primary/10 text-primary" }}
+              >
+                关于
               </Link>
               <ExportersSection />
             </AccordionContent>

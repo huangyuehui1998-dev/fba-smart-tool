@@ -43,6 +43,10 @@ NEW_COLUMNS = {
     "last_nonpromo_at": "TEXT",
     # S9-step4（D-15）：近 90 天非促销价的来源。ADD COLUMN 带默认值：升级前已有的记录、以及旧版 exe 之后写的记录都是 legacy（算“有历史”）
     "last_nonpromo_origin": "TEXT DEFAULT 'legacy'",
+    "product_cost_cny": "REAL",
+    "product_cost_currency": "TEXT",
+    "retail_source": "TEXT",
+    "retail_synced_at": "TEXT",
 }
 ORIGIN_SELF_FIRST = "self_first"  # 首次同步、当时没有任何参照时自己记下的（可能就是促销价），不算“有历史”
 ORIGIN_CONFIRMED = "confirmed"    # 之后的同步在有参照时记下的非促销价，或用户人工确认的正常价
@@ -52,16 +56,19 @@ from fba_tool.master_schema import SCHEMA_VERSION  # noqa: E402  v3：新增配�
 
 # 可由本模块写入的字段及类型
 _FLOAT_FIELDS = (
-    "listing_price", "declared_value", "qty_per_box",
+    "listing_price", "declared_value", "qty_per_box", "product_cost_cny",
     "carton_length", "carton_width", "carton_height", "carton_weight", "carton_gross_weight",
     "regular_price",
 )
-_TEXT_FIELDS = ("listing_price_currency", "declare_unit", "fnsku", "asin", "local_name", "listing_price_basis", "category")
+_TEXT_FIELDS = (
+    "listing_price_currency", "declare_unit", "fnsku", "asin", "local_name", "listing_price_basis", "category",
+    "product_cost_currency", "retail_source", "retail_synced_at",
+)
 WRITABLE_FIELDS = _FLOAT_FIELDS + _TEXT_FIELDS
 # 这些字段由本模块直接写列（upsert_product 不认识）
 OWN_FIELDS = (
     "listing_price", "listing_price_currency", "declare_unit", "carton_gross_weight", "local_name", "listing_price_basis",
-    "category", "regular_price",
+    "category", "regular_price", "product_cost_cny", "product_cost_currency", "retail_source", "retail_synced_at",
 )
 # 用户 2026-10-16 定：申报价按实时售价报，领星售价不受手填锁定
 NEVER_LOCKED_FOR_LINGXING = ("listing_price", "listing_price_currency", "listing_price_basis", "regular_price")
@@ -86,9 +93,49 @@ def migrate(conn) -> None:
     from fba_tool.master_schema import ensure_v3
 
     ensure_v3(conn)
+    _migrate_legacy_product_cost(conn)
     ver = conn.execute("PRAGMA user_version").fetchone()[0]
     if ver < SCHEMA_VERSION:
         conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+
+
+OLD_PRODUCT_COST_NOTE = "产品成本→declared_value（CNY）"
+NEW_PRODUCT_COST_NOTE = "产品成本→product_cost_cny（CNY）"
+
+
+def _migrate_legacy_product_cost(conn) -> None:
+    """把曾经写进 declared_value 的产品成本迁到 product_cost_cny，并记一条历史。"""
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS product_field_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            sku TEXT,
+            field TEXT,
+            old_value TEXT,
+            new_value TEXT,
+            reason TEXT,
+            created_at TEXT
+        )"""
+    )
+    rows = conn.execute(
+        "SELECT sku, declared_value, extra_data FROM product_master WHERE extra_data LIKE ?",
+        (f"%{OLD_PRODUCT_COST_NOTE}%",),
+    ).fetchall()
+    now = _now()
+    for sku, declared, extra in rows:
+        if declared in (None, ""):
+            continue
+        conn.execute(
+            """UPDATE product_master
+               SET product_cost_cny = ?, product_cost_currency = 'CNY', declared_value = NULL,
+                   extra_data = REPLACE(extra_data, ?, ?)
+               WHERE sku = ?""",
+            (declared, OLD_PRODUCT_COST_NOTE, NEW_PRODUCT_COST_NOTE, sku),
+        )
+        conn.execute(
+            """INSERT INTO product_field_history (sku, field, old_value, new_value, reason, created_at)
+               VALUES (?, 'product_cost_cny', ?, ?, ?, ?)""",
+            (sku, str(declared), str(declared), OLD_PRODUCT_COST_NOTE, now),
+        )
 
 
 def _utcnow() -> datetime:

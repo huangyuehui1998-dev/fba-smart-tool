@@ -16,7 +16,9 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCustoms } from "@/hooks/use-customs";
 import { useWorkflow } from "@/context/workflow-context";
+import { ErrorNotice } from "@/components/feedback/error-notice";
 import { StaleDataBanner } from "@/components/stale-data-banner";
+import { Step5DeclaredValue } from "@/components/step5-declared-value";
 import { cn } from "@/lib/utils";
 
 function FieldRow({
@@ -66,6 +68,9 @@ export function Step5Workspace({ onPrev }: { onPrev?: () => void }) {
     exportFormat,
     setExportFormat,
     error,
+    fxNotice,
+    declarationDate,
+    setDeclarationDate,
     canPreview,
     runPreview,
     runExport,
@@ -81,11 +86,11 @@ export function Step5Workspace({ onPrev }: { onPrev?: () => void }) {
   if (!step4Ok && !shipmentOptions.length) {
     return (
       <div className="flex h-full min-h-[60vh] flex-col items-center justify-center gap-3 p-6">
-        <p className="text-sm text-muted-foreground">请先完成 Step 4 货件校验并通过后再进入报关资料。</p>
+        <p className="text-sm text-muted-foreground">请先完成第 4 步：货件校验。</p>
         {onPrev && (
           <Button variant="outline" onClick={onPrev}>
             <ArrowLeft className="mr-2 h-4 w-4" />
-            返回 Step 4
+            返回第 4 步
           </Button>
         )}
       </div>
@@ -95,6 +100,27 @@ export function Step5Workspace({ onPrev }: { onPrev?: () => void }) {
   return (
     <div className="flex h-full flex-col gap-4 p-6 pb-24">
       <StaleDataBanner step={5} staleness={staleness} />
+      {fxNotice && (
+        <ErrorNotice
+          copy={fxNotice}
+          extra={
+            <button
+              type="button"
+              className="underline"
+              onClick={() => document.getElementById("fx-rate-input")?.focus()}
+            >
+              去录入汇率
+            </button>
+          }
+        />
+      )}
+      <Step5DeclaredValue
+        data={data}
+        onPatch={patchData}
+        declarationDate={declarationDate}
+        onDeclarationDate={setDeclarationDate}
+        onProfileSaved={() => void runPreview()}
+      />
       <div className="flex flex-wrap items-end gap-4">
         <div className="space-y-1.5">
           <Label>出口商</Label>
@@ -115,9 +141,10 @@ export function Step5Workspace({ onPrev }: { onPrev?: () => void }) {
         <div className="space-y-1.5">
           <Label>订单号 / 合同号</Label>
           <Input
-            className="w-[200px]"
+            className={cn("w-[200px]", !orderNo.trim() && "border-destructive")}
             placeholder="如 DEMO-ORDER-001"
             value={orderNo}
+            aria-invalid={!orderNo.trim()}
             onChange={(e) => setOrderNo(e.target.value)}
           />
         </div>
@@ -412,7 +439,7 @@ export function Step5Workspace({ onPrev }: { onPrev?: () => void }) {
         </>
       )}
 
-      <div className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+      <div data-bottom-bar className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/80">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             {onPrev && (
@@ -458,7 +485,7 @@ export function Step5Workspace({ onPrev }: { onPrev?: () => void }) {
           </label>
           <Button
             onClick={runExport}
-            disabled={!data || exporting || isStale || staleness.customs || staleness.validation}
+            disabled={!data || exporting || isStale || staleness.customs || staleness.validation || !orderNo.trim()}
             title={
               staleness.customs || staleness.validation
                 ? "结果已过期，不能作为正式文件下载"

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearch } from "@tanstack/react-router";
 import { Database, FileSpreadsheet, Loader2, RefreshCw, Upload, ArrowLeft, CloudDownload } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
@@ -23,6 +24,7 @@ import {
   syncLocalMasterExcel,
   uploadMasterProductInfo,
   uploadMasterReport,
+  uploadRetailPrices,
   type MasterProduct,
 } from "@/lib/api/master-data";
 import {
@@ -38,6 +40,7 @@ import { LingxingPreviewPanel } from "@/components/lingxing-preview-panel";
 import { LingxingSchedulePanel } from "@/components/lingxing-schedule-panel";
 import { DIFF_LABEL, diffItemClass } from "@/lib/diff-kinds";
 import { usePreventBrowserFileDrop, fileDropZoneProps } from "@/hooks/use-prevent-browser-file-drop";
+import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 
 function masterDataApiError(err: unknown): string {
   if (err instanceof ApiError && err.status === 404) {
@@ -127,9 +130,16 @@ function ReportDropzone({
   );
 }
 
-type UploadKind = "fee_preview" | "inventory" | "product_info";
+type UploadKind = "fee_preview" | "inventory" | "product_info" | "retail";
 
 export function MasterDataWorkspace() {
+  const search = useSearch({ from: "/master-data" });
+  const [confirmState, setConfirmState] = useState<{
+    message: string;
+    resolve: (ok: boolean) => void;
+  } | null>(null);
+  const askConfirm = (message: string) =>
+    new Promise<boolean>((resolve) => setConfirmState({ message, resolve }));
   const [items, setItems] = useState<MasterProduct[]>([]);
   const [skuConflicts, setSkuConflicts] = useState<string[][]>([]);
   const [onlyMissingCustoms, setOnlyMissingCustoms] = useState(false);
@@ -152,6 +162,11 @@ export function MasterDataWorkspace() {
   const [lxConfirming, setLxConfirming] = useState(false);
 
   usePreventBrowserFileDrop();
+
+  useEffect(() => {
+    if (search.import !== "product-info") return;
+    document.getElementById("product-info-import")?.scrollIntoView({ block: "center" });
+  }, [search.import]);
 
   const loadList = useCallback(async () => {
     setLoading(true);
@@ -209,6 +224,22 @@ export function MasterDataWorkspace() {
       const res = await uploadMasterProductInfo(file);
       toast.success(
         `产品信息表：解析 ${res.parsed} 条，更新 ${res.upserted} 条（库中共 ${res.total_in_db} 条）`,
+      );
+      await loadList();
+    } catch (err) {
+      toast.error(masterDataApiError(err));
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const handleRetailUpload = async (file: File) => {
+    setUploading("retail");
+    try {
+      const res = await uploadRetailPrices(file);
+      const warning = (res.warnings ?? []).join("；");
+      toast.success(
+        `领星导入：解析 ${res.parsed_count}，写入 ${res.imported_count}，未匹配 ${res.unmatched_count}${warning ? `。${warning}` : ""}`,
       );
       await loadList();
     } catch (err) {
@@ -365,7 +396,7 @@ export function MasterDataWorkspace() {
       <Card className="shrink-0">
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-2 pb-3">
           <div>
-            <CardTitle className="text-sm">领星 ERP 一键同步</CardTitle>
+            <CardTitle id="lingxing-sync" className="text-sm">领星 ERP 一键同步</CardTitle>
             <p className="mt-1 text-xs text-muted-foreground">
               从领星拉取 Listing / FBA 库存 / 补货建议 / 近 30 天表现。Listing 先预览再写入主表；箱规与报关字段不会被覆盖。
               {lxLastSynced
@@ -448,7 +479,21 @@ export function MasterDataWorkspace() {
             />
           </CardContent>
         </Card>
-        <Card>
+        <Card id="lingxing-retail-import">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">领星导入</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ReportDropzone
+              title="上传领星售价 xlsx / csv"
+              hint="只按产品库里的 MSKU 写入售价，未匹配的行不新建 SKU。"
+              accept=".csv,.xlsx,.xlsm"
+              loading={uploading === "retail"}
+              onFile={(f) => void handleRetailUpload(f)}
+            />
+          </CardContent>
+        </Card>
+        <Card id="product-info-import">
           <CardHeader className="pb-3">
             <CardTitle className="text-sm">产品信息总表（报关字段）</CardTitle>
           </CardHeader>
@@ -492,7 +537,7 @@ export function MasterDataWorkspace() {
                   try {
                     const pv = await previewTicketImport(file);
                     const s = pv.summary;
-                    const ok = window.confirm(
+                    const ok = await askConfirm(
                       `${names[pv.source]}：共 ${s.total} 票，新增 ${s.new}、变化 ${s.changed}、不变 ${s.unchanged}` +
                         (pv.issues.length ? `，提示 ${pv.issues.length} 条（${pv.issues[0].message}…）` : "") +
                         "。确认写入？",
@@ -524,7 +569,7 @@ export function MasterDataWorkspace() {
                   try {
                     const pv = await previewWarehouseImport(file);
                     const s = pv.summary;
-                    const ok = window.confirm(
+                    const ok = await askConfirm(
                       `仓库地址库：共 ${s.total} 条，新增 ${s.new}、变化 ${s.changed}、不变 ${s.unchanged}` +
                         (pv.issues.length ? `，提示 ${pv.issues.length} 条` : "") +
                         "。确认写入？",
@@ -564,7 +609,7 @@ export function MasterDataWorkspace() {
                       return;
                     }
                     const lines = pv.changes.slice(0, 15).map((c) => `${c.sku} ${c.field}: ${String(c.old ?? "")} → ${String(c.new)}`);
-                    const ok = window.confirm(
+                    const ok = await askConfirm(
                       `将修改 ${pv.changes.length} 个字段（改动记为手填并锁定，MCP 拉取不覆盖；申报价仍领星优先）：\n` +
                         lines.join("\n") + (pv.changes.length > 15 ? "\n…" : "") +
                         (pv.errors.length ? `\n另有 ${pv.errors.length} 条问题不写入` : "") + "\n确认写入？",
@@ -624,6 +669,19 @@ export function MasterDataWorkspace() {
           />
         </CardContent>
       </Card>
+      <ConfirmDialog
+        open={confirmState != null}
+        title="请确认"
+        description={confirmState?.message}
+        onConfirm={() => {
+          confirmState?.resolve(true);
+          setConfirmState(null);
+        }}
+        onCancel={() => {
+          confirmState?.resolve(false);
+          setConfirmState(null);
+        }}
+      />
     </div>
   );
 }

@@ -52,6 +52,19 @@ CONFIG_WHITELIST: Dict[str, str] = {
 
 RELEASE_SUBDIR = "release_templates"
 
+# Marco 2026-10-20 决定：这 3 份真实数据模板原样留在仓库，不打进安装包。
+# 文本扫描不解包它们；新增的其它真实二进制由 test_manifest_excludes_real_data_files 拦截。
+ALLOWED_REAL_TEMPLATES_DECISION_DATE = "2026-10-20"
+ALLOWED_REAL_TEMPLATES = (
+    "发货录入样表.xlsx",
+    "工厂表.xlsx",
+    "货代表.xlsx",
+)
+# 空白官方 STA 表，不是上述 3 份已填写的真实数据模板，也不进安装包白名单。
+KNOWN_BLANK_TEMPLATES = (
+    "Send to Amazon表格.xlsx",
+)
+
 
 def _root(root: Path = None) -> Path:
     return Path(root).resolve() if root is not None else Path(__file__).resolve().parent.parent
@@ -84,3 +97,23 @@ def pyinstaller_datas(root: Path = None) -> List[Tuple[str, str]]:
     if missing:
         raise FileNotFoundError("白名单文件缺失：%s" % "; ".join(missing))
     return [(str(src), str(Path(dest).parent).replace("\\", "/")) for src, dest in entries(root)]
+
+
+FORBIDDEN_REAL_NAMES = ("lingxing_listing_prices.xlsx",)
+# 真实领星在售导出不得进仓库。合成用例只用内存里的 xlsx，不落这个文件名。
+FORBIDDEN_REAL_GLOBS = ("*listing*.xlsx",)
+
+
+def forbidden_real_hits(root: Path = None) -> List[str]:
+    base = _root(root)
+    skip = {"node_modules", ".git", "dist", ".venv", "__pycache__"}
+    hits: List[str] = []
+    for path in base.rglob("*"):
+        if any(part in skip for part in path.parts):
+            continue
+        if not path.is_file():
+            continue
+        name = path.name.lower()
+        if name in FORBIDDEN_REAL_NAMES or ("listing" in name and name.endswith(".xlsx")):
+            hits.append(str(path.relative_to(base)))
+    return hits

@@ -6,8 +6,8 @@ from fastapi import APIRouter, HTTPException
 
 from fba_tool.boxing import (
     box_metrics,
+    calculate_boxes,
     dataframe_to_sku_rows,
-    generate_box_plan,
     plans_to_editor_df,
 )
 from fba_tool.data_processing import validate_step1
@@ -36,10 +36,14 @@ def api_calculate_boxes(body: InputRowsRequest):
             detail={"message": "录入数据未通过校验", "errors": validation_errors_payload(errors)},
         )
     sku_rows = dataframe_to_sku_rows(df)
-    plans, tail_df = generate_box_plan(sku_rows)
+    plans, tail_df, warnings = calculate_boxes(sku_rows)
     editor_df = plans_to_editor_df(plans)
     metrics = box_metrics(editor_df, sku_rows)
-    return boxing_response_payload(editor_df, sku_rows, metrics, tail_df=tail_df)
+    payload = boxing_response_payload(
+        editor_df, sku_rows, metrics, tail_df=tail_df, transport_mode=body.transport_mode
+    )
+    payload["warnings"] = warnings
+    return payload
 
 
 @router.post("/api/box_metrics")
@@ -49,7 +53,9 @@ def api_box_metrics(body: BoxEditorRequest):
     editor_df = editor_to_df(body.box_editor)
     sku_rows = dataframe_to_sku_rows(df)
     metrics = box_metrics(editor_df, sku_rows)
-    enriched, compliance = boxing_api_compliance(editor_df, sku_rows, metrics)
+    enriched, compliance = boxing_api_compliance(
+        editor_df, sku_rows, metrics, transport_mode=body.transport_mode
+    )
     return {
         "metrics": df_to_records(enriched),
         "has_overweight": bool(enriched["超重"].any()) if not enriched.empty else False,
@@ -103,7 +109,9 @@ def api_assign_tail(body: TailAssignRequest):
     )
     editor_df = pd.concat([editor_df, new_row], ignore_index=True)
     metrics = box_metrics(editor_df, sku_rows)
-    payload = boxing_response_payload(editor_df, sku_rows, metrics)
+    payload = boxing_response_payload(
+        editor_df, sku_rows, metrics, transport_mode=body.transport_mode
+    )
     return {
         "box_editor": payload["box_editor"],
         "metrics": payload["metrics"],

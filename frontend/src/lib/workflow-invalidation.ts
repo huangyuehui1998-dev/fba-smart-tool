@@ -30,13 +30,13 @@ export const STAGE_ORDER: readonly WorkflowStage[] = [
 
 /** 阶段 → 用户可见中文标签（供 UI 提示）。 */
 export const STAGE_LABELS: Record<WorkflowStage, string> = {
-  input: "Step 1 录入",
-  boxing: "Step 2 排箱",
-  export: "Step 3 导出",
-  routing: "Step 3.5 刷仓",
-  validation: "Step 4 回传校验",
-  invoice: "Step 4.5 发票",
-  customs: "Step 5 报关",
+  input: "第 1 步 录入",
+  boxing: "第 2 步 排箱",
+  export: "第 3 步 导出",
+  routing: "第 7 步 刷仓",
+  validation: "第 4 步 货件校验",
+  invoice: "第 5 步 发票",
+  customs: "第 6 步 报关",
 };
 
 export function createEmptyStaleness(): WorkflowStaleness {
@@ -87,6 +87,82 @@ export function clearStaleFrom(stage: WorkflowStage, current: WorkflowStaleness)
   const next = { ...current };
   for (let i = idx; i < STAGE_ORDER.length; i++) {
     next[STAGE_ORDER[i]] = false;
+  }
+  return next;
+}
+
+/** 判断某阶段是否已经有可展示的产物。没有产物时，过期标记不对外显示。 */
+export type WorkflowOutputPresence = {
+  boxEditorCount: number;
+  step3MatrixCount: number;
+  routingSnapshotCount: number;
+  step4Ok: boolean;
+  step4StatusLineCount: number;
+  hasInvoiceDraft: boolean;
+  invoiceSessionCount: number;
+  hasCustomsSession: boolean;
+};
+
+export function stageHasOutput(stage: WorkflowStage, outputs: WorkflowOutputPresence): boolean {
+  switch (stage) {
+    case "boxing":
+      return outputs.boxEditorCount > 0;
+    case "export":
+      return outputs.step3MatrixCount > 0;
+    case "routing":
+      return outputs.routingSnapshotCount > 0;
+    case "validation":
+      return outputs.step4Ok || outputs.step4StatusLineCount > 0;
+    case "invoice":
+      return outputs.hasInvoiceDraft || outputs.invoiceSessionCount > 0;
+    case "customs":
+      return outputs.hasCustomsSession;
+    default:
+      return false;
+  }
+}
+
+/**
+ * 对外暴露的过期 = 原始标记且该阶段已有产物。
+ * 快照里仍保存原始标记；首次进入尚无发票/报关结果时不应显示「已过期」。
+ */
+/** 这些阶段的过期以录入输入的 sha256 为准，不因“上一步重新生成过”单独点亮。 */
+const INPUT_HASH_STAGES: readonly WorkflowStage[] = [
+  "export",
+  "routing",
+  "validation",
+  "invoice",
+  "customs",
+];
+
+export function stalenessFromInputHash(
+  visible: WorkflowStaleness,
+  recorded: Partial<Record<WorkflowStage, string>>,
+  current: string | null,
+  outputs: WorkflowOutputPresence,
+  step4Ok: boolean,
+): WorkflowStaleness {
+  if (!current) return visible;
+  const next = { ...visible };
+  for (const stage of INPUT_HASH_STAGES) {
+    const saved = recorded[stage];
+    if (!saved) continue;
+    if (saved === current) {
+      next[stage] = false;
+    } else if (step4Ok || stageHasOutput(stage, outputs)) {
+      next[stage] = true;
+    }
+  }
+  return next;
+}
+
+export function effectiveStaleness(
+  staleness: WorkflowStaleness,
+  outputs: WorkflowOutputPresence,
+): WorkflowStaleness {
+  const next = { ...staleness };
+  for (const stage of STAGE_ORDER) {
+    next[stage] = Boolean(staleness[stage]) && stageHasOutput(stage, outputs);
   }
   return next;
 }

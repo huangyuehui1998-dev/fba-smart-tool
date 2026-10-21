@@ -1,4 +1,5 @@
 import { ApiError } from "@/lib/api/client";
+import { explainApiError, formatErrorCopy } from "@/lib/error-messages";
 
 const NETWORK_ERROR_HINT =
   "无法连接后端（网络中断、后端未启动或端口冲突）。请只保留一个后端进程，刷新页面后重试。";
@@ -22,5 +23,5 @@ export function extractApiErrors(err: unknown): string[] {
 
 export function formatApiError(err: unknown): string {
   if (isNetworkFetchError(err)) return NETWORK_ERROR_HINT;
-  return extractApiErrors(err).join("\n");
+  return formatErrorCopy(explainApiError(err));
 }

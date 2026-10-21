@@ -12,6 +12,7 @@ from fba_tool.shipment_parser import (
     CsvShipment,
     PdfBoxPage,
     format_box_u_label,
+    join_wrapped_sku,
     normalize_fba_box_id,
 )
 
@@ -50,13 +51,25 @@ def _csv_boxes_with_fba(csv: CsvShipment) -> Dict[int, str]:
     return ids
 
 
-def _pdf_pages_by_fba(pages: List[PdfBoxPage]) -> Dict[str, PdfBoxPage]:
-    out: Dict[str, PdfBoxPage] = {}
+def _u_token(fba_id: str, box_no: int) -> str:
+    """保留箱号里的 U 后缀原样（U000001），供重复箱唛提示引用。"""
+    match = re.search(r"(U\d+)\s*$", str(fba_id or "").upper())
+    if match:
+        return match.group(1)
+    return _box_label(fba_id, box_no)
+
+
+def _is_soft_finding(message: str) -> bool:
+    return str(message or "").lstrip().startswith("⚠️")
+
+
+def _pdf_pages_grouped(pages: List[PdfBoxPage]) -> Dict[str, List[PdfBoxPage]]:
+    groups: Dict[str, List[PdfBoxPage]] = defaultdict(list)
     for page in pages:
         key = normalize_fba_box_id(page.fba_box_id)
         if key:
-            out[key] = page
-    return out
+            groups[key].append(page)
+    return groups
 
 
 def validate_step1_macro_totals(
@@ -142,7 +155,13 @@ def cross_validate_pair(
         return errors
 
     fba_by_box = _csv_boxes_with_fba(csv)
-    pdf_by_fba = _pdf_pages_by_fba(pdf_pages)
+    grouped_pages = _pdf_pages_grouped(pdf_pages)
+    for key, group in grouped_pages.items():
+        if len(group) < 2:
+            continue
+        token = _u_token(group[0].fba_box_id, group[0].box_no)
+        errors.append(f"❌ 【重复箱唛】箱号 {token} 出现 {len(group)} 页")
+    pdf_by_fba = {key: group[0] for key, group in grouped_pages.items()}
 
     csv_box_nos = sorted(csv.box_data.keys())
     csv_fba_ids = [
@@ -150,12 +169,20 @@ def cross_validate_pair(
     ]
 
     pdf_with_id = [p for p in pdf_pages if normalize_fba_box_id(p.fba_box_id)]
+    seen_fba: Dict[str, int] = {}
+    for page in pdf_with_id:
+        key = normalize_fba_box_id(page.fba_box_id)
+        seen_fba[key] = seen_fba.get(key, 0) + 1
+    for key, count in seen_fba.items():
+        if count > 1:
+            errors.append(f"❌ 【重复箱唛】箱号 {key} 在 PDF 中出现了 {count} 次。")
     if len(pdf_with_id) != len(csv_box_nos):
         errors.append(
             f"❌ 【箱数不一致】[{warehouse}] 货件 {shipment_id}：CSV 共 {len(csv_box_nos)} 箱，"
             f"PDF 有效箱唛页 {len(pdf_with_id)} 页。"
         )
 
+    unlabeled = 0
     for box_no in csv_box_nos:
         fba_raw = fba_by_box.get(box_no, "")
         fba_key = normalize_fba_box_id(fba_raw)
@@ -182,39 +209,67 @@ def cross_validate_pair(
         if sku_count <= 0:
             continue
 
+        if sku_count == 1 and pdf_page.is_mixed:
+            errors.append(
+                f"❌ 【混装标签异常】箱号 {label} 为单 SKU 箱，箱唛却标注 Mixed SKUs。"
+                f"（请确认该箱是否混装；单 SKU 箱不得使用 Mixed 箱唛）"
+            )
+            continue
+
+        if sku_count > 1 and (
+            pdf_page.is_mixed or MIXED_SKU_RE.search(str(pdf_page.raw_text or ""))
+        ):
+            continue
+
+        pdf_sku = str(pdf_page.sku or "").strip()
+        if not pdf_sku:
+            pdf_sku = join_wrapped_sku(pdf_page.raw_text or "", list(csv_skus))
+        try:
+            pdf_qty = int(pdf_page.qty or 0)
+        except (TypeError, ValueError):
+            pdf_qty = 0
+        fnsku = str(pdf_page.fnsku or "").strip().upper()
+        csv_fnskus = {str(value).strip().upper() for value in (csv.sku_fnsku or {}).values() if str(value).strip()}
+        if not pdf_sku:
+            recognized_fnsku = bool(fnsku) and (not csv_fnskus or fnsku in csv_fnskus)
+            recognized_qty = pdf_qty > 0 and (
+                sku_count != 1 or pdf_qty == int(next(iter(csv_skus.values())))
+            )
+            if not pdf_sku and not fnsku and pdf_qty <= 0:
+                errors.append(f"❌ 【箱唛未识别】箱号 {label} 的 SKU、FNSKU、数量都识别不出")
+            elif recognized_fnsku or recognized_qty:
+                errors.append(f"⚠️ 箱号 {label} 箱唛 SKU 未识别，已按 FNSKU/数量核对")
+            else:
+                errors.append(f"❌ 【箱唛未识别】箱号 {label} 的 SKU、FNSKU、数量都对不上")
+            continue
+
         if sku_count == 1:
             csv_sku = next(iter(csv_skus.keys()))
             csv_qty = int(csv_skus[csv_sku])
-            pdf_sku = str(pdf_page.sku or "").strip()
-            pdf_qty = int(pdf_page.qty or 0)
+            if _norm_sku(pdf_sku) != _norm_sku(csv_sku):
+                errors.append(
+                    f"❌ 【产品不符】箱号 {label} 的 PDF 标签 SKU 为 {pdf_sku}，"
+                    f"但 CSV 要求装 {csv_sku}。"
+                    f"（若两者其实是同一产品，请统一 SKU 简称与亚马逊 Merchant SKU 命名后重试）"
+                )
+            if pdf_qty != csv_qty:
+                errors.append(
+                    f"❌ 【数量冲突】箱号 {label} 的 PDF 标签显示数量为 {pdf_qty}，"
+                    f"但 CSV 数据库中要求装 {csv_qty}。"
+                    f"（请核对该箱实际装箱数量，并确认 CSV 与箱唛 PDF 为同一次货件生成）"
+                )
+        elif pdf_sku and _norm_sku(pdf_sku) not in {_norm_sku(s) for s in csv_skus}:
+            errors.append(
+                f"❌ 【混装产品异常】箱号 {label} CSV 为混装 {sku_count} SKU，"
+                f"PDF 却标注单一 SKU {pdf_sku} 且非 Mixed SKUs。"
+                f"（请确认该箱是否为混装箱；若是，箱唛应标注 Mixed SKUs）"
+            )
 
-            if pdf_page.is_mixed:
-                continue
-
-            if pdf_sku and pdf_qty > 0:
-                if _norm_sku(pdf_sku) != _norm_sku(csv_sku):
-                    errors.append(
-                        f"❌ 【产品不符】箱号 {label} 的 PDF 标签 SKU 为 {pdf_sku}，"
-                        f"但 CSV 要求装 {csv_sku}。"
-                        f"（若两者其实是同一产品，请统一 SKU 简称与亚马逊 Merchant SKU 命名后重试）"
-                    )
-                if pdf_qty != csv_qty:
-                    errors.append(
-                        f"❌ 【数量冲突】箱号 {label} 的 PDF 标签显示数量为 {pdf_qty}，"
-                        f"但 CSV 数据库中要求装 {csv_qty}。"
-                        f"（请核对该箱实际装箱数量，并确认 CSV 与箱唛 PDF 为同一次货件生成）"
-                    )
-        else:
-            if pdf_page.is_mixed or MIXED_SKU_RE.search(str(pdf_page.raw_text or "")):
-                continue
-            if pdf_page.sku and not pdf_page.is_mixed:
-                pdf_sku = str(pdf_page.sku).strip()
-                if pdf_sku and _norm_sku(pdf_sku) not in {_norm_sku(s) for s in csv_skus}:
-                    errors.append(
-                        f"❌ 【混装产品异常】箱号 {label} CSV 为混装 {sku_count} SKU，"
-                        f"PDF 却标注单一 SKU {pdf_sku} 且非 Mixed SKUs。"
-                        f"（请确认该箱是否为混装箱；若是，箱唛应标注 Mixed SKUs）"
-                    )
+    if unlabeled:
+        errors.append(
+            f"⚠️ [{warehouse}] 货件 {shipment_id}：本票 {unlabeled} 箱箱唛无 SKU/数量文本，"
+            f"已跳过逐箱 SKU 比对（箱号、箱数比对照常）"
+        )
 
     for page in pdf_with_id:
         key = normalize_fba_box_id(page.fba_box_id)
@@ -250,10 +305,14 @@ def run_cross_validation(
                 48 + int(32 * (i + 1) / total),
             )
         pages = pdf_pages_map.get(pair.shipment_id, [])
-        pair_errors = cross_validate_pair(
+        pair_messages = cross_validate_pair(
             pair.csv, pages, pair.warehouse_code, pair.shipment_id
         )
+        pair_errors = [msg for msg in pair_messages if not _is_soft_finding(msg)]
+        pair_warnings = [msg for msg in pair_messages if _is_soft_finding(msg)]
         compare_errors.extend(pair_errors)
+        result.warnings.extend(pair_warnings)
+        result.status_lines.extend(pair_warnings)
         if not pair_errors:
             box_n = pair.csv.box_count or len(pair.csv.box_data)
             result.status_lines.append(
@@ -273,6 +332,8 @@ def run_cross_validation(
             on_progress("交叉校验通过，正在生成工人装箱单数据…", 84)
         result.worker_packing_rows = build_worker_packing_rows(pairs)
         result.status_lines.append("✅ 交叉校验通过，装箱单数据已就绪。")
+    else:
+        result.status_lines.append(f"❌ 校验未通过，共 {len(compare_errors)} 项")
 
     return result
 
