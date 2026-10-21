@@ -270,7 +270,7 @@ def test_export_field_edit_overrides_rendered_qiluo_model():
         delete_product_by_sku(sku)
 
 
-def test_send_note_slave_does_not_fail_export():
+def test_send_note_slave_is_rejected():
     from fastapi.testclient import TestClient
 
     from fba_tool.forwarder_registry import get_template_bytes
@@ -289,13 +289,36 @@ def test_send_note_slave_does_not_fail_export():
             "fields": [{"cell": "E5", "value": "NOPE", "key": "E5", "label": "E5"}],
         },
     )
-    assert exported.status_code == 200, exported.text[:400]
-    wb = _book(exported.content)
+    assert exported.status_code == 400, exported.text[:400]
+    assert exported.json()["detail"]["code"] == "MERGED_SLAVE"
+    assert "E5" in exported.json()["detail"]["cells"]
+
+
+def test_send_step45_empty_reference_id_asks_for_pdf():
+    from fastapi.testclient import TestClient
+
+    from fba_tool.invoice_step45 import REFERENCE_ID_EMPTY_HINT
+    from fba_tool.master_db import delete_product_by_sku
+    from main import app
+
+    sku = "B13-REF"
+    delete_product_by_sku(sku)
+    _seed(sku, "X00TESTREF", "B0B13REF01", "型号乙")
+    raw = _csv("FBA13REF1", sku, "X00TESTREF", "B0B13REF01")
+    client = TestClient(app)
     try:
-        assert "澳洲" in str(wb.active["D5"].value)
-        assert wb.active["I5"].value != "NOPE"
+        generated = client.post(
+            "/api/invoice/generate",
+            json={
+                "shipment_id": "FBA13REF1",
+                "forwarder_id": "send",
+                "csv_base64": base64.b64encode(raw).decode(),
+            },
+        )
+        assert generated.status_code == 200, generated.text[:400]
+        assert REFERENCE_ID_EMPTY_HINT in (generated.json().get("warnings") or [])
     finally:
-        wb.close()
+        delete_product_by_sku(sku)
 
 
 def test_rollback_restores_sql_null_not_empty_text(monkeypatch, tmp_path):

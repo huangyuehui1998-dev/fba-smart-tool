@@ -69,7 +69,7 @@ def test_serialize_preview_includes_price_info(tmp_path, monkeypatch):
     from fba_tool import lingxing_preview as lp
 
     run_id = 4242
-    lp.build_listing_preview(run_id, [{"sku": "DEMO-PRICE-1-FBA", "asin": "B0DEMO0101", "fnsku": "X00DEMO101",
+    lp.build_listing_preview(run_id, [{"sku": "DEMO-PRICE-1-FBA", "asin": "B0DEMO0101", "fnsku": "X00TEST101",
                                        "listing_price": 12.0, "regular_price": 16.0,
                                        "listing_price_basis": "listing_price"}])
     payload = lp.serialize_preview(run_id)

@@ -309,6 +309,58 @@ def _workbook_texts(data: bytes) -> set[str]:
     return texts
 
 
+def _catalog_seed(rec, meta: dict) -> dict | None:
+    """真实批次种子：ASIN 来自 CSV 的 SKU 行，没有再看装箱行。"""
+    import json
+
+    from fba_tool.sku_keys import lookup_sku
+
+    sku_text = str(rec.get("SKU") or "").strip()
+    if not sku_text:
+        return None
+    hit = lookup_sku(meta, sku_text, {}) or {}
+    asin = str(hit.get("asin") or "").strip()
+    if not asin:
+        for key in getattr(rec, "index", []):
+            if str(key).strip().upper() == "ASIN":
+                asin = str(rec.get(key) or "").strip()
+                break
+    fnsku = str(rec.get("FNSKU") or hit.get("fnsku") or "").strip().upper()
+    return {
+        "sku": sku_text,
+        "fnsku": fnsku,
+        "asin": asin,
+        "english_name": "Item",
+        "chinese_name": "物品",
+        "brand": "Brand",
+        "material": "棉",
+        "purpose": "宠物",
+        "hs_code": "9507100090",
+        "model_name": "M",
+        "extra_data": json.dumps(
+            {"invoice": {"unit": "个", "purchase_price": 5, "material_en": "cotton", "purpose_en": "pet", "pcs_per_set": 1}},
+            ensure_ascii=False,
+        ),
+    }
+
+
+def test_real_batch_seed_copies_asin_from_csv():
+    from fba_tool.invoice_table import extract_csv_sku_meta
+    from fba_tool.shipment_parser import parse_csv_shipment
+
+    raw = _sta_batch14_csv()
+    ship = parse_csv_shipment(raw, file_name="batch14.csv", allow_unassigned_fba=True)
+    meta = extract_csv_sku_meta(raw)
+    seeds = []
+    for _, rec in ship.box_items.iterrows():
+        seed = _catalog_seed(rec, meta)
+        if seed:
+            seeds.append(seed)
+    assert seeds
+    assert all(item["asin"].startswith("B0STA14") for item in seeds)
+    assert all(item["fnsku"].startswith("X00TEST14") for item in seeds)
+
+
 def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tmp_path):
     """真实目录在时跑六个货代的自动填写→导出，并和同票发票核对货件号与数量。"""
     from tests.smoke.reference import LayoutMissing, available, realdata_root
@@ -346,30 +398,15 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
                 raise AssertionError(f"{path.name} 解析失败：{exc}") from exc
             if ship.box_items.empty:
                 raise AssertionError(f"{path.name} 没有箱内数量")
-            import json
+            from fba_tool.invoice_table import extract_csv_sku_meta
 
+            meta = extract_csv_sku_meta(raw)
             for _, rec in ship.box_items.iterrows():
-                sku_text = str(rec.get("SKU") or "").strip()
-                if not sku_text:
+                seed = _catalog_seed(rec, meta)
+                if not seed:
                     continue
-                upsert_product(
-                    {
-                        "sku": sku_text,
-                        "fnsku": str(rec.get("FNSKU") or "").strip().upper(),
-                        "english_name": "Item",
-                        "chinese_name": "物品",
-                        "brand": "Brand",
-                        "material": "棉",
-                        "purpose": "宠物",
-                        "hs_code": "9507100090",
-                        "model_name": "M",
-                        "extra_data": json.dumps(
-                            {"invoice": {"unit": "个", "purchase_price": 5, "material_en": "cotton", "purpose_en": "pet", "pcs_per_set": 1}},
-                            ensure_ascii=False,
-                        ),
-                    }
-                )
-                set_product_fields(sku_text, {"listing_price": 10, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+                upsert_product(seed)
+                set_product_fields(seed["sku"], {"listing_price": 10, "listing_price_currency": "USD"}, SOURCE_MANUAL)
             qty_tokens = {str(int(value)) for value in ship.box_items["数量"] if int(value) > 0}
             for forwarder_id in FORWARDERS:
                 generated = client.post(

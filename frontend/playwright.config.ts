@@ -1,5 +1,6 @@
 import { defineConfig, devices } from "@playwright/test";
 
+import { e2eDataDir } from "./e2e/data-dir";
 import { e2ePython } from "./e2e/python-bin";
 
 const python = e2ePython();
@@ -24,7 +25,7 @@ export default defineConfig({
       timeout: 120_000,
       env: {
         ...process.env,
-        FBA_APP_DATA_DIR: "/tmp/fba-e2e-data",
+        FBA_APP_DATA_DIR: e2eDataDir(),
         FBA_DISABLE_SCHEDULER: "1",
       },
     },

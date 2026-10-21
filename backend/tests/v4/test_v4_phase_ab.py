@@ -179,18 +179,21 @@ def test_v4_roundtrip_and_single_cell_edit(forwarder):
     assert diffs == [coord]
 
 
-def test_v4_t4_send_slave_writes_value_master():
-    """B4 是「FBA Shipment ID」标签合并的从属格，写入落到值的主格 C4，标签 A4 保持不变。"""
-    from fba_tool.univer_apply import apply_snapshot_values
+def test_v4_t4_send_slave_write_is_rejected():
+    """B4 是「FBA Shipment ID」标签合并的从属格。显式写入返回 400，不落到 C4。"""
+    from fba_tool.univer_apply import ApplyRejected, apply_snapshot_values
 
     raw = _bytes("send.xlsx")
     payload = _snapshot("send.xlsx")["snapshot"]
     sheet = next(iter(payload["sheets"].values()))
     sheet.setdefault("cellData", {}).setdefault("3", {})["1"] = {"v": "SLAVE", "t": 1}
-    changed = apply_snapshot_values(raw, payload)
-    wb = openpyxl.load_workbook(io.BytesIO(changed))
+    with pytest.raises(ApplyRejected) as caught:
+        apply_snapshot_values(raw, payload)
+    assert caught.value.code == "MERGED_SLAVE"
+    assert "B4" in caught.value.cells
+    wb = openpyxl.load_workbook(io.BytesIO(raw))
     try:
-        assert wb.active["C4"].value == "SLAVE"
+        assert wb.active["C4"].value in (None, "")
         assert "FBA Shipment ID" in str(wb.active["A4"].value)
     finally:
         wb.close()
@@ -1089,7 +1092,7 @@ def _export(client, filename: str, forwarder_id: str, sheet: str, fields: list, 
 
 
 def test_v4_export_invoice_keeps_workbook_and_rejects_conflicts():
-    """发出件保留原模板的表、隐藏状态、图片、数据验证；公式格改成纯值返回 400，合并从属格写到值的主格。"""
+    """发出件保留原模板的表、隐藏状态、图片、数据验证；公式格改成纯值、合并从属格都返回 400。"""
     from fastapi.testclient import TestClient
 
     from main import app
@@ -1139,13 +1142,9 @@ def test_v4_export_invoice_keeps_workbook_and_rejects_conflicts():
         "Sheet1",
         [{"cell": "B4", "value": "TEST_SLAVE", "key": "B4", "label": "B4"}],
     )
-    assert slave.status_code == 200, slave.text[:400]
-    book = openpyxl.load_workbook(io.BytesIO(slave.content))
-    try:
-        assert book.active["C4"].value == "TEST_SLAVE"
-        assert "FBA Shipment ID" in str(book.active["A4"].value)
-    finally:
-        book.close()
+    assert slave.status_code == 400, slave.text[:400]
+    assert slave.json()["detail"]["code"] == "MERGED_SLAVE"
+    assert "B4" in slave.json()["detail"]["cells"]
 
     formula, _raw = _export(
         client,
@@ -1161,13 +1160,9 @@ def test_v4_export_invoice_keeps_workbook_and_rejects_conflicts():
     sheet = next(iter(snap["sheets"].values()))
     sheet.setdefault("cellData", {}).setdefault("3", {})["1"] = {"v": "TEST_SLAVE"}
     moved, _raw = _export(client, "send.xlsx", "send", "Sheet1", [], snap)
-    assert moved.status_code == 200, moved.text[:400]
-    book = openpyxl.load_workbook(io.BytesIO(moved.content))
-    try:
-        assert book.active["C4"].value == "TEST_SLAVE"
-        assert "FBA Shipment ID" in str(book.active["A4"].value)
-    finally:
-        book.close()
+    assert moved.status_code == 400, moved.text[:400]
+    assert moved.json()["detail"]["code"] == "MERGED_SLAVE"
+    assert "B4" in moved.json()["detail"]["cells"]
 
     snap = _snapshot("qiluo_t6.xlsx")["snapshot"]
     sheet = next(item for item in snap["sheets"].values() if item["name"] == "发票")
@@ -1199,6 +1194,111 @@ def test_v4_a7_flags_injected_workbook_parser(tmp_path):
     spec.loader.exec_module(module)
     assert module.scan_paths([tmp_path])
     assert module.scan_paths([tmp_path / "missing"]) == []
+
+
+def test_all_forwarder_slave_cells_reject_merged_slave():
+    """每个货代模板的从属格都按原坐标拒绝，不能改写到旁边的格子。"""
+    from openpyxl.utils import get_column_letter
+
+    from fba_tool.univer_apply import ApplyRejected, _slave_map, apply_cell_writes, apply_snapshot_values
+
+    scanned = 0
+    for path in sorted(TEMPLATES.glob("*.xlsx")):
+        raw = path.read_bytes()
+        wb = openpyxl.load_workbook(io.BytesIO(raw))
+        try:
+            for ws in wb.worksheets:
+                slaves = _slave_map(ws)
+                if not slaves:
+                    continue
+                writes = []
+                cell_data: dict = {}
+                for row, col in slaves:
+                    ref = f"{get_column_letter(col)}{row}"
+                    writes.append({"cell": ref, "value": "SLAVE_SCAN"})
+                    cell_data.setdefault(str(row - 1), {})[str(col - 1)] = {"v": "SLAVE_SCAN"}
+                scanned += len(writes)
+                with pytest.raises(ApplyRejected) as caught:
+                    apply_cell_writes(raw, writes, ws.title)
+                assert caught.value.code == "MERGED_SLAVE", path.name
+                assert set(caught.value.cells) == {item["cell"] for item in writes}
+                snapshot = {
+                    "sheetOrder": ["s0"],
+                    "sheets": {"s0": {"name": ws.title, "cellData": cell_data}},
+                }
+                with pytest.raises(ApplyRejected) as snapped:
+                    apply_snapshot_values(raw, snapshot)
+                assert snapped.value.code == "MERGED_SLAVE"
+                assert set(snapped.value.cells) == {item["cell"] for item in writes}
+        finally:
+            wb.close()
+    assert scanned >= 24
+
+    raw = _bytes("qiluo_t6.xlsx")
+    with pytest.raises(ApplyRejected) as caught:
+        apply_cell_writes(raw, [{"cell": "C7", "value": "HACK"}], "发票")
+    assert caught.value.code == "MERGED_SLAVE"
+    assert caught.value.cells == ["C7"]
+    book = openpyxl.load_workbook(io.BytesIO(raw))
+    try:
+        assert book["发票"]["D7"].value == "收件人地址1"
+        assert book["发票"]["B7"].value == "不需报关"
+    finally:
+        book.close()
+
+
+def test_template_base64_formula_or_wrong_forwarder_returns_400():
+    from fastapi.testclient import TestClient
+
+    from main import app
+
+    client = TestClient(app)
+
+    def post(forwarder: str, sheet: str, data: bytes, fields: list):
+        return client.post(
+            "/api/export_invoice",
+            json={
+                "forwarder_id": forwarder,
+                "template_base64": base64.b64encode(data).decode(),
+                "template_sheet": sheet,
+                "shipment_id": "FBAE2E",
+                "warehouse_code": "ONT8",
+                "fields": fields,
+            },
+        )
+
+    mismatch = post("qiluo_t6", "发票", _bytes("send.xlsx"), [{"cell": "E3", "value": "X", "key": "E3", "label": "E3"}])
+    assert mismatch.status_code == 400, mismatch.text[:400]
+    assert mismatch.json()["detail"]["code"] == "TEMPLATE_MISMATCH"
+
+    other = post("qiluo_t6", "发票", _bytes("qiluo.xlsx"), [])
+    assert other.status_code == 400
+    assert other.json()["detail"]["code"] == "TEMPLATE_MISMATCH"
+
+    raw = _bytes("qiluo_t6.xlsx")
+    wb = openpyxl.load_workbook(io.BytesIO(raw))
+    wb["发票"]["E4"] = 123
+    buf = io.BytesIO()
+    wb.save(buf)
+    wb.close()
+    formula = post("qiluo_t6", "发票", buf.getvalue(), [])
+    assert formula.status_code == 400, formula.text[:400]
+    assert formula.json()["detail"]["code"] == "FORMULA_OVERWRITE"
+    assert "E4" in formula.json()["detail"]["cells"]
+
+    wb = openpyxl.load_workbook(io.BytesIO(raw))
+    wb["发票"]["E3"] = "FROM_UPLOAD"
+    buf = io.BytesIO()
+    wb.save(buf)
+    wb.close()
+    edited = post("qiluo_t6", "发票", buf.getvalue(), [])
+    assert edited.status_code == 200, edited.text[:400]
+    book = openpyxl.load_workbook(io.BytesIO(edited.content))
+    try:
+        assert book["发票"]["E3"].value == "FROM_UPLOAD"
+        assert str(book["发票"]["E4"].value).startswith("=VLOOKUP")
+    finally:
+        book.close()
 
 
 def test_deshu_currency_dropdown_survives_snapshot_apply():

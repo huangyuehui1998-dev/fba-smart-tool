@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import { expect, test, type Page } from "@playwright/test";
 
+import { e2eDataDir } from "./data-dir";
 import { e2ePython } from "./python-bin";
 
 const FBOX = {
@@ -73,6 +74,7 @@ async function openInvoice(page: Page, payload: typeof FBOX = FBOX) {
   await expect(page.getByText("V4 e2e")).toBeVisible({ timeout: 20_000 });
   await expect(page.getByTestId("forwarder-select")).toBeVisible({ timeout: 20_000 });
   await page.waitForFunction(() => window.__fbaUniverPreloaded === true, undefined, { timeout: 20_000 });
+  await page.waitForFunction(() => window.__fbaUniverShell === true, undefined, { timeout: 20_000 });
 }
 
 async function chooseForwarder(page: Page, name: string) {
@@ -300,23 +302,8 @@ test("V4 UI export keeps sheets and images and rejects merge or formula edits", 
         await new Promise((resolve) => window.setTimeout(resolve, 30));
       });
       const slave = await exportWorkbook(page);
-      expect(slave.status).toBe(200);
-      const dir = mkdtempSync(join(tmpdir(), "fba-send-master-"));
-      const out = join(dir, "out.xlsx");
-      writeFileSync(out, slave.body);
-      const placed = JSON.parse(
-        execFileSync(
-          e2ePython(),
-          [
-            "-c",
-            "import json,sys; from openpyxl import load_workbook; wb=load_workbook(sys.argv[1]); ws=wb.active; print(json.dumps({'C4': ws['C4'].value, 'A4': str(ws['A4'].value)}))",
-            out,
-          ],
-          { encoding: "utf-8" },
-        ),
-      ) as { C4: string; A4: string };
-      expect(placed.C4).toBe("TEST_SLAVE");
-      expect(placed.A4).toContain("FBA Shipment ID");
+      expect(slave.status).toBe(400);
+      expect(JSON.parse(slave.body.toString("utf8")).detail.code).toBe("MERGED_SLAVE");
     }
   }
 });
@@ -387,7 +374,7 @@ for sku, fnsku, asin, price in (
       cwd: join("..", "backend"),
       env: {
         ...process.env,
-        FBA_APP_DATA_DIR: "/tmp/fba-e2e-data",
+        FBA_APP_DATA_DIR: e2eDataDir(),
         FBA_DISABLE_SCHEDULER: "1",
       },
     },
@@ -465,6 +452,7 @@ for sku, fnsku, asin, price in (
   const sendGen = page.waitForResponse((response) => response.url().includes("/api/invoice/generate"));
   await page.getByTestId("invoice-autofill").click();
   expect((await sendGen).status()).toBe(200);
+  await expect(page.getByTestId("reference-id-hint")).toContainText("PDF");
   await expect(page.getByTestId("invoice-autofill")).toBeEnabled();
   const sendFile = join(mkdtempSync(join(tmpdir(), "fba-b13-send-")), "out.xlsx");
   const sendExport = await exportWorkbook(page);
@@ -535,7 +523,7 @@ else:
       ],
       {
         cwd: join("..", "backend"),
-        env: { ...process.env, FBA_APP_DATA_DIR: "/tmp/fba-e2e-data", FBA_DISABLE_SCHEDULER: "1" },
+        env: { ...process.env, FBA_APP_DATA_DIR: e2eDataDir(), FBA_DISABLE_SCHEDULER: "1" },
       },
     );
   };

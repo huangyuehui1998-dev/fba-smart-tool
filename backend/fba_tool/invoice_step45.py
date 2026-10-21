@@ -19,11 +19,14 @@ from fba_tool.univer_apply import (
     _is_formula,
     _iter_cells,
     _norm_formula,
+    _raise_conflicts,
+    _slave_map,
     _snapshot_sheets,
     _values_equal,
     _write,
-    resolve_write_cell,
 )
+
+REFERENCE_ID_EMPTY_HINT = "Reference ID 为空，请上传货件 PDF"
 
 _CACHE: Dict[str, bytes] = {}
 
@@ -176,6 +179,11 @@ def try_adapter_draft(
             warnings.append(str(item.get("message") or item.get("code") or ""))
         elif item:
             warnings.append(str(item))
+    if _adapter_id(forwarder_id) == "send" and not str(rendered.get("reference_id") or "").strip():
+        model = rendered.get("model")
+        reference = str(getattr(model, "reference_id", "") or "")
+        if not reference.strip():
+            warnings.append(REFERENCE_ID_EMPTY_HINT)
     return InvoiceDraft(
         shipment_id=rendered["shipment"].shipment_id,
         warehouse_code=rendered["shipment"].warehouse_code or "",
@@ -206,6 +214,7 @@ def _apply_user_edits(rendered: bytes, template: bytes, snapshot: Dict[str, Any]
     filled = openpyxl.load_workbook(io.BytesIO(rendered))
     blank = openpyxl.load_workbook(io.BytesIO(template))
     formula_cells: List[str] = []
+    slave_cells: List[str] = []
     try:
         by_name = {ws.title: ws for ws in filled.worksheets}
         blank_by_name = {ws.title: ws for ws in blank.worksheets}
@@ -214,14 +223,15 @@ def _apply_user_edits(rendered: bytes, template: bytes, snapshot: Dict[str, Any]
             src = blank_by_name.get(sheet.get("name"))
             if ws is None:
                 continue
+            slaves = _slave_map(ws)
             for row, col, payload in _iter_cells(sheet):
                 ref = f"{get_column_letter(col)}{row}"
                 snap = payload.get("v")
-                target = resolve_write_cell(ws, row, col, snap)
-                if target is None:
+                if (row, col) in slaves:
+                    master = ws.cell(*slaves[(row, col)])
+                    if not _values_equal(master.value, snap):
+                        slave_cells.append(ref)
                     continue
-                row, col = target
-                ref = f"{get_column_letter(col)}{row}"
                 cell = ws.cell(row, col)
                 template_value = src.cell(row, col).value if src is not None else None
                 if _is_formula(cell):
@@ -238,8 +248,7 @@ def _apply_user_edits(rendered: bytes, template: bytes, snapshot: Dict[str, Any]
                 if _values_equal(cell.value, snap) or _values_equal(template_value, snap):
                     continue
                 _write(cell, payload)
-        if formula_cells:
-            raise ApplyRejected("FORMULA_OVERWRITE", formula_cells, f"公式单元格不能改成纯值：{', '.join(formula_cells[:30])}")
+        _raise_conflicts(formula_cells, slave_cells)
         buf = io.BytesIO()
         filled.save(buf)
         return buf.getvalue()
@@ -248,20 +257,48 @@ def _apply_user_edits(rendered: bytes, template: bytes, snapshot: Dict[str, Any]
         blank.close()
 
 
+def _sheet_merges(wb) -> Dict[str, tuple]:
+    """按规范化表名记下合并范围。多出来的表不算另一份模板。"""
+    from fba_tool.invoice_templates import norm
+
+    sheets: Dict[str, tuple] = {}
+    for ws in wb.worksheets:
+        sheets[norm(ws.title)] = tuple(sorted(str(item) for item in ws.merged_cells.ranges))
+    return sheets
+
+
+def _same_forwarder_template(official, preview) -> bool:
+    """官方模板的每一张表都要在上传件里，而且合并范围一致。值可以不同。"""
+    left = _sheet_merges(official)
+    right = _sheet_merges(preview)
+    if not left or not right:
+        return False
+    return all(name in right and right[name] == merges for name, merges in left.items())
+
+
 def overlay_preview_edits(base: bytes, official: bytes, preview: bytes) -> bytes:
     """forwarder_id 固定官方模板壳。preview 相对空白官方模板改过的格子写回 base。
 
     不整本替换：合并、公式、图片、数据验证和隐藏表仍以官方模板或已渲染结果为准。
-    从属格写到值的主格。公式格保持原公式，不在这里改成纯值。
+    上传件和官方模板的表名或合并范围不一致时拒绝。公式格改成纯值时拒绝。
+    从属格不能写入。
     """
     if not preview or preview == official:
         return base
     filled = openpyxl.load_workbook(io.BytesIO(base))
     blank = openpyxl.load_workbook(io.BytesIO(official))
     edited = openpyxl.load_workbook(io.BytesIO(preview))
+    formula_cells: List[str] = []
+    slave_cells: List[str] = []
     try:
         from fba_tool.invoice_templates import norm
 
+        if not _same_forwarder_template(blank, edited):
+            raise ApplyRejected(
+                "TEMPLATE_MISMATCH",
+                [],
+                "上传的工作簿与所选货代模板不匹配",
+            )
         blank_by = {norm(ws.title): ws for ws in blank.worksheets}
         edited_by = {norm(ws.title): ws for ws in edited.worksheets}
         for ws in filled.worksheets:
@@ -269,6 +306,7 @@ def overlay_preview_edits(base: bytes, official: bytes, preview: bytes) -> bytes
             prev = edited_by.get(norm(ws.title))
             if src is None or prev is None:
                 continue
+            slaves = _slave_map(ws)
             max_row = min(max(prev.max_row or 1, 1), 200)
             max_col = min(max(prev.max_column or 1, 1), 40)
             for row in prev.iter_rows(min_row=1, max_row=max_row, max_col=max_col):
@@ -278,15 +316,20 @@ def overlay_preview_edits(base: bytes, official: bytes, preview: bytes) -> bytes
                     official_value = src.cell(cell.row, cell.column).value
                     if _values_equal(official_value, cell.value):
                         continue
-                    target = resolve_write_cell(ws, cell.row, cell.column, cell.value)
-                    if target is None:
+                    coord = cell.coordinate
+                    if (cell.row, cell.column) in slaves:
+                        master = ws.cell(*slaves[(cell.row, cell.column)])
+                        if not _values_equal(master.value, cell.value):
+                            slave_cells.append(coord)
                         continue
-                    dest = ws.cell(*target)
-                    if _is_formula(dest):
+                    dest = ws.cell(cell.row, cell.column)
+                    if _is_formula(dest) or _is_formula(src.cell(cell.row, cell.column)):
+                        formula_cells.append(coord)
                         continue
                     if _values_equal(dest.value, cell.value):
                         continue
                     _write(dest, {"v": _json_cell(cell.value) if isinstance(cell.value, (datetime, date)) else cell.value})
+        _raise_conflicts(formula_cells, slave_cells)
         buf = io.BytesIO()
         filled.save(buf)
         return buf.getvalue()

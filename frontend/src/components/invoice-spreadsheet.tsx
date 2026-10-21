@@ -128,6 +128,13 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
     const editsRef = useRef<Record<string, CellEdit>>({});
     const cellMetaRef = useRef<Record<string, CellMeta>>({});
     const loadSeq = useRef(0);
+    const fillGenRef = useRef(0);
+    const shellPromiseRef = useRef<Promise<UniverMount> | null>(null);
+    const suppressEditsRef = useRef(false);
+    const programmaticDepthRef = useRef(0);
+    const shellGenRef = useRef(0);
+    const onCellEditedRef = useRef(onCellEdited);
+    onCellEditedRef.current = onCellEdited;
     const wheelStickyRef = useRef<{ target: "sheet" | "page"; deltaY: number; scrollOffsetY: number; at: number } | null>(null);
     const [ready, setReady] = useState(false);
     const [parsing, setParsing] = useState(false);
@@ -137,9 +144,12 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
     const cancelRef = useRef(false);
 
     const dispose = useCallback(() => {
+      shellGenRef.current += 1;
       const current = mountRef.current;
       mountRef.current = null;
+      shellPromiseRef.current = null;
       window.__fbaUniver = undefined;
+      window.__fbaUniverShell = false;
       try {
         current?.univerAPI.dispose();
       } catch {
@@ -152,7 +162,69 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
       }
     }, []);
 
-    useEffect(() => () => dispose(), [dispose]);
+    const ensureShell = useCallback(async () => {
+      if (mountRef.current) return mountRef.current;
+      if (!shellPromiseRef.current) {
+        const pending = (async () => {
+          const gen = shellGenRef.current;
+          const host = hostRef.current;
+          if (!host) throw new Error("表格容器还没准备好");
+          const engine = await import("@/lib/univer-engine");
+          if (gen !== shellGenRef.current) throw new Error("已取消加载");
+          if (mountRef.current) return mountRef.current;
+          host.replaceChildren();
+          const mount = engine.mountUniverShell(host);
+          if (gen !== shellGenRef.current) {
+            try {
+              mount.univerAPI.dispose();
+            } catch {
+              // 这一轮已经卸载
+            }
+            try {
+              mount.univer.dispose();
+            } catch {
+              // 同上
+            }
+            throw new Error("已取消加载");
+          }
+          mountRef.current = mount;
+          engine.publishUniverDebug(mount.univerAPI);
+          mount.univerAPI.addEvent(mount.univerAPI.Event.CommandExecuted, (event) => {
+            if (suppressEditsRef.current) return;
+            if (!String(event.id || "").includes("set-range-values")) return;
+            const params = event.params as { range?: { startRow?: number; startColumn?: number }; value?: unknown } | undefined;
+            const row = params?.range?.startRow;
+            const col = params?.range?.startColumn;
+            if (row == null || col == null) return;
+            const pendingCell = window.__fbaPendingCell;
+            const cell = pendingCell || formatCellRef(row, col);
+            const text = displayValue(params?.value);
+            valuesRef.current[cell] = text;
+            const sheet = activeSheetName(mount.univerAPI);
+            editsRef.current[`${sheet}!${cell}`] = { sheet, cell, value: text };
+            const meta = cellMetaRef.current[cell];
+            if (meta?.source === "missing" && text.trim()) {
+              cellMetaRef.current = { ...cellMetaRef.current, [cell]: { ...meta, source: "exact" } };
+            }
+            onCellEditedRef.current?.(cell, text);
+          });
+          window.__fbaUniverShell = true;
+          return mount;
+        })();
+        let guarded: Promise<UniverMount>;
+        guarded = pending.catch((error: unknown) => {
+          if (shellPromiseRef.current === guarded) shellPromiseRef.current = null;
+          throw error;
+        });
+        shellPromiseRef.current = guarded;
+      }
+      return shellPromiseRef.current;
+    }, []);
+
+    useEffect(() => {
+      void ensureShell().catch(() => undefined);
+      return () => dispose();
+    }, [dispose, ensureShell]);
 
     useEffect(() => {
       const root = hostRef.current;
@@ -192,35 +264,14 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
 
     const paint = useCallback(
       async (snapshot: unknown) => {
-        const host = hostRef.current;
-        if (!host) throw new Error("表格容器还没准备好");
         const engine = await import("@/lib/univer-engine");
-        dispose();
-        host.replaceChildren();
-        const mount = engine.mountUniver(host, snapshot);
-        mountRef.current = mount;
+        const mount = await ensureShell();
+        await new Promise((resolve) => window.setTimeout(resolve, 0));
+        engine.replaceWorkbook(mount.univerAPI, snapshot);
         engine.publishUniverDebug(mount.univerAPI);
         snapshotRef.current = snapshot;
-        mount.univerAPI.addEvent(mount.univerAPI.Event.CommandExecuted, (event) => {
-          if (!String(event.id || "").includes("set-range-values")) return;
-          const params = event.params as { range?: { startRow?: number; startColumn?: number }; value?: unknown } | undefined;
-          const row = params?.range?.startRow;
-          const col = params?.range?.startColumn;
-          if (row == null || col == null) return;
-          const pending = window.__fbaPendingCell;
-          const cell = pending || formatCellRef(row, col);
-          const text = displayValue(params?.value);
-          valuesRef.current[cell] = text;
-          const sheet = activeSheetName(mount.univerAPI);
-          editsRef.current[`${sheet}!${cell}`] = { sheet, cell, value: text };
-          const meta = cellMetaRef.current[cell];
-          if (meta?.source === "missing" && text.trim()) {
-            cellMetaRef.current = { ...cellMetaRef.current, [cell]: { ...meta, source: "exact" } };
-          }
-          onCellEdited?.(cell, text);
-        });
       },
-      [dispose, onCellEdited],
+      [ensureShell],
     );
 
     const markReady = useCallback(() => {
@@ -253,6 +304,7 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
         setProgress(null);
         setJobId(null);
         onReadyChange?.(false);
+        fillGenRef.current += 1;
         valuesRef.current = {};
         editsRef.current = {};
         cellMetaRef.current = {};
@@ -316,16 +368,30 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
       const sheet = api?.getActiveWorkbook()?.getActiveSheet();
       if (!sheet) return;
       const source = cellMetaRef.current[upper]?.source ?? "preview";
+      programmaticDepthRef.current += 1;
+      suppressEditsRef.current = true;
       try {
         sheet.getRange(upper).setValue(text);
         if (!fill.clear && text) sheet.getRange(upper).setBackgroundColor(SOURCE_BG_HEX[source]);
       } catch {
         // 非法单元格引用跳过
+      } finally {
+        window.setTimeout(() => {
+          programmaticDepthRef.current -= 1;
+          if (programmaticDepthRef.current <= 0) {
+            programmaticDepthRef.current = 0;
+            suppressEditsRef.current = false;
+          }
+        }, 0);
       }
     }, []);
 
     const applyCells = useCallback(
       (fills: InvoiceCellFill[]) => {
+        // 换货代后再填写时，上一张表的格子不能留在快照里。
+        fillGenRef.current += 1;
+        editsRef.current = {};
+        valuesRef.current = {};
         cellMetaRef.current = cellMetaFromFills(fills);
         for (const fill of fills) writeFill(fill);
       },
@@ -340,6 +406,7 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
     );
 
     const resetTemplate = useCallback(() => {
+      fillGenRef.current += 1;
       cellMetaRef.current = {};
       valuesRef.current = {};
       editsRef.current = {};
@@ -348,10 +415,14 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
 
     const resetAndApplyCells = useCallback(
       (fills: InvoiceCellFill[]) => {
+        const gen = ++fillGenRef.current;
         cellMetaRef.current = cellMetaFromFills(fills);
         valuesRef.current = {};
         editsRef.current = {};
-        const apply = () => applyCells(fills);
+        const apply = () => {
+          if (gen !== fillGenRef.current) return;
+          applyCells(fills);
+        };
         if (snapshotRef.current) {
           void paint(snapshotRef.current).then(() => {
             apply();

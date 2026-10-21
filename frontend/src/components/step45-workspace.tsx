@@ -74,6 +74,7 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
     revenueTon,
     missingLabels,
     hasMissing,
+    referenceIdHint,
     forwarders,
     forwardersLoading,
     selectedForwarderId,
@@ -217,7 +218,7 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
             )}
             {hasTemplate && !parsing && (
               <p className="text-[11px] text-muted-foreground" data-testid="export-scope-note">
-                导出按当前表格整本回填，未映射单元格的修改也会写入。公式格和合并单元格的从属格不能改成纯值。
+                导出按当前表格整本回填，未映射单元格的修改也会写入。公式格不能改成纯值，合并单元格的从属格不能写入。
               </p>
             )}
           </CardContent>
@@ -379,12 +380,22 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
       />
       <div data-testid="sheet-scroll-spacer" className="h-[70vh]" />
 
-      {hasMissing && (
+      {(referenceIdHint || missingLabels.some((label) => label.includes("Reference ID"))) && (
+        <Alert className="border-amber-300 bg-amber-50" data-testid="reference-id-hint">
+          <AlertTriangle className="h-4 w-4 !text-amber-600" />
+          <AlertTitle className="text-sm font-semibold text-amber-900">Reference ID 为空</AlertTitle>
+          <AlertDescription className="text-xs text-amber-800">
+            请上传货件 PDF。Reference ID 在货件 PDF 里，产品库没有这一项。
+          </AlertDescription>
+        </Alert>
+      )}
+
+      {missingLabels.some((label) => !label.includes("Reference ID")) && (
         <Alert className="border-amber-300 bg-amber-50">
           <AlertTriangle className="h-4 w-4 !text-amber-600" />
           <AlertTitle className="text-sm font-semibold text-amber-900">部分字段未填</AlertTitle>
           <AlertDescription className="text-xs text-amber-800">
-            以下仍为空：{missingLabels.join("、")}。
+            以下仍为空：{missingLabels.filter((label) => !label.includes("Reference ID")).join("、")}。
             <Link to="/master-data" className="ml-2 font-medium underline">
               去产品库补齐
             </Link>
@@ -461,7 +472,7 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
                   ? FILL_FAILED_EXPORT_BLOCK
                   : staleness.invoice
                     ? "结果已过期，不能作为正式文件下载"
-                    : "按当前表格整本回填。未映射的改动也会写入；公式格不能改成纯值。合并从属格写到值所在的主格。"
+                    : "按当前表格整本回填。未映射的改动也会写入；公式格不能改成纯值。合并单元格的从属格不能写入。"
               }
               className="gap-2 px-8 text-base font-semibold shadow-md"
               onClick={() => void handleExport()}

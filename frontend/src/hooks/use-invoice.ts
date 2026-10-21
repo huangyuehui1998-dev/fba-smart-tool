@@ -155,6 +155,10 @@ export function useInvoice() {
   const missingLabels =
     sheetPhase === "filled" ? missingRequiredFromCellMeta(cellMeta, getCellValue, invoiceDraft?.cells) : [];
   const hasMissing = missingLabels.length > 0;
+  const referenceIdHint =
+    sheetPhase === "filled"
+      ? (invoiceDraft?.warnings || []).find((item) => item.includes("Reference ID")) || ""
+      : "";
 
   const buildWorkflowJson = useCallback(() => {
     return {
@@ -413,9 +417,15 @@ export function useInvoice() {
           sheetPhase: "filled",
         }),
       );
-      if (res.warnings && res.warnings.length > 0) {
+      const warnings = res.warnings || [];
+      const referenceWarnings = warnings.filter((item) => item.includes("Reference ID"));
+      const otherWarnings = warnings.filter((item) => !item.includes("Reference ID"));
+      if (referenceWarnings.length > 0) {
+        toast.warning(referenceWarnings[0]);
+      }
+      if (otherWarnings.length > 0) {
         toast.warning("部分 SKU 缺少主数据，请在导出后手动补充", {
-          description: res.warnings.slice(0, 3).join("；"),
+          description: otherWarnings.slice(0, 3).join("；"),
         });
       }
     },
@@ -715,6 +725,7 @@ export function useInvoice() {
     revenueTon,
     missingLabels,
     hasMissing,
+    referenceIdHint,
     forwarders,
     forwardersLoading,
     selectedForwarderId,

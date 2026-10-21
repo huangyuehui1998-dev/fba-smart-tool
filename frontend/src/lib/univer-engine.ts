@@ -6,6 +6,7 @@ import { LocaleType, mergeLocales } from "@univerjs/core";
 import { UniverSheetsDataValidationPreset } from "@univerjs/preset-sheets-data-validation";
 import { UniverSheetsCorePreset } from "@univerjs/preset-sheets-core";
 import { createUniver } from "@univerjs/presets";
+import { CalculationMode } from "@univerjs/sheets-formula";
 // 预设包把 JS 标成无副作用，Facade 的 FWorksheet.extend 会被摇掉。这里显式引入，getDataValidations 才存在。
 import "@univerjs/sheets-data-validation/facade";
 
@@ -22,10 +23,12 @@ export interface UniverMount {
     Event: { CommandExecuted: string };
     addEvent: (name: string, cb: (event: { id?: string; params?: unknown }) => void) => { dispose: () => void };
     getActiveWorkbook: () => {
+      getId?: () => string;
       getActiveSheet: () => UniverSheet | null;
       save: () => unknown;
     } | null;
     createWorkbook: (data: unknown) => unknown;
+    disposeUnit: (unitId: string) => boolean;
   };
 }
 
@@ -61,7 +64,7 @@ export function preloadUniverEngine(): void {
   window.__fbaUniverPreloaded = true;
 }
 
-export function mountUniver(container: HTMLElement, snapshot: unknown): UniverMount {
+export function mountUniverShell(container: HTMLElement): UniverMount {
   const { univer, univerAPI } = createUniver({
     locale: LocaleType.ZH_CN,
     locales: localeBundle() as never,
@@ -71,14 +74,30 @@ export function mountUniver(container: HTMLElement, snapshot: unknown): UniverMo
         header: false,
         toolbar: false,
         formulaBar: false,
+        disableAutoFocus: true,
         footer: { sheetBar: true, statisticBar: false, menus: false, zoomSlider: false },
+        formula: { initialFormulaComputing: CalculationMode.NO_CALCULATION },
+        sheets: { autoHeightForMergedCells: false },
       }),
       UniverSheetsDataValidationPreset(),
     ],
   });
-  univerAPI.createWorkbook(snapshot as never);
   window.__fbaUniverPreloaded = true;
   return { univer, univerAPI: univerAPI as unknown as UniverMount["univerAPI"] };
+}
+
+export function replaceWorkbook(api: UniverMount["univerAPI"], snapshot: unknown): void {
+  const unitId = api.getActiveWorkbook()?.getId?.();
+  if (unitId) api.disposeUnit(unitId);
+  // 交给 Univer 的是副本。它会把合并从属格写回原对象，不能污染导出用的快照。
+  const copy = typeof structuredClone === "function" ? structuredClone(snapshot) : JSON.parse(JSON.stringify(snapshot));
+  api.createWorkbook(copy as never);
+}
+
+export function mountUniver(container: HTMLElement, snapshot: unknown): UniverMount {
+  const mount = mountUniverShell(container);
+  replaceWorkbook(mount.univerAPI, snapshot);
+  return mount;
 }
 
 export function activeSheet(api: UniverMount["univerAPI"]): UniverSheet | null {
@@ -90,7 +109,7 @@ export function publishUniverDebug(api: UniverMount["univerAPI"]): void {
     getDataValidations: () => activeSheet(api)?.getDataValidations?.() ?? [],
     getCell: (a1: string) => activeSheet(api)?.getRange(a1).getValue() ?? null,
     setCell: (a1: string, value: unknown) => {
-      // 合并从属格可能被 Univer 归一到主格。命令回调可能晚于 setValue 返回，所以延后清掉。
+      // 命令回调可能晚于 setValue 返回，所以记下用户点的格子，延后清掉。
       const cell = String(a1 || "").replace(/\$/g, "").toUpperCase();
       window.__fbaPendingCell = cell;
       try {
@@ -107,6 +126,7 @@ export function publishUniverDebug(api: UniverMount["univerAPI"]): void {
 declare global {
   interface Window {
     __fbaUniverPreloaded?: boolean;
+    __fbaUniverShell?: boolean;
     __fbaSnapshotReadyAt?: number;
     __fbaPendingCell?: string;
     __fbaUniver?: {

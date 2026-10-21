@@ -103,8 +103,8 @@ def test_listing_preview_includes_price_and_apply_writes_it():
     from fba_tool.lingxing_sync import listing_to_product
 
     assert "listing_price" in CONFIRM_FIELDS
-    rec = listing_to_product({"msku": "A", "fnsku": "X00DEMO001", "listing_price": "15.99", "list_price": "38.97"}, "t")
+    rec = listing_to_product({"msku": "A", "fnsku": "X00TEST001", "listing_price": "15.99", "list_price": "38.97"}, "t")
     assert rec["listing_price"] == 15.99
     apply_lingxing_field_patch("A", ["listing_price", "fnsku"], rec)
     got = get_product_by_sku("A")
-    assert got["listing_price"] == 15.99 and got["fnsku"] == "X00DEMO001"
+    assert got["listing_price"] == 15.99 and got["fnsku"] == "X00TEST001"

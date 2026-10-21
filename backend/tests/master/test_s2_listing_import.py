@@ -34,7 +34,7 @@ def _xlsx(rows):
 
 
 def test_preview_then_apply_then_zero_diff():
-    data = _csv([["A", "X000000001", "B000000001", "15.99"], ["B", "X000000002", "B000000002", "37.99"]])
+    data = _csv([["A", "X00TEST001", "B000000001", "15.99"], ["B", "X00TEST002", "B000000002", "37.99"]])
     pv = preview_listing_import(data, "listing.csv")
     assert pv["errors"] == []
     assert pv["summary"]["new"] == 2
@@ -47,11 +47,11 @@ def test_preview_then_apply_then_zero_diff():
 
 
 def test_manual_field_not_overwritten():
-    apply_listing_import(_csv([["A", "X000000001", "B000000001", "15.99"]]), "l.csv")
+    apply_listing_import(_csv([["A", "X00TEST001", "B000000001", "15.99"]]), "l.csv")
     patch_product_field("A", "fnsku", "X0MANUAL01")
-    pv = preview_listing_import(_csv([["A", "X000000009", "B000000001", "15.99"]]), "l.csv")
+    pv = preview_listing_import(_csv([["A", "X00TEST009", "B000000001", "15.99"]]), "l.csv")
     assert pv["summary"]["locked"] == 1
-    apply_listing_import(_csv([["A", "X000000009", "B000000001", "15.99"]]), "l.csv")
+    apply_listing_import(_csv([["A", "X00TEST009", "B000000001", "15.99"]]), "l.csv")
     assert get_product_by_sku("A")["fnsku"] == "X0MANUAL01"
 
 
@@ -59,7 +59,7 @@ def test_bad_price_reported_by_row_and_gbk_xlsx():
     pv = preview_listing_import(_csv([["A", "X1", "B1", "abc"], ["", "X2", "B2", "9"]], enc="gbk"), "l.csv")
     rows = {(e["row"], e["field"]) for e in pv["errors"]}
     assert (2, "listing_price") in rows and (3, "sku") in rows
-    pv = preview_listing_import(_xlsx([["A", "X000000001", "B000000001", 12.5]]), "l.xlsx")
+    pv = preview_listing_import(_xlsx([["A", "X00TEST001", "B000000001", 12.5]]), "l.xlsx")
     assert pv["summary"]["new"] == 1
 
 
@@ -71,7 +71,7 @@ def test_missing_required_header():
 def test_api_preview_and_apply():
     from main import app
     c = TestClient(app)
-    data = _csv([["A", "X000000001", "B000000001", "15.99"]])
+    data = _csv([["A", "X00TEST001", "B000000001", "15.99"]])
     r = c.post("/api/master-data/import/listing/preview", files={"file": ("l.csv", data, "text/csv")})
     assert r.status_code == 200 and r.json()["summary"]["new"] == 1
     r = c.post("/api/master-data/import/listing/apply", files={"file": ("l.csv", data, "text/csv")})

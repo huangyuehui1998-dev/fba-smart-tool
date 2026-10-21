@@ -24,13 +24,13 @@ def test_legacy_positional_comma_still_works():
 def test_header_tab_with_fnsku_in_any_order_and_empty_cell():
     text = (
         "FNSKU\tSKU简称*\t发货总数*\t单箱装量*\t箱长(cm)*\t箱宽(cm)*\t箱高(cm)*\t单个重量(kg)\t空纸箱重(kg)\t单箱毛重(kg)\n"
-        "X0059EFBRF\tPM-80\t52\t4\t44.96\t44.96\t40.89\t1.6\t0.5\t7.5\n"
+        "X00TESTBRF\tPM-80\t52\t4\t44.96\t44.96\t40.89\t1.6\t0.5\t7.5\n"
         "\tPM-100\t32\t4\t44.96\t44.96\t40.89\t2.1\t0.5\t\n"
     )
     df, errors, _ = parse_smart_text_detailed(text)
     assert errors == []
     assert list(df["SKU简称"]) == ["PM-80", "PM-100"]
-    assert list(df["FNSKU"]) == ["X0059EFBRF", ""]
+    assert list(df["FNSKU"]) == ["X00TESTBRF", ""]
     assert df.iloc[0]["单箱毛重(kg)"] == 7.5
     assert df.iloc[1]["箱长(cm)"] == 44.96  # 空 FNSKU 单元格不会让后面的列错位
 
@@ -43,8 +43,8 @@ def test_header_reordered_columns():
 
 
 def test_headerless_with_fnsku_second_column_space_separated():
-    row, _ = _one("PM-80   X0059EFBRF  52 4 44.96 44.96 40.89 1.6 0.5 7.5")
-    assert row["SKU简称"] == "PM-80" and row["FNSKU"] == "X0059EFBRF"
+    row, _ = _one("PM-80   X00TESTBRF  52 4 44.96 44.96 40.89 1.6 0.5 7.5")
+    assert row["SKU简称"] == "PM-80" and row["FNSKU"] == "X00TESTBRF"
     assert row["发货总数"] == 52 and row["单箱装量"] == 4
     assert row["单箱毛重(kg)"] == 7.5
 
