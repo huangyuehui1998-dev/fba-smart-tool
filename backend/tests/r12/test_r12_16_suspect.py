@@ -50,14 +50,26 @@ def test_tolerance_constant_and_boundaries():
 ])
 def test_check_marks_suspect_unit_in_gross(gross, hit):
     warnings = check_gross_weight_consistency(_frame(gross), suspect_kg=Decimal("0.5"))
-    assert len(warnings) == 1
+    assert warnings[0]["kind"] == "unit_weight_missing"
+    assert warnings[0]["requires_confirm"] is True
+    assert warnings[0]["suggested_gross_kg"] is None
+    assert "0.3" not in warnings[0]["message"]
     if hit:
-        assert warnings[0]["kind"] == "suspect_unit_in_gross"
-        assert "疑似把单件重填进了单箱毛重" in warnings[0]["message"]
-        assert warnings[0]["threshold_note"] == SUSPECT_THRESHOLD_NOTE
-        assert warnings[0]["requires_confirm"] is True
+        assert [item["kind"] for item in warnings] == ["unit_weight_missing", "suspect_unit_in_gross"]
+        assert "疑似把单件重填进了单箱毛重" in warnings[1]["message"]
+        assert warnings[1]["threshold_note"] == SUSPECT_THRESHOLD_NOTE
+        assert warnings[1]["requires_confirm"] is True
+        assert warnings[1]["suggested_gross_kg"] is None
     else:
-        assert warnings[0]["kind"] == "unit_weight_missing"
+        assert [item["kind"] for item in warnings] == ["unit_weight_missing"]
+
+
+def test_gross_1_8_emits_missing_and_suspect():
+    warnings = check_gross_weight_consistency(_frame(Decimal("1.8")), suspect_kg=Decimal("0.5"))
+    assert [item["kind"] for item in warnings] == ["unit_weight_missing", "suspect_unit_in_gross"]
+    assert warnings[0]["suggested_gross_kg"] is None
+    assert "0.3" not in warnings[0]["message"]
+    assert warnings[1]["requires_confirm"] is True
 
 
 def test_unconfirmed_suspect_blocks_export():

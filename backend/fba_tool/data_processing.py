@@ -530,11 +530,15 @@ def check_gross_weight_consistency(
             if suspect_kg is None:
                 threshold = suspect_unit_weight_kg()
             suspect = gross_is_suspect_unit(declared, per_box, tare_kg, threshold)
+            missing_message = (
+                f"SKU {sku} 录了单箱毛重 {declared:g} kg，但单个重量为空。"
+                f"请补单重，或确认沿用录入毛重。不要把空箱重当成建议毛重"
+            )
             warnings.append(
                 {
                     "row_index": int(idx),
                     "sku": sku,
-                    "kind": "suspect_unit_in_gross" if suspect else "unit_weight_missing",
+                    "kind": "unit_weight_missing",
                     "requires_confirm": True,
                     "suggested_gross_kg": None,
                     "declared_kg": round(declared, 3),
@@ -543,17 +547,29 @@ def check_gross_weight_consistency(
                     "deviation_pct": None,
                     "suspect_unit_weight_kg": float(threshold),
                     "threshold_note": SUSPECT_THRESHOLD_NOTE,
-                    "message": (
-                        f"SKU {sku} 疑似把单件重填进了单箱毛重（{declared:g} kg）。"
-                        f"{SUSPECT_THRESHOLD_NOTE} {threshold:g} kg"
-                        if suspect
-                        else (
-                            f"SKU {sku} 录了单箱毛重 {declared:g} kg，但单个重量为空。"
-                            f"请补单重，或确认沿用录入毛重。不要把空箱重当成建议毛重"
-                        )
-                    ),
+                    "message": missing_message,
                 }
             )
+            if suspect:
+                warnings.append(
+                    {
+                        "row_index": int(idx),
+                        "sku": sku,
+                        "kind": "suspect_unit_in_gross",
+                        "requires_confirm": True,
+                        "suggested_gross_kg": None,
+                        "declared_kg": round(declared, 3),
+                        "expected_kg": expected,
+                        "diff_kg": None,
+                        "deviation_pct": None,
+                        "suspect_unit_weight_kg": float(threshold),
+                        "threshold_note": SUSPECT_THRESHOLD_NOTE,
+                        "message": (
+                            f"SKU {sku} 疑似把单件重填进了单箱毛重（{declared:g} kg）。"
+                            f"{SUSPECT_THRESHOLD_NOTE} {threshold:g} kg"
+                        ),
+                    }
+                )
             continue
 
         if not unit_missing and (declared is None or declared <= 0):

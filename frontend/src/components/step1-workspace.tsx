@@ -463,7 +463,7 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
           <AlertDescription className="mt-1 text-xs">
             <ul className="list-inside list-disc space-y-1">
               {weightWarnings.map((w) => (
-                <li key={`${w.row_index}-${w.sku}`}>
+                <li key={`${w.row_index}-${w.sku}-${w.kind}`}>
                   {w.message}
                   {(w.kind === "suspect_unit_in_gross" || w.kind === "unit_weight_missing") && (
                     <span className="ml-2 inline-flex gap-1">
