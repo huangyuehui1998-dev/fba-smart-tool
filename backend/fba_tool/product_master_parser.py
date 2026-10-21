@@ -40,7 +40,9 @@ PRODUCT_MASTER_REGEX_MAP: Dict[str, str] = {
 
     "brand": r"品牌",
 
-    "declared_value": r"售价\(客户到手价格\)|产品成本|申报单价",
+    "declared_value": r"售价\(客户到手价格\)|申报单价",
+
+    "product_cost_cny": r"产品成本",
 
     "fnsku": r"美国站[-_]?FNSKU|FNSKU",
 
@@ -376,9 +378,9 @@ def parse_business_product_master(
 
     # 说明字段只进返回的映射报告，不能当源列名去索引 DataFrame。
     report_extra: Dict[str, str] = {}
-    if "产品成本" in str(col_map.get("declared_value") or ""):
-        report_extra["declared_value_currency"] = "CNY"
-        report_extra["column_note"] = "产品成本→declared_value（CNY）"
+    if "产品成本" in str(col_map.get("product_cost_cny") or ""):
+        report_extra["product_cost_currency"] = "CNY"
+        report_extra["column_note"] = "产品成本→product_cost_cny（CNY）"
 
 
 
@@ -403,6 +405,10 @@ def parse_business_product_master(
     if "declared_value" in clean.columns:
 
         clean["declared_value"] = pd.to_numeric(clean["declared_value"], errors="coerce")
+
+    if "product_cost_cny" in clean.columns:
+
+        clean["product_cost_cny"] = pd.to_numeric(clean["product_cost_cny"], errors="coerce")
 
 
 
@@ -454,7 +460,7 @@ def parse_business_product_master(
 
                 continue
 
-            if field == "declared_value":
+            if field in ("declared_value", "product_cost_cny"):
 
                 rec[field] = _opt_float(val)
 

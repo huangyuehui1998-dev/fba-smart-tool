@@ -249,8 +249,10 @@ def test_product_cost_column_note():
     from fba_tool.product_master_parser import parse_business_product_master
 
     _records, col_map = parse_business_product_master(buf.getvalue(), "product-info.xlsx")
-    assert col_map["column_note"] == "产品成本→declared_value（CNY）"
-    assert col_map["declared_value_currency"] == "CNY"
+    assert col_map["column_note"] == "产品成本→product_cost_cny（CNY）"
+    assert col_map["product_cost_currency"] == "CNY"
+    assert _records[0]["product_cost_cny"] == 80
+    assert "declared_value" not in _records[0]
 
 
 def test_net_weight_tare_changes_cl2_style_total(monkeypatch):

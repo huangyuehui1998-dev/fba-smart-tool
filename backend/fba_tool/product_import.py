@@ -212,7 +212,34 @@ def _apply(records: List[Dict[str, Any]], diff: Dict[str, Any], source: str) -> 
     return {"written": written, "fields": sum(len(v) for v in todo.values()), "summary": diff["summary"]}
 
 
+def _table_headers(data: bytes, file_name: str) -> List[str]:
+    name = (file_name or "").lower()
+    if name.endswith((".xlsx", ".xlsm")):
+        ws = load_workbook(io.BytesIO(data), data_only=True, read_only=True).worksheets[0]
+        first = next(ws.iter_rows(values_only=True), None) or ()
+        return [str(cell or "").strip() for cell in first]
+    text = decode_csv_bytes(data)
+    return next(csv.reader(io.StringIO(text)), [])
+
+
+def _is_price_chain(data: bytes, file_name: str) -> bool:
+    headers = set(_table_headers(data, file_name))
+    return "国家" in headers and "币种" in headers and ("价格" in headers or "售价(总价)" in headers)
+
+
 def preview_listing_import(data: bytes, file_name: str) -> Dict[str, Any]:
+    if _is_price_chain(data, file_name):
+        from fba_tool.declared_value import parse_listing_xlsx, parse_listing_table, import_retail_rows
+        from fba_tool.master_db import get_products_by_skus
+
+        if (file_name or "").lower().endswith((".xlsx", ".xlsm")):
+            rows = parse_listing_xlsx(data)
+        else:
+            text = decode_csv_bytes(data)
+            table = list(csv.reader(io.StringIO(text)))
+            rows = parse_listing_table(table[0], table[1:])
+        products = get_products_by_skus([str(row.get("msku") or "") for row in rows])
+        return import_retail_rows(rows, products, source="lingxing_xlsx")
     records, errors = parse_listing_rows(data, file_name)
     records, conflicts = split_case_conflicts(records)
     d = _diff(records, SOURCE_LINGXING)
@@ -220,8 +247,16 @@ def preview_listing_import(data: bytes, file_name: str) -> Dict[str, Any]:
 
 
 def apply_listing_import(data: bytes, file_name: str) -> Dict[str, Any]:
-    """S9-step3 #1：确认写入时只跳过坏行，合法的行照常写入（与预览里“这一行已跳过”一致）；
-    响应 skipped 列出跳过的行号、字段、原始值和原因。全部是坏行（没有一行能写）时报 422（ImportRowsError）。"""
+    if _is_price_chain(data, file_name):
+        from fba_tool.declared_value import parse_listing_table, parse_listing_xlsx, persist_retail_import
+
+        if (file_name or "").lower().endswith((".xlsx", ".xlsm")):
+            rows = parse_listing_xlsx(data)
+        else:
+            text = decode_csv_bytes(data)
+            table = list(csv.reader(io.StringIO(text)))
+            rows = parse_listing_table(table[0], table[1:])
+        return persist_retail_import(rows, source="lingxing_xlsx")
     records, errors = parse_listing_rows(data, file_name)
     records, conflicts = split_case_conflicts(records)
     _raise_conflicts(conflicts)

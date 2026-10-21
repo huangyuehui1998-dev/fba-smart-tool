@@ -35,6 +35,17 @@ async def api_master_data_upload_product_info(file: UploadFile = File(...)):
     if not records:
         raise HTTPException(status_code=400, detail="未从产品信息表中解析到有效 SKU 行")
     upserted = upsert_products(records)
+    from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
+
+    for record in records:
+        cost = record.get("product_cost_cny")
+        if cost in (None, ""):
+            continue
+        set_product_fields(
+            record["sku"],
+            {"product_cost_cny": cost, "product_cost_currency": "CNY"},
+            SOURCE_MANUAL,
+        )
     total = len(list_products())
     return {
         "ok": True,
@@ -264,19 +275,27 @@ def api_hs_template_upsert(body: dict):
 
 @router.post("/api/master-data/retail-prices")
 def api_retail_prices(body: dict):
-    from fba_tool.declared_value import FxRateRequired, import_retail_rows, parse_listing_table, resolve_retail
+    from fba_tool.declared_value import FxRateRequired, parse_listing_table, persist_retail_import
 
     try:
         rows = body.get("rows")
         if body.get("headers"):
             rows = parse_listing_table(body.get("headers") or [], body.get("table_rows") or [])
-        products = body.get("products") or {}
         fx_by_pair = body.get("fx_by_pair") or {}
+        ignored = "products" in body
+        source = "lingxing_mcp" if body.get("source") == "lingxing_mcp" else "lingxing_xlsx"
         if body.get("mcp_error"):
-            return resolve_retail(products, xlsx_rows=rows or [], fx_by_pair=fx_by_pair, mcp_error=str(body.get("mcp_error")))
-        if body.get("source") == "xlsx" or body.get("headers"):
-            return import_retail_rows(rows or [], products, source="manual_xlsx", fx_by_pair=fx_by_pair)
-        return resolve_retail(products, mcp_rows=rows or [], fx_by_pair=fx_by_pair)
+            source = "lingxing_xlsx"
+        result = persist_retail_import(
+            rows or [],
+            source=source,
+            fx_by_pair=fx_by_pair,
+            ignored_products=ignored,
+        )
+        if body.get("mcp_error"):
+            result["notice"] = "领星同步失败，已用手动导入值"
+            result["mcp_error"] = str(body.get("mcp_error"))
+        return result
     except FxRateRequired as exc:
         raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
     except ValueError as exc:
@@ -317,6 +336,36 @@ def _import_call(fn, data: bytes, name: str):
     except Exception as exc:  # noqa: BLE001  ArithmeticError 等：只记日志，用户看到中文提示
         logging.getLogger("fba.import").exception("导入解析失败：%s", name)
         raise HTTPException(status_code=422, detail={"message": "文件内容无法解析，请检查价格、数量等数字格式"}) from exc
+
+
+@router.post("/api/master-data/retail-prices/upload")
+async def api_retail_prices_upload(file: UploadFile = File(...)):
+    """领星导出写入产品库。请求体里的 products 不使用。"""
+    from fba_tool.declared_value import FxRateRequired, parse_listing_xlsx, persist_retail_import
+    from fba_tool.shipment_parser import decode_csv_bytes
+
+    raw = await file.read()
+    name = (file.filename or "").lower()
+    try:
+        if name.endswith((".xlsx", ".xlsm")):
+            rows = parse_listing_xlsx(raw)
+        else:
+            import csv
+            import io
+
+            text = decode_csv_bytes(raw)
+            reader = csv.reader(io.StringIO(text))
+            table = list(reader)
+            if not table:
+                raise ValueError("文件无法解析")
+            from fba_tool.declared_value import parse_listing_table
+
+            rows = parse_listing_table(table[0], table[1:])
+        return persist_retail_import(rows, source="lingxing_xlsx" if name.endswith((".xlsx", ".xlsm")) else "lingxing_xlsx")
+    except FxRateRequired as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
 
 @router.post("/api/master-data/import/listing/preview")
