@@ -19,7 +19,7 @@ import {
   type InvoiceCellFill,
   type Sheet,
 } from "@/lib/invoice-spreadsheet";
-import { metricsFromUniverSheet, verticalWheelTarget, wheelPixelDelta } from "@/lib/grid-wheel";
+import { metricsFromUniverSheet, verticalWheelTarget, wheelPixelDelta, wheelTargetAfterStuck } from "@/lib/grid-wheel";
 import type { UniverMount } from "@/lib/univer-engine";
 import { cn } from "@/lib/utils";
 
@@ -128,6 +128,7 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
     const editsRef = useRef<Record<string, CellEdit>>({});
     const cellMetaRef = useRef<Record<string, CellMeta>>({});
     const loadSeq = useRef(0);
+    const wheelStickyRef = useRef<{ target: "sheet" | "page"; deltaY: number; scrollOffsetY: number; at: number } | null>(null);
     const [ready, setReady] = useState(false);
     const [parsing, setParsing] = useState(false);
     const [progress, setProgress] = useState<number | null>(null);
@@ -156,6 +157,7 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
     useEffect(() => {
       const root = hostRef.current;
       if (!root) return;
+      wheelStickyRef.current = null;
       const onWheel = (event: WheelEvent) => {
         const deltaY = wheelPixelDelta(event.deltaY, event.deltaMode, window.innerHeight || 800);
         if (!deltaY) {
@@ -164,7 +166,13 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
         }
         const sheet = mountRef.current?.univerAPI.getActiveWorkbook()?.getActiveSheet() ?? null;
         const metrics = metricsFromUniverSheet(sheet, root.clientHeight);
-        const target = verticalWheelTarget({ ...metrics, deltaY });
+        const at = performance.now();
+        const target = wheelTargetAfterStuck(
+          verticalWheelTarget({ ...metrics, deltaY }),
+          wheelStickyRef.current,
+          { deltaY, scrollOffsetY: metrics.scrollOffsetY, at },
+        );
+        wheelStickyRef.current = { target, deltaY, scrollOffsetY: metrics.scrollOffsetY, at };
         window.__fbaGridWheel = { target, ...metrics };
         root.dataset.gridWheel = target;
         const scroller = document.querySelector("[data-testid=app-scroll]");
@@ -172,6 +180,7 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
           const max = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
           const next = Math.min(max, Math.max(0, scroller.scrollTop + deltaY));
           event.preventDefault();
+          event.stopPropagation();
           if (next !== scroller.scrollTop) scroller.scrollTop = next;
           return;
         }

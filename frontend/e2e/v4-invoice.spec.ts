@@ -75,6 +75,8 @@ async function openInvoice(page: Page) {
 
 async function chooseForwarder(page: Page, name: string) {
   const readyAt = await page.evaluate(() => window.__fbaSnapshotReadyAt ?? 0);
+  const shell = page.locator("[data-sheet-load]");
+  const loadCount = Number((await shell.getAttribute("data-sheet-load")) || 0);
   const select = page.getByTestId("forwarder-select");
   await expect(select).toBeEnabled();
   await select.click();
@@ -82,7 +84,13 @@ async function chooseForwarder(page: Page, name: string) {
   await expect
     .poll(async () => page.evaluate(() => window.__fbaSnapshotReadyAt ?? 0), { timeout: 15_000 })
     .toBeGreaterThan(readyAt);
-  await expect(page.locator("[data-sheet-ready='1']")).toBeVisible();
+  await expect
+    .poll(async () => {
+      const count = Number((await shell.getAttribute("data-sheet-load")) || 0);
+      const ready = await shell.getAttribute("data-sheet-ready");
+      return count > loadCount && ready === "1";
+    }, { timeout: 15_000 })
+    .toBe(true);
 }
 
 async function longestTaskAfterSnapshot(page: Page): Promise<number> {
