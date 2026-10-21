@@ -144,7 +144,7 @@ def price_checks(raw_rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], 
     promos = []
     for s in sources:
         pp = s.get("promo_price")
-        if pp in (None, "") or s.get("price") in (None, ""):
+        if pp in (None, "") or s.get("price") in (None, "") or not str(s.get("source") or "").startswith("lingxing"):
             continue
         promos.append(f"{s['sku']}（实时售价 {float(pp):.2f} 是促销价，按{PRICE_SOURCE_LABELS.get(s['source'], s['source'])} {float(s['price']):.2f} 申报）")
     if promos:
@@ -465,7 +465,7 @@ def build_customs_from_tickets(
                 "category": category, "declare_elements": elements, "config_missing": cfg_missing,
                 "price_source": price_source, "legacy_price": hints.get("历史申报价"),
                 "manual_price": hints.get("手填申报价"), "raw_price": raw_price,
-                "promo_price": hints.get("促销售价") if str(price_source).startswith("lingxing_") else None,
+                "promo_price": hints.get("促销售价"),
                 "_quote_hints": quote_hints,
             })
         alloc_rows = raw_rows[row_start:]
