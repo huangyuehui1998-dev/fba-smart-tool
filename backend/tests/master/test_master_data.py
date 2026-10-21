@@ -22,6 +22,20 @@ def isolated_app_data(monkeypatch, tmp_path):
     return ad
 
 
+def test_inch_dims_stay_unrounded_until_display():
+    csv = (
+        "sku,asin,fnsku,longest-side,median-side,shortest-side,"
+        "item-package-weight,unit-of-dimension,unit-of-weight\n"
+        "SKU-ODD,B009,FNSKU9,17.72,16.14,10.0,1.0,inches,pounds\n"
+    )
+    row = parse_master_report(csv.encode(), "fee_preview")[0]
+    assert row["unit_length"] == pytest.approx(45.0088, abs=1e-6)
+    assert row["unit_width"] == pytest.approx(40.9956, abs=1e-6)
+    assert row["unit_height"] == to_cm(10.0, "in")
+    assert row["unit_length"] != round(row["unit_length"], 1)
+    assert row["unit_width"] != round(row["unit_width"], 1)
+
+
 def test_inch_lb_to_cm_kg():
     assert to_cm(10.0, "in") == round(10 * 2.54, 1)
     assert to_kg(1.0, "lb") == round(1.0 * LB_TO_KG, 2)
@@ -37,8 +51,8 @@ def test_fee_preview_parsed_as_unit_dims():
     assert len(rows) == 1
     r = rows[0]
     assert r["unit_length"] == to_cm(10.0, "in")
-    assert r["unit_width"] == to_cm(8.0, "in")
-    assert r["unit_height"] == to_cm(6.0, "in")
+    assert r["unit_width"] == pytest.approx(20.32, abs=1e-9)
+    assert r["unit_height"] == pytest.approx(15.24, abs=1e-9)
     assert r["unit_weight"] == to_kg(1.0, "lb")
     assert "carton_length" not in r
 

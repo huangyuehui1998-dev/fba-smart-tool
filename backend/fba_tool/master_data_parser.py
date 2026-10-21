@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import pandas as pd
 
 from fba_tool.table_loader import detect_table_format, load_raw_table
-from fba_tool.volume_weight import detect_length_unit, detect_weight_unit, to_cm, to_kg
+from fba_tool.volume_weight import detect_length_unit, detect_weight_unit, to_kg
 
 ReportKind = str  # "fee_preview" | "inventory"
 
@@ -205,11 +205,22 @@ def _resolve_wt_unit(unit_cell: str, weight: float, default: str) -> str:
     return default
 
 
+def _dim_cm(value: float, unit: str) -> float:
+    """入库保持全精度。英寸按 2.54 换算，显示层再舍入。"""
+    if value <= 0:
+        return 0.0
+    if str(unit).lower() in {"in", "inch", "inches", "英寸"}:
+        from fba_tool.carton_math import inches_to_cm_exact
+
+        return float(inches_to_cm_exact(value))
+    return float(value)
+
+
 def _sorted_dims_cm(l: float, w: float, h: float, unit: str) -> Tuple[Optional[float], Optional[float], Optional[float]]:
     if l <= 0 or w <= 0 or h <= 0:
         return None, None, None
-    dims = sorted([to_cm(l, unit), to_cm(w, unit), to_cm(h, unit)], reverse=True)
-    return round(dims[0], 1), round(dims[1], 1), round(dims[2], 1)
+    dims = sorted([_dim_cm(l, unit), _dim_cm(w, unit), _dim_cm(h, unit)], reverse=True)
+    return dims[0], dims[1], dims[2]
 
 
 def _cell(row: pd.Series, col: Optional[str]) -> str:
