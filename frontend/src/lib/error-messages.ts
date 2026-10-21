@@ -54,6 +54,13 @@ export function explainApiError(err: unknown): ErrorCopy {
     return SERVER_COPY;
   }
   if (/internal server error/i.test(raw)) return SERVER_COPY;
+  if (/已取消/.test(raw)) {
+    return {
+      what: raw,
+      why: "这次操作被取消了，没有继续提交。",
+      action: "需要的话再做一次。",
+    };
+  }
   return {
     what: raw || "请求没有完成",
     why: "填写不满足规则，或服务返回了错误。",

@@ -18,6 +18,19 @@ LBS_TO_KG = 0.45359237
 IN_TO_CM = 2.54
 
 
+def _model_text(val: Any) -> str:
+    """型号列只接受 model_name。空值保持空白，不用 SKU 顶上。"""
+    if val is None:
+        return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except TypeError:
+        pass
+    text = str(val).strip()
+    return "" if text.lower() == "nan" else text
+
+
 def _to_float(val: Any) -> Optional[float]:
     if val in (None, ""):
         return None
@@ -308,13 +321,17 @@ def _group_by_box_range(df: pd.DataFrame) -> pd.DataFrame:
         return df.iloc[0:0].copy()
 
     work["fba_id"] = work["shipment_id"].astype(str).str.strip()
-    work["model"] = work.get("model", work["sku"]).fillna(work["sku"]).astype(str).str.strip()
+    if "model" not in work.columns:
+        work["model"] = ""
+    # 型号只来自 model_name。空型号用 SKU 做分组键，避免不同 SKU 被并成一行，但不把 SKU 写进型号列。
+    work["model"] = work["model"].fillna("").astype(str).str.strip().replace({"nan": ""})
+    work["_model_group"] = work["model"].where(work["model"] != "", work["sku"].astype(str))
     work["_gk_qty"] = work["qty_per_box"].map(lambda v: round(_to_float(v) or 0, 3))
     work["_gk_len"] = work["length_cm"].map(lambda v: round(_to_float(v) or 0, 3))
     work["_gk_wid"] = work["width_cm"].map(lambda v: round(_to_float(v) or 0, 3))
     work["_gk_hei"] = work["height_cm"].map(lambda v: round(_to_float(v) or 0, 3))
 
-    group_keys = ["fba_id", "model", "_gk_qty", "_gk_len", "_gk_wid", "_gk_hei"]
+    group_keys = ["fba_id", "_model_group", "_gk_qty", "_gk_len", "_gk_wid", "_gk_hei"]
     work = work.sort_values(group_keys + ["_box_num"], kind="mergesort")
 
     prev_box = work.groupby(group_keys, sort=False)["_box_num"].shift(1)
@@ -339,7 +356,7 @@ def _group_by_box_range(df: pd.DataFrame) -> pd.DataFrame:
         rows.append(row)
 
     out = pd.DataFrame(rows)
-    drop_cols = [c for c in ("_gk_qty", "_gk_len", "_gk_wid", "_gk_hei", "_block", "_box_num") if c in out.columns]
+    drop_cols = [c for c in ("_gk_qty", "_gk_len", "_gk_wid", "_gk_hei", "_block", "_box_num", "_model_group") if c in out.columns]
     if drop_cols:
         out = out.drop(columns=drop_cols)
     return out
@@ -390,7 +407,7 @@ def dataframe_to_line_items(
             "asin": row.get("master_asin") or "",
             "battery": "否",
             "magnet": "否",
-            "model": row.get("model") or row.get("sku") or "",
+            "model": _model_text(row.get("model")),
             "total_qty": total_qty,
             "qty_per_box": row.get("qty_per_box") or "",
             "unit": "套",

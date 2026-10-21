@@ -22,6 +22,7 @@ from fba_tool.univer_apply import (
     _snapshot_sheets,
     _values_equal,
     _write,
+    resolve_write_cell,
 )
 
 _CACHE: Dict[str, bytes] = {}
@@ -201,7 +202,6 @@ def _apply_user_edits(rendered: bytes, template: bytes, snapshot: Dict[str, Any]
     filled = openpyxl.load_workbook(io.BytesIO(rendered))
     blank = openpyxl.load_workbook(io.BytesIO(template))
     formula_cells: List[str] = []
-    slave_cells: List[str] = []
     try:
         by_name = {ws.title: ws for ws in filled.worksheets}
         blank_by_name = {ws.title: ws for ws in blank.worksheets}
@@ -210,23 +210,14 @@ def _apply_user_edits(rendered: bytes, template: bytes, snapshot: Dict[str, Any]
             src = blank_by_name.get(sheet.get("name"))
             if ws is None:
                 continue
-            slaves = _slave_coords(ws)
             for row, col, payload in _iter_cells(sheet):
                 ref = f"{get_column_letter(col)}{row}"
                 snap = payload.get("v")
-                if (row, col) in slaves:
-                    master_coord = None
-                    for merged in ws.merged_cells.ranges:
-                        if merged.min_row <= row <= merged.max_row and merged.min_col <= col <= merged.max_col:
-                            master_coord = (merged.min_row, merged.min_col)
-                            break
-                    master = ws.cell(*master_coord) if master_coord else ws.cell(row, col)
-                    template_master = src.cell(*master_coord) if src is not None and master_coord else None
-                    template_value = template_master.value if template_master is not None else None
-                    if _values_equal(master.value, snap) or _values_equal(template_value, snap):
-                        continue
-                    slave_cells.append(ref)
+                target = resolve_write_cell(ws, row, col, snap)
+                if target is None:
                     continue
+                row, col = target
+                ref = f"{get_column_letter(col)}{row}"
                 cell = ws.cell(row, col)
                 template_value = src.cell(row, col).value if src is not None else None
                 if _is_formula(cell):
@@ -243,14 +234,59 @@ def _apply_user_edits(rendered: bytes, template: bytes, snapshot: Dict[str, Any]
                 if _values_equal(cell.value, snap) or _values_equal(template_value, snap):
                     continue
                 _write(cell, payload)
-        if formula_cells or slave_cells:
-            code = "FORMULA_OVERWRITE" if formula_cells else "MERGED_SLAVE"
-            cells = formula_cells or slave_cells
-            label = "公式单元格不能改成纯值" if code == "FORMULA_OVERWRITE" else "不能写入合并单元格的从属格"
-            raise ApplyRejected(code, cells, f"{label}：{', '.join(cells[:30])}")
+        if formula_cells:
+            raise ApplyRejected("FORMULA_OVERWRITE", formula_cells, f"公式单元格不能改成纯值：{', '.join(formula_cells[:30])}")
         buf = io.BytesIO()
         filled.save(buf)
         return buf.getvalue()
     finally:
         filled.close()
         blank.close()
+
+
+def overlay_preview_edits(base: bytes, official: bytes, preview: bytes) -> bytes:
+    """forwarder_id 固定官方模板壳。preview 相对空白官方模板改过的格子写回 base。
+
+    不整本替换：合并、公式、图片、数据验证和隐藏表仍以官方模板或已渲染结果为准。
+    从属格写到值的主格。公式格保持原公式，不在这里改成纯值。
+    """
+    if not preview or preview == official:
+        return base
+    filled = openpyxl.load_workbook(io.BytesIO(base))
+    blank = openpyxl.load_workbook(io.BytesIO(official))
+    edited = openpyxl.load_workbook(io.BytesIO(preview))
+    try:
+        from fba_tool.invoice_templates import norm
+
+        blank_by = {norm(ws.title): ws for ws in blank.worksheets}
+        edited_by = {norm(ws.title): ws for ws in edited.worksheets}
+        for ws in filled.worksheets:
+            src = blank_by.get(norm(ws.title))
+            prev = edited_by.get(norm(ws.title))
+            if src is None or prev is None:
+                continue
+            max_row = min(max(prev.max_row or 1, 1), 200)
+            max_col = min(max(prev.max_column or 1, 1), 40)
+            for row in prev.iter_rows(min_row=1, max_row=max_row, max_col=max_col):
+                for cell in row:
+                    if isinstance(cell, MergedCell):
+                        continue
+                    official_value = src.cell(cell.row, cell.column).value
+                    if _values_equal(official_value, cell.value):
+                        continue
+                    target = resolve_write_cell(ws, cell.row, cell.column, cell.value)
+                    if target is None:
+                        continue
+                    dest = ws.cell(*target)
+                    if _is_formula(dest):
+                        continue
+                    if _values_equal(dest.value, cell.value):
+                        continue
+                    _write(dest, {"v": _json_cell(cell.value) if isinstance(cell.value, (datetime, date)) else cell.value})
+        buf = io.BytesIO()
+        filled.save(buf)
+        return buf.getvalue()
+    finally:
+        filled.close()
+        blank.close()
+        edited.close()

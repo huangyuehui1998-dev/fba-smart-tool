@@ -1,6 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const python = process.env.FBA_E2E_PYTHON || "/tmp/fba-venv/bin/python";
+import { e2ePython } from "./e2e/python-bin";
+
+const python = e2ePython();
 
 export default defineConfig({
   testDir: "./e2e",

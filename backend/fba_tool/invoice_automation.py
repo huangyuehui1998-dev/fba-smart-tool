@@ -22,6 +22,7 @@ from fba_tool.invoice_table import (
     build_invoice_line_items,
     detect_invoice_table_layout,
     preview_table_cells,
+    value_cell_right_of,
     sanitize_header_text,
     table_cells_from_line_items,
 )
@@ -277,14 +278,7 @@ def detect_template_cells(wb, cfg: dict, max_row: int | None = None) -> Dict[str
                 if field_key in found:
                     continue
                 if any(_label_matches(text, v) for v in variants):
-                    target_col = cell.column + 1
-                    target_row = cell.row
-                    if cell.column < ws.max_column:
-                        right = ws.cell(cell.row, cell.column + 1)
-                        if right.value in (None, ""):
-                            target_col = cell.column + 1
-                        else:
-                            target_col = cell.column + 2
+                    target_row, target_col = value_cell_right_of(ws, cell.row, cell.column)
                     found[field_key] = f"{get_column_letter(target_col)}{target_row}"
     return found
 

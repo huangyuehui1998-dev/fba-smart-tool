@@ -34,9 +34,15 @@ class InvoiceFieldEdit(BaseModel):
 
 
 class InvoiceExportRequest(BaseModel):
-    template_base64: Optional[str] = Field(None, description="发票模板 xlsx base64；与 template_hash 二选一")
+    template_base64: Optional[str] = Field(
+        None,
+        description="发票模板 xlsx base64。未选货代时作为模板壳；选了货代时不替换官方模板，只把相对空白模板改过的格子叠到导出结果上",
+    )
     template_hash: Optional[str] = Field(None, description="服务端缓存的模板 SHA256，导出时优先使用")
-    forwarder_id: Optional[str] = Field(None, description="货代 ID；优先于 template_base64")
+    forwarder_id: Optional[str] = Field(
+        None,
+        description="货代 ID。选定后导出使用该货代的官方模板壳；template_base64 里的预览改动仍然保留",
+    )
     shipment_id: str
     warehouse_code: str
     template_sheet: str = "Sheet1"

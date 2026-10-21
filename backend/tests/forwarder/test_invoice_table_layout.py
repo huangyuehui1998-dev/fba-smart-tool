@@ -53,6 +53,8 @@ def test_sanitize_header_strips_newlines_and_spaces():
     assert sanitize_header_text(raw) == "海关编码hscode"
     assert header_matches_alias(raw, "HS CODE")
     assert header_matches_alias("材质/用途\nMaterial&Use", "材质/用途Material&Use")
+    assert header_matches_alias("用途 purpose*", "用途")
+    assert not header_matches_alias("用途 purpose*", "PO")
 
 
 def test_detect_header_at_row_9():
@@ -191,6 +193,9 @@ def test_detect_qiluo_template_layout():
     assert layout is not None
     assert layout.header_row == 1
     assert layout.first_data_row == 2
+    assert layout.columns["material"] == 8
+    assert layout.columns["purpose"] == 9
+    assert layout.columns["model"] == 11
 
     expected = {
         "box_range",
@@ -211,3 +216,22 @@ def test_detect_qiluo_template_layout():
         "height",
     }
     assert expected.issubset(set(layout.columns.keys()))
+
+
+def test_detect_send_detail_header_not_the_note_row():
+    from pathlib import Path
+
+    from fba_tool.invoice_table import value_cell_right_of
+    from fba_tool.xlsx_io import load_workbook_fast
+
+    tpl = Path(__file__).resolve().parents[2] / "templates" / "forwarders" / "send.xlsx"
+    wb = load_workbook_fast(tpl.read_bytes())
+    layout = detect_invoice_table_layout(wb, cfg=load_invoice_config(), forwarder_id="send")
+    assert layout is not None
+    assert layout.header_row == 14
+    assert layout.first_data_row == 15
+    assert layout.columns["sku"] == 5
+    assert layout.columns["material"] == 10
+    assert layout.columns["purpose"] == 11
+    assert layout.columns["model"] == 12
+    assert value_cell_right_of(wb.active, 4, 1) == (4, 3)

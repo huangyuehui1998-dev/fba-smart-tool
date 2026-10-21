@@ -106,7 +106,13 @@ def _assign_field(conn: sqlite3.Connection, sku: str, field: str, value: Any) ->
     column = _COLUMN.get(field, field)
     if column not in columns:
         return False
-    payload = json.dumps(value or {}, ensure_ascii=False, sort_keys=True) if field == "field_sources" else value
+    # 文本空值写 SQL NULL。原先是 NULL 的列回滚后不能变成 '' 或 '{}'。
+    if field == "field_sources":
+        payload = None if not value else json.dumps(value, ensure_ascii=False, sort_keys=True)
+    elif isinstance(value, str) and not value.strip():
+        payload = None
+    else:
+        payload = value
     conn.execute(f"UPDATE product_master SET {column} = ? WHERE sku = ?", (payload, sku))
     return True
 

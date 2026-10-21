@@ -257,6 +257,7 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
                 type="button"
                 size="lg"
                 className="h-11 flex-1 gap-2 bg-orange-600 text-base font-semibold shadow-md hover:bg-orange-700"
+                data-testid="invoice-autofill"
                 disabled={!canAutoFill}
                 onClick={() => void runFill()}
               >
@@ -440,7 +441,7 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
                   ? FILL_FAILED_EXPORT_BLOCK
                   : staleness.invoice
                     ? "结果已过期，不能作为正式文件下载"
-                    : "按当前表格整本回填。未映射的改动也会写入；公式格和合并从属格不能改成纯值。"
+                    : "按当前表格整本回填。未映射的改动也会写入；公式格不能改成纯值。合并从属格写到值所在的主格。"
               }
               className="gap-2 px-8 text-base font-semibold shadow-md"
               onClick={() => void handleExport()}

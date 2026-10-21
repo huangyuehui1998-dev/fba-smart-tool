@@ -1,7 +1,8 @@
 """把 Univer 快照里改过的值写回原始 xlsx。
 
 只改不相等的普通单元格。公式格保持原公式；快照把公式换成纯值时拒绝。
-合并单元格的从属格拒绝写入。不改数据验证、图片、条件格式和隐藏表。
+合并从属格写到值的主格（标签右侧那一格）；宽备注里的从属格跳过。
+不改数据验证、图片、条件格式和隐藏表。
 """
 from __future__ import annotations
 
@@ -23,20 +24,62 @@ class ApplyRejected(Exception):
         self.message = message
 
 
+def _merge_at(ws: Worksheet, row: int, col: int):
+    for merged in ws.merged_cells.ranges:
+        if merged.max_row > 20000 or merged.max_col > 512:
+            continue
+        if merged.min_row <= row <= merged.max_row and merged.min_col <= col <= merged.max_col:
+            return merged
+    return None
+
+
+def _long_note(value: Any) -> bool:
+    text = str(value or "")
+    return len(text) > 40 or "\n" in text
+
+
+def resolve_write_cell(ws: Worksheet, row: int, col: int, new_value: Any) -> Optional[tuple]:
+    """从属格改写到值的主格。写不进去的宽备注从属格跳过，不让整张导出失败。
+
+    标签合并（A4:B4「FBA Shipment ID」）的值在合并块右侧的主格 C4。
+    值合并（C4:H4，主格为空）直接写主格。宽备注（D5:H5）里的从属格不覆盖备注。
+    """
+    merged = _merge_at(ws, row, col)
+    if merged is None or (row, col) == (merged.min_row, merged.min_col):
+        return row, col
+    if new_value in (None, ""):
+        return None
+    origin = (merged.min_row, merged.min_col)
+    master_value = ws.cell(*origin).value
+    if _values_equal(master_value, new_value):
+        return None
+    if master_value in (None, ""):
+        return origin
+    width = merged.max_col - merged.min_col + 1
+    if width > 3 or _long_note(master_value):
+        return None
+    next_col = merged.max_col + 1
+    host = _merge_at(ws, row, next_col)
+    if host:
+        dest = (host.min_row, host.min_col)
+        if _long_note(ws.cell(*dest).value):
+            return None
+        return dest
+    return row, next_col
+
+
 def apply_cell_writes(data: bytes, writes: List[Dict[str, Any]], sheet_name: Optional[str] = None) -> bytes:
     """把导出字段写回原始 xlsx。不删工作表、图片、数据验证或隐藏表。
 
-    合并从属格和公式格改成纯值时拒绝，与 apply_snapshot_values 同一套规则。
+    合并从属格写到值的主格；宽备注里的从属格跳过。公式格改成纯值时拒绝。
     """
     wb = openpyxl.load_workbook(io.BytesIO(data))
     formula_cells: List[str] = []
-    slave_cells: List[str] = []
     try:
         if sheet_name and sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
         else:
             ws = wb.active
-        slaves = _slave_map(ws)
         for item in writes or []:
             ref = str(item.get("cell") or "").replace("$", "").strip().upper()
             if not ref or item.get("value") in (None, ""):
@@ -45,11 +88,10 @@ def apply_cell_writes(data: bytes, writes: List[Dict[str, Any]], sheet_name: Opt
 
             row, col = coordinate_to_tuple(ref)
             value = item.get("value")
-            if (row, col) in slaves:
-                master = ws.cell(*slaves[(row, col)])
-                if not _values_equal(master.value, value):
-                    slave_cells.append(ref)
+            target = resolve_write_cell(ws, row, col, value)
+            if target is None:
                 continue
+            row, col = target
             cell = ws.cell(row, col)
             if _is_formula(cell):
                 if _norm_formula(value) != _norm_formula(cell.value):
@@ -58,11 +100,8 @@ def apply_cell_writes(data: bytes, writes: List[Dict[str, Any]], sheet_name: Opt
             if _values_equal(cell.value, value):
                 continue
             _write(cell, {"v": value})
-        if formula_cells or slave_cells:
-            code = "FORMULA_OVERWRITE" if formula_cells else "MERGED_SLAVE"
-            cells = formula_cells or slave_cells
-            label = "公式单元格不能改成纯值" if code == "FORMULA_OVERWRITE" else "不能写入合并单元格的从属格"
-            raise ApplyRejected(code, cells, f"{label}：{', '.join(cells[:30])}")
+        if formula_cells:
+            raise ApplyRejected("FORMULA_OVERWRITE", formula_cells, f"公式单元格不能改成纯值：{', '.join(formula_cells[:30])}")
         buf = io.BytesIO()
         wb.save(buf)
         return buf.getvalue()
@@ -73,21 +112,18 @@ def apply_cell_writes(data: bytes, writes: List[Dict[str, Any]], sheet_name: Opt
 def apply_snapshot_values(data: bytes, snapshot: Dict[str, Any]) -> bytes:
     wb = openpyxl.load_workbook(io.BytesIO(data))
     formula_cells: List[str] = []
-    slave_cells: List[str] = []
     try:
         by_name = {ws.title: ws for ws in wb.worksheets}
         for sheet in _snapshot_sheets(snapshot):
             ws = by_name.get(sheet.get("name"))
             if ws is None:
                 continue
-            slaves = _slave_map(ws)
             for row, col, payload in _iter_cells(sheet):
                 ref = f"{get_column_letter(col)}{row}"
-                if (row, col) in slaves:
-                    master = ws.cell(*slaves[(row, col)])
-                    if not _values_equal(master.value, payload.get("v")):
-                        slave_cells.append(ref)
+                target = resolve_write_cell(ws, row, col, payload.get("v"))
+                if target is None:
                     continue
+                row, col = target
                 cell = ws.cell(row, col)
                 if _is_formula(cell):
                     snap_f = payload.get("f")
@@ -101,11 +137,8 @@ def apply_snapshot_values(data: bytes, snapshot: Dict[str, Any]) -> bytes:
                 if _values_equal(cell.value, payload.get("v")):
                     continue
                 _write(cell, payload)
-        if formula_cells or slave_cells:
-            code = "FORMULA_OVERWRITE" if formula_cells else "MERGED_SLAVE"
-            cells = formula_cells or slave_cells
-            label = "公式单元格不能改成纯值" if code == "FORMULA_OVERWRITE" else "不能写入合并单元格的从属格"
-            raise ApplyRejected(code, cells, f"{label}：{', '.join(cells[:30])}")
+        if formula_cells:
+            raise ApplyRejected("FORMULA_OVERWRITE", formula_cells, f"公式单元格不能改成纯值：{', '.join(formula_cells[:30])}")
         buf = io.BytesIO()
         wb.save(buf)
         return buf.getvalue()
@@ -129,19 +162,6 @@ def _iter_cells(sheet: Dict[str, Any]):
             if not isinstance(payload, dict):
                 continue
             yield row, int(col_key) + 1, payload
-
-
-def _slave_map(ws: Worksheet) -> Dict[tuple, tuple]:
-    slaves: Dict[tuple, tuple] = {}
-    for mr in ws.merged_cells.ranges:
-        if mr.max_row > 20000 or mr.max_col > 512:
-            continue
-        origin = (mr.min_row, mr.min_col)
-        for row in range(mr.min_row, mr.max_row + 1):
-            for col in range(mr.min_col, mr.max_col + 1):
-                if (row, col) != origin:
-                    slaves[(row, col)] = origin
-    return slaves
 
 
 def _is_formula(cell: Any) -> bool:

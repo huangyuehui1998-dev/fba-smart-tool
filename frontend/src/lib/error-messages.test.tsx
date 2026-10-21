@@ -22,6 +22,12 @@ describe("explainApiError", () => {
     expect(formatErrorCopy(copy)).toContain("发生了什么");
   });
 
+  it("does not blame a cancelled load on validation rules", () => {
+    const text = formatApiError(new Error("已取消加载"));
+    expect(text).toContain("已取消加载");
+    expect(text).not.toContain("填写不满足规则");
+  });
+
   it("does not show Internal Server Error", () => {
     const html = renderToStaticMarkup(
       <ErrorNotice copy={explainApiError(new ApiError(500, "Internal Server Error"))} />,

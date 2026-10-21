@@ -60,7 +60,13 @@ def header_matches_alias(header_raw: str, alias: str) -> bool:
     a = sanitize_header_text(alias)
     if not h or not a:
         return False
-    return a == h or a in h or h in a
+    if a == h:
+        return True
+    # 「PO」不能因为 purpose 里含有 po 就抢走用途列。短英文别名按单词比，不按子串。
+    if a.isascii() and len(a) <= 3:
+        tokens = re.findall(r"[a-z0-9]+", str(header_raw or "").casefold())
+        return a in tokens
+    return a in h or h in a
 
 
 def _is_sku_header(text: str) -> bool:
@@ -92,6 +98,16 @@ def _is_fba_id_header(text: str) -> bool:
     return _is_shipment_id_header(text)
 
 
+def _is_detail_companion_header(text: str) -> bool:
+    """明细区同行：箱号或品名/型号/材质。不要求这一行再写货件号。"""
+    k = sanitize_header_text(text)
+    if not k:
+        return False
+    if _is_box_seq_header(text) or k.startswith("箱号") or "boxno" in k:
+        return True
+    return any(token in k for token in ("英文品名", "中文品名", "物品英文名", "物品中文名", "型号", "材质", "用途"))
+
+
 def _row_has_table_markers(cell_texts: List[str]) -> bool:
     has_sku = any(_is_sku_header(t) for t in cell_texts if t)
     has_shipment = any(_is_shipment_id_header(t) for t in cell_texts if t)
@@ -99,7 +115,45 @@ def _row_has_table_markers(cell_texts: List[str]) -> bool:
         return True
     has_fba = any(_is_fba_id_header(t) for t in cell_texts if t)
     has_box_seq = any(_is_box_seq_header(t) for t in cell_texts if t)
-    return has_fba and has_box_seq
+    if has_fba and has_box_seq:
+        return True
+    # SEND 第 14 行是「箱号 / SKU / 品名 / 型号」，货件号在上面的合并主格，不在这一行。
+    return has_sku and any(_is_detail_companion_header(t) for t in cell_texts if t)
+
+
+def _merge_at(ws, row: int, col: int):
+    for merged in ws.merged_cells.ranges:
+        if merged.max_row > 20000 or merged.max_col > 512:
+            continue
+        if merged.min_row <= row <= merged.max_row and merged.min_col <= col <= merged.max_col:
+            return merged
+    return None
+
+
+def value_cell_right_of(ws, row: int, col: int) -> tuple[int, int]:
+    """标签右侧的值写在合并主格上。
+
+    A4:B4 是「FBA Shipment ID」，紧挨着的 B4 是从属格，值的主格是 C4（C4:H4）。
+    标签本身没有合并、右侧已有别的字时，仍往后空一格，避免盖住旁边的标签。
+    """
+    label_merge = _merge_at(ws, row, col)
+    next_col = label_merge.max_col + 1 if label_merge else col + 1
+    host = _merge_at(ws, row, next_col)
+    if host and (host.min_row, host.min_col) != (row, next_col):
+        origin = (host.min_row, host.min_col)
+        if ws.cell(*origin).value in (None, ""):
+            return origin
+        after = host.max_col + 1
+        host_after = _merge_at(ws, row, after)
+        if host_after:
+            return host_after.min_row, host_after.min_col
+        return row, after
+    if host and (host.min_row, host.min_col) == (row, next_col):
+        return host.min_row, host.min_col
+    right = ws.cell(row, next_col)
+    if label_merge is None and right.value not in (None, ""):
+        return row, next_col + 1
+    return row, next_col
 
 
 def _map_columns_from_headers(

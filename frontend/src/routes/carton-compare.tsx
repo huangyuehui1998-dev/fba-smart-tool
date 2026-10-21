@@ -4,6 +4,7 @@ import { driver } from "driver.js";
 import "driver.js/dist/driver.css";
 
 import { AppShell } from "@/components/app-shell";
+import { CARTON_TOUR_BUTTONS } from "@/lib/carton-tour";
 import { BackToWorkflow } from "@/components/back-to-workflow";
 import { CartonCompareWorkspace } from "@/components/carton-compare-workspace";
 import { CartonSpecWizard } from "@/components/carton-spec-wizard";
@@ -24,6 +25,7 @@ function CartonComparePage() {
     if (window.localStorage.getItem("fba_carton_wizard_seen") === "1") return;
     const tour = driver({
       showProgress: true,
+      ...CARTON_TOUR_BUTTONS,
       steps: [
         {
           element: "[data-testid=carton-wizard-open]",

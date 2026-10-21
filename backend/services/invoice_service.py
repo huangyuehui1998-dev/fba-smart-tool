@@ -90,6 +90,11 @@ def resolve_invoice_template_bytes(
     template_hash: str | None = None,
     forwarder_id: str | None = None,
 ) -> bytes:
+    """选定货代时返回官方模板壳，不用请求里的 template_base64 换掉整本工作簿。
+
+    预览里改过的格子不在这里处理。导出接口会把 template_base64、fields 和 Univer
+    快照里相对这份空白模板的差异写回去。
+    """
     if forwarder_id:
         data = forwarder_template_bytes(forwarder_id)
         store_template(data)

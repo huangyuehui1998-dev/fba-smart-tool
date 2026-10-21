@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from openpyxl.cell.cell import MergedCell
+
 from fba_tool.invoice_rules import (
     DECLARED_CURRENCY,
     InvoiceBlocked,
@@ -112,17 +114,40 @@ def _sheet(wb, name: str):
 
 
 # ---------------------------------------------------------------- SEND
+def _label_cell(ws, needle: str):
+    from fba_tool.invoice_table import sanitize_header_text
+
+    want = sanitize_header_text(needle)
+    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row or 1, 20), max_col=min(ws.max_column or 1, 12)):
+        for cell in row:
+            if isinstance(cell, MergedCell):
+                continue
+            if want and want in sanitize_header_text(cell.value):
+                return cell.row, cell.column
+    return None
+
+
 def write_send(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, Any]) -> None:
+    from fba_tool.invoice_automation import load_invoice_config
+    from fba_tool.invoice_table import detect_invoice_table_layout, value_cell_right_of
+
     cfg = fw.get("invoice_export") or {}
     ws = _sheet(wb, SEND_SHEET)
     ws.title = SEND_SHEET  # 保持原表名（含 \xa0）
-    ws["C4"] = model.shipment_id
+    label = _label_cell(ws, "FBA Shipment ID")
+    if label:
+        value_row, value_col = value_cell_right_of(ws, *label)
+        ws.cell(value_row, value_col).value = model.shipment_id
+    else:
+        ws["C4"] = model.shipment_id
     ws["C5"] = cfg.get("duty_included", "是 Yes")
     ws["C6"] = cfg.get("use_forwarder_ior", "否 No")
-    styles = _style_row(ws, 15)
+    layout = detect_invoice_table_layout(wb, cfg=load_invoice_config(), forwarder_id="send")
+    first_row = layout.first_data_row if layout is not None else 15
+    styles = _style_row(ws, first_row)
     lines = {l["fnsku"]: l for l in model.lines}
     for i, r in enumerate(model.ranges):
-        row = 15 + i
+        row = first_row + i
         _apply_style(ws, row, styles)
         l = lines[r.fnsku]
         pcs = to_number(l["pcs_per_set"]) or 1
