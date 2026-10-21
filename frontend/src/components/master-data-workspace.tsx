@@ -24,6 +24,7 @@ import {
   syncLocalMasterExcel,
   uploadMasterProductInfo,
   uploadMasterReport,
+  uploadRetailPrices,
   type MasterProduct,
 } from "@/lib/api/master-data";
 import {
@@ -129,7 +130,7 @@ function ReportDropzone({
   );
 }
 
-type UploadKind = "fee_preview" | "inventory" | "product_info";
+type UploadKind = "fee_preview" | "inventory" | "product_info" | "retail";
 
 export function MasterDataWorkspace() {
   const search = useSearch({ from: "/master-data" });
@@ -223,6 +224,22 @@ export function MasterDataWorkspace() {
       const res = await uploadMasterProductInfo(file);
       toast.success(
         `产品信息表：解析 ${res.parsed} 条，更新 ${res.upserted} 条（库中共 ${res.total_in_db} 条）`,
+      );
+      await loadList();
+    } catch (err) {
+      toast.error(masterDataApiError(err));
+    } finally {
+      setUploading(null);
+    }
+  };
+
+  const handleRetailUpload = async (file: File) => {
+    setUploading("retail");
+    try {
+      const res = await uploadRetailPrices(file);
+      const warning = (res.warnings ?? []).join("；");
+      toast.success(
+        `领星导入：解析 ${res.parsed_count}，写入 ${res.imported_count}，未匹配 ${res.unmatched_count}${warning ? `。${warning}` : ""}`,
       );
       await loadList();
     } catch (err) {
@@ -459,6 +476,20 @@ export function MasterDataWorkspace() {
               accept=".csv,.txt,.tsv,.xlsx,.xls,.xlsm,.xlsb"
               loading={uploading === "inventory"}
               onFile={(f) => void handleAmazonUpload(f, "inventory")}
+            />
+          </CardContent>
+        </Card>
+        <Card id="lingxing-retail-import">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">领星导入</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ReportDropzone
+              title="上传领星售价 xlsx / csv"
+              hint="只按产品库里的 MSKU 写入售价，未匹配的行不新建 SKU。"
+              accept=".csv,.xlsx,.xlsm"
+              loading={uploading === "retail"}
+              onFile={(f) => void handleRetailUpload(f)}
             />
           </CardContent>
         </Card>
