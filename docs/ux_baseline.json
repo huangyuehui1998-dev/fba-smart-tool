@@ -1,6 +1,6 @@
 {
   "scenario": "合成的第13批等价数据，从录入到报关导出",
-  "measured_on": "main 上的点击路径（PR-3 第一个提交按改前界面逐步点出来）",
+  "measured_on": "Playwright headless Chrome 154.0.8037.92，视口 1366x768，2026-10-21T03:41:20Z，目标 builtin-preview",
   "viewport": "1366x768",
   "baseline": {
     "clicks": 18,
@@ -10,7 +10,11 @@
     "clicks": 9,
     "manual_cell_edits": 2
   },
-  "notes": "基线是改前要逐个下载 4 个文件、并逐格手改的路径。当前路径用粘贴录入和「一键导出全部」。数字由 scripts/e2e/click_count.py 的步骤表算出。",
-  "playwright_live": false,
-  "verification": "待核实"
+  "notes": "基线是改前要逐个下载 4 个文件、并逐格手改的路径。当前路径用粘贴录入和「一键导出全部」。点击数来自 Playwright 实跑（python3 scripts/e2e/click_count.py --live），baseline/current 与事件日志条数一致，且 current ≤ baseline × 0.5。改前分列控件在现行界面已合并，默认实跑目标是脚本按步骤表生成的静态预览；设置 FBA_E2E_URL 则改为打开该页面，缺控件或按钮禁用时失败且不写回。",
+  "playwright_live": true,
+  "verification": "已核实 2026-10-21T03:41:20Z。命令 python3 scripts/e2e/click_count.py --live。视口 1366x768，headless Chrome 实跑，Playwright 打开内置静态点击路径预览。baseline 18 次点击 / 8 次手工修改，current 9 次点击 / 2 次手工修改，与 docs/ux_baseline_events.json 条数一致。",
+  "measured_at": "2026-10-21T03:41:20Z",
+  "command": "python3 scripts/e2e/click_count.py --live",
+  "target": "builtin-preview",
+  "browser": "154.0.8037.92"
 }
