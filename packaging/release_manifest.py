@@ -48,6 +48,15 @@ CONFIG_WHITELIST: Dict[str, str] = {
     "sku_mapping.default.json": RELEASE,
     "exporter_profiles.default.json": RELEASE,
     "invoice_template_map.json": RELEASE,
+    # 首次启动会在 import 时读 policy.json。bundled_default 只认 policy.default.json，
+    # 缺了就落到不存在的 policy.json，便携版启动即 FileNotFoundError。
+    # 品类、箱规渠道、商品分段、STA 下拉是装箱和发货预检要用的出厂规则，不是客户数据。
+    # invoice_history.default.json 含业务参考，不进白名单。
+    "policy.default.json": REPO,
+    "category_map.default.json": REPO,
+    "item_size_policy.default.json": REPO,
+    "forwarder_registry.default.json": REPO,
+    "sta_dropdowns.default.json": REPO,
 }
 
 RELEASE_SUBDIR = "release_templates"

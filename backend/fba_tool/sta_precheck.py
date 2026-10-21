@@ -10,6 +10,8 @@ from typing import Any, Dict, Iterable, List, Optional, Set
 
 from openpyxl import load_workbook
 
+from fba_tool.app_paths import resolve_config_read
+
 logger = logging.getLogger("fba_tool.sta_precheck")
 
 REQUIRED_COLUMNS = (
@@ -41,11 +43,11 @@ BOX_LABEL_PREFIXES = (
 
 
 def _config_path() -> Path:
-    override = Path("app_data/config/sta_dropdowns.json")
-    if override.is_file():
-        return override
-    here = Path(__file__).resolve().parents[1] / "config" / "sta_dropdowns.default.json"
-    return here
+    """用户 app_data/config/sta_dropdowns.json 优先，否则出厂 sta_dropdowns.default.json。
+
+    打包后 cwd 在 _MEIPASS，不能用相对路径 app_data/。和 policy.json 同一套 resolve_config_read。
+    """
+    return resolve_config_read("sta_dropdowns.json")
 
 
 def load_sta_dropdowns() -> Dict[str, Any]:

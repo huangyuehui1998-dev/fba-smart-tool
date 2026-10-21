@@ -41,6 +41,41 @@ def test_datas_cover_each_whitelist_file_once():
     assert "config/invoice_history.default.json" not in rebuilt
 
 
+# 便携版 import placement_fee 就会 load_policy()。缺 policy.default.json 时
+# bundled_default 回落到不存在的 policy.json，启动即 FileNotFoundError。
+FACTORY_POLICY_DEFAULTS = (
+    "policy.default.json",
+    "category_map.default.json",
+    "item_size_policy.default.json",
+    "forwarder_registry.default.json",
+    "sta_dropdowns.default.json",
+)
+
+
+def test_factory_policy_defaults_are_in_whitelist_and_datas():
+    for name in FACTORY_POLICY_DEFAULTS:
+        assert M.CONFIG_WHITELIST.get(name) == M.REPO, name
+        assert (BACKEND / "config" / name).is_file(), name
+    datas = M.pyinstaller_datas(ROOT)
+    rebuilt = []
+    for src, dest_dir in datas:
+        name = Path(src).name
+        rebuilt.append(name if dest_dir == "." else f"{dest_dir}/{name}")
+    for name in FACTORY_POLICY_DEFAULTS:
+        assert f"config/{name}" in rebuilt, name
+        assert Path(next(src for src, dest in datas if Path(src).name == name)).is_file()
+    assert "config/invoice_history.default.json" not in rebuilt
+    assert "config/lingxing.json" not in rebuilt
+    datas_win = [(rel.replace("/", "\\"), "DATA") for rel in M.bundle_relpaths(ROOT)]
+    dropped = [
+        item
+        for item in datas_win
+        if not str(item[0]).replace("\\", "/").endswith("config/policy.default.json")
+    ]
+    with pytest.raises(SystemExit, match="policy.default.json"):
+        M.assert_collected(dropped, ROOT)
+
+
 def test_assert_collected_accepts_windows_dests_and_rejects_gaps():
     datas = [(rel.replace("/", "\\"), "unused", "DATA") for rel in M.bundle_relpaths(ROOT)]
     M.assert_collected(datas, ROOT)

@@ -21,7 +21,7 @@ zip 内（正斜杠，中文名带 UTF-8 标志）：
 
 模板和出厂配置来自白名单 `packaging/release_manifest.py`。PyInstaller 在 Analysis 之后若没收齐，打包直接失败。`scripts/finish_portable_dist.py` 只检查 `_internal` 里这些文件在不在，**缺了不会手工拷进去**。
 
-不要打进包里的东西：`realdata`、`app_data`、领星密钥（`lingxing.json`）、发票历史、会话、数据库。白名单不变。
+不要打进包里的东西：`realdata`、`app_data`、领星密钥（`lingxing.json`）、发票历史（`invoice_history.default.json`）、会话、数据库。出厂规则 `policy.default.json`、`category_map.default.json`、`item_size_policy.default.json`、`forwarder_registry.default.json`、`sta_dropdowns.default.json` 在白名单里，否则首次启动会找不到 `_internal/config/policy.json`。
 
 中文文件名是在 **Windows 构建机上的 Python** 写进 zip 的。不要在 Linux 上解压再重新压缩，locale 不对时中文名会坏。
 
