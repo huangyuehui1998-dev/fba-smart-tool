@@ -7,7 +7,16 @@ from pathlib import Path
 import pytest
 from openpyxl import Workbook
 
-from tests.smoke.reference import LayoutMissing, assemble, chargeable, parse_measure_file, round_up_half_kg
+from tests.smoke.reference import (
+    LayoutMissing,
+    _measure_files,
+    assemble,
+    chargeable,
+    cl2_net,
+    parse_measure_file,
+    round_up_half_kg,
+    summarize_batch13,
+)
 
 
 def _book(path: Path, rows: list[list]) -> None:
@@ -41,3 +50,133 @@ def test_present_directory_without_layout_fails(tmp_path):
     (tmp_path / "note.txt").write_text("present", encoding="utf-8")
     with pytest.raises(LayoutMissing):
         assemble(tmp_path)
+
+
+def _measure_book(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _book(path, [
+        ["外箱号", "运单号", "单箱实重", "长", "宽", "高"],
+        ["FBATESTU000001", "WBTEST1", "10.25", 10, 10, 10],
+        ["入库计费重", 10.5],
+    ])
+
+
+def _amazon_csv(path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "包装箱重量（kg）,10\n"
+        "包装箱长度（cm）,10\n"
+        "包装箱宽度（cm）,10\n"
+        "包装箱高度（cm）,10\n"
+        "箱号,FBATESTU000001\n",
+        encoding="utf-8",
+    )
+
+
+def _sta(root: Path) -> None:
+    for batch, total in (("13", 2), ("14", 6), ("15", 1)):
+        folder = root / "batches" / f"第{batch}批"
+        folder.mkdir(parents=True, exist_ok=True)
+        _book(folder / "Send to Amazon.xlsx", [[f"SKU总数：{total}"]])
+
+
+def _entry(path: Path, tare: float | None = 0.3) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _book(path, [
+        ["SKU简称*", "发货总数*", "单箱装量*", "单个重量(kg)", "空纸箱重(kg)", "单箱毛重(kg)"],
+        ["J-PETMAT-CAR-ZHENTOU-DEMO", 64, 2, None, tare, 8],
+        ["J-PETMAT-CAR-TANZI-DEMO", 64, 2, None, tare, 8],
+    ])
+
+
+def _shipping(path: Path, carton_a: str, carton_b: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    _book(path, [
+        ["亚马逊 FBA 发货装箱单"],
+        ["FBA 货件编号\n(Shipment ID)", "箱号\n(Carton No.)", "总毛重(KG)\n(Total G.W.)", "中文品名"],
+        ["FBATESTCL2", carton_a, 150, "枕头"],
+        ["FBATESTCL2", carton_b, 114, "毯子"],
+        ["", "", 264, "合计 (Total)"],
+    ])
+
+
+def test_jiufang_bill_dir_assembles_cl2_net_254_4(tmp_path):
+    batch = tmp_path / "batches" / "第13批"
+    _measure_book(batch / "九方确认账单文件" / "单箱.xlsx")
+    _amazon_csv(batch / "货件.csv")
+    _shipping(batch / "发给工厂" / "发货表.xlsx", "1-18", "19-32")
+    _entry(batch / "发货录入样表.xlsx")
+    _sta(tmp_path)
+    report = assemble(tmp_path)
+    cl2 = report["cl2"]
+    assert cl2["net"] == Decimal("254.4")
+    assert cl2["boxes"] == 32
+    assert cl2["gross"] == Decimal("264.0")
+    assert cl2["tare"] == Decimal("0.3")
+    assert "九方确认账单文件" in report["batch13"]["measure_files"][0]
+    from fba_tool.customs_package import compute_net_weight
+
+    product_net = Decimal(str(compute_net_weight(cl2["gross"], cl2["boxes"], [cl2["tare"]] * cl2["boxes"])))
+    assert cl2["net"] == product_net == Decimal("254.4")
+
+
+def test_legacy_measure_dir_still_parses(tmp_path):
+    batch = tmp_path / "batches" / "第13批"
+    _measure_book(batch / "货代计费重确认文件" / "九方.xlsx")
+    _amazon_csv(batch / "货件.csv")
+    summary = summarize_batch13(tmp_path)
+    assert summary["bill_count"] == 1
+    assert len(_measure_files(tmp_path)) == 1
+
+
+def test_inbound_folder_is_not_a_measure_source(tmp_path):
+    batch = tmp_path / "batches" / "第13批"
+    _measure_book(batch / "货代入库数据" / "货代计费重确认文件" / "九方.xlsx")
+    _amazon_csv(batch / "货件.csv")
+    with pytest.raises(LayoutMissing, match="九方确认账单"):
+        summarize_batch13(tmp_path)
+
+
+def test_comma_box_numbers_and_csv_count_both_can_reach_254_4(tmp_path):
+    batch = tmp_path / "batches" / "第13批"
+    left = ",".join(str(i) for i in range(1, 17))
+    right = ",".join(str(i) for i in range(17, 33))
+    _shipping(batch / "发给工厂" / "发货表.xlsx", left, right)
+    _entry(batch / "发货录入样表.xlsx")
+    got = cl2_net(tmp_path)
+    assert got["net"] == Decimal("254.4")
+    assert got["boxes"] == 32
+    assert "箱号" in got["detail"]
+
+    root = tmp_path / "csv-case"
+    batch = root / "batches" / "第13批"
+    _shipping(batch / "发给工厂" / "发货表.xlsx", "见明细", "见明细")
+    _entry(batch / "发货录入样表.xlsx")
+    packing = batch / "装箱明细" / "第一票FBATESTCL2.csv"
+    packing.parent.mkdir(parents=True)
+    packing.write_text("货件编号,FBATESTCL2\n箱子数量,32\n", encoding="utf-8")
+    from_csv = cl2_net(root)
+    assert from_csv["net"] == Decimal("254.4")
+    assert from_csv["boxes"] == 32
+    assert "箱子数量" in from_csv["detail"]
+
+
+def test_entry_sheet_sku_cl2_is_not_a_net_source(tmp_path):
+    batch = tmp_path / "batches" / "第13批" / "发给工厂"
+    _book_path = batch / "发货录入样表.xlsx"
+    _book_path.parent.mkdir(parents=True)
+    _book(_book_path, [
+        ["SKU简称", "发货总数", "单箱毛重", "空纸箱重(kg)"],
+        ["WIDGET-CL2", 32, 264, 0.3],
+    ])
+    with pytest.raises(LayoutMissing, match="发货表"):
+        cl2_net(tmp_path)
+
+
+def test_missing_tare_uses_product_fallback(tmp_path):
+    batch = tmp_path / "batches" / "第13批"
+    _shipping(batch / "发给工厂" / "发货表.xlsx", "1-18", "19-32")
+    got = cl2_net(tmp_path)
+    assert got["tare"] == Decimal("0.2")
+    assert got["net"] == Decimal("257.6")
+    assert "0.2" in got["detail"]

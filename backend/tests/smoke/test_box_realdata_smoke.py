@@ -226,8 +226,8 @@ def test_box_realdata_smoke(monkeypatch, tmp_path):
         product_net = Decimal(str(compute_net_weight(
             cl2["gross"], cl2["boxes"], [cl2["tare"]] * cl2["boxes"],
         )))
-        assert cl2["net"] == product_net == ANCHOR_NET, (cl2["net"], product_net, ANCHOR_NET)
-        return {"net": str(cl2["net"]), "boxes": cl2["boxes"]}
+        assert cl2["net"] == product_net == ANCHOR_NET, (cl2["net"], product_net, ANCHOR_NET, cl2.get("detail"))
+        return {"net": str(cl2["net"]), "boxes": cl2["boxes"], "detail": cl2.get("detail") or ""}
 
     def s07():
         table = placement_table()
