@@ -5,7 +5,6 @@ import base64
 import hashlib
 import json
 import os
-import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +20,6 @@ SESSIONS_DIR = sessions_dir()
 AUTOSAVE_PATH = SESSIONS_DIR / "autosave.json"
 HISTORY_INDEX_PATH = SESSIONS_DIR / "history_index.json"
 HISTORY_DIR = SESSIONS_DIR / "history"
-_TASK_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,80}$")
 ROUTING_SNAPSHOTS_DIR = HISTORY_DIR / "routing_snapshots"
 
 PERSIST_KEYS = {
@@ -368,14 +366,9 @@ def list_history_tasks(offset: int = 0, limit: int | None = None) -> List[dict]:
 
 def safe_history_id(task_id: str) -> str:
     """历史文件名只允许本目录里的一段名字，拒绝 ../ 和路径分隔符。"""
-    text = str(task_id or "").strip()
-    if not _TASK_ID_RE.fullmatch(text) or ".." in text:
-        raise ValueError("task_id 含有非法路径字符")
-    path = (HISTORY_DIR / f"{text}.json").resolve()
-    root = HISTORY_DIR.resolve()
-    if path.parent != root:
-        raise ValueError("task_id 含有非法路径字符")
-    return text
+    from fba_tool.history_guard import safe_history_path
+
+    return safe_history_path(task_id)
 
 
 def save_history_payload(payload: dict, name: str | None = None) -> str:

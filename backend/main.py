@@ -185,6 +185,23 @@ def create_app() -> FastAPI:
     install_access_control(app)
 
     @app.middleware("http")
+    async def reject_unsafe_history_ids(request, call_next):
+        from fba_tool.history_guard import history_task_suffix, safe_history_path
+
+        raw = request.scope.get("raw_path") or b""
+        text = raw.decode("latin-1", "replace") if isinstance(raw, (bytes, bytearray)) else str(raw)
+        suffix = history_task_suffix(text or request.url.path)
+        if suffix:
+            try:
+                safe_history_path(suffix)
+            except ValueError:
+                return JSONResponse(
+                    status_code=400,
+                    content={"detail": {"code": "INVALID_TASK_ID", "message": "任务编号不合法"}},
+                )
+        return await call_next(request)
+
+    @app.middleware("http")
     async def reject_writes_when_db_is_newer(request, call_next):
         if request.method in {"POST", "PUT", "PATCH", "DELETE"} and request.url.path.startswith("/api/"):
             from fba_tool.db_migrations import is_readonly
