@@ -83,6 +83,7 @@ import sys as _sys
 
 _sys.path.insert(0, str(Path(SPECPATH).resolve()))
 from release_manifest import pyinstaller_datas as _release_datas  # noqa: E402
+from release_manifest import assert_collected as _assert_collected  # noqa: E402
 
 
 a = Analysis(
@@ -103,6 +104,9 @@ a = Analysis(
     optimize=0,
 )
 
+# 目录模式下数据在 _internal（sys._MEIPASS）。缺模板就停，不要打包后再拷。
+_assert_collected(a.datas, ROOT)
+
 pyz = PYZ(a.pure)
 
 exe = EXE(
@@ -115,6 +119,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    contents_directory="_internal",
     console=True,
     disable_windowed_traceback=False,
     argv_emulation=False,
