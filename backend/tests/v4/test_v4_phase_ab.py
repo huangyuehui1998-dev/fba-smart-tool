@@ -540,11 +540,11 @@ def test_v4_d1_listing_preview_confirm_rollback():
 
 
 def _owner_listing_path() -> Path:
-    """真实美国站导出只从环境变量读。仓库里不放这份文件；没有就跳过。"""
+    """真实美国站导出。默认用仓库里的回归表，也可用 FBA_LINGXING_OWNER_XLSX 指向另一份。"""
     override = os.environ.get("FBA_LINGXING_OWNER_XLSX", "").strip()
-    path = Path(override) if override else None
-    if path is None or not path.is_file():
-        pytest.skip("设置 FBA_LINGXING_OWNER_XLSX 指向领星导出后才跑真实表")
+    path = Path(override) if override else ROOT / "review" / "lingxing_listing_export_2026-10-21.xlsx"
+    if not path.is_file():
+        pytest.fail(f"领星回归表不存在：{path}")
     return path
 
 
