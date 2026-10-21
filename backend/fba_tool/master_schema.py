@@ -175,6 +175,7 @@ def ensure_v3(conn) -> None:
         ("tax_fx_basis", "TEXT DEFAULT 'month_first'"),
         ("min_declared_ratio_of_retail", "REAL DEFAULT 0.30"),
         ("tax_fx_locked_until", "TEXT"),
+        ("suspect_unit_weight_kg", "REAL DEFAULT 0.5"),
     ):
         if name not in cols:
             conn.execute(f"ALTER TABLE customs_rule_profile ADD COLUMN {name} {ddl}")

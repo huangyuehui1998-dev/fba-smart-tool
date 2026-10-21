@@ -32,12 +32,19 @@ def _row(**kw):
 
 
 def test_rule_1a_missing_unit_weight_requires_confirm_without_suggestion():
+    # 1.8 ≤ 4×0.5+0.3+0.01，这条现在归到“疑似单件重填进毛重”，仍然要确认、不给建议毛重。
     warnings = check_gross_weight_consistency(with_computed_columns(pd.DataFrame([_row()])))
     assert len(warnings) == 1
-    assert warnings[0]["kind"] == "unit_weight_missing"
+    assert warnings[0]["kind"] == "suspect_unit_in_gross"
     assert warnings[0]["requires_confirm"] is True
     assert warnings[0]["suggested_gross_kg"] is None
-    assert "0.3" not in warnings[0]["message"]
+    assert "疑似把单件重填进了单箱毛重" in warnings[0]["message"]
+    heavy = check_gross_weight_consistency(
+        with_computed_columns(pd.DataFrame([_row(**{"单箱毛重(kg)": 15})])),
+    )
+    assert heavy[0]["kind"] == "unit_weight_missing"
+    assert heavy[0]["suggested_gross_kg"] is None
+    assert "0.3" not in heavy[0]["message"]
 
 
 def test_rule_1b_missing_gross_is_warning_only():

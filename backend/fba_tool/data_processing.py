@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import re
 import unicodedata
+from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -411,6 +412,10 @@ def validate_step1(df: pd.DataFrame) -> List[Tuple[int, str]]:
 
 # 录入毛重与理论毛重的可接受偏差；超过即提示核对（软告警，不阻断）
 GROSS_WEIGHT_TOLERANCE = 0.08
+# 疑似把单件重填进毛重：比较用字符串构造的 Decimal，容差固定 0.01kg。
+SUSPECT_UNIT_TOLERANCE_KG = Decimal("0.01")
+DEFAULT_SUSPECT_UNIT_WEIGHT_KG = Decimal("0.5")
+SUSPECT_THRESHOLD_NOTE = "内部阈值，非官方规定"
 
 
 def _unit_weight_missing(value: Any) -> bool:
@@ -450,9 +455,52 @@ def _is_positive_int(value: Any) -> bool:
     return number > 0 and number == int(number)
 
 
+def _as_decimal(value: Any) -> Decimal:
+    """由字符串构造。float 先转成它自己的十进制文本，避免二进制误差再进比较。"""
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, bool) or value is None:
+        return Decimal("0")
+    try:
+        if pd.isna(value):
+            return Decimal("0")
+    except (TypeError, ValueError):
+        pass
+    if isinstance(value, float):
+        return Decimal(str(value))
+    text = str(value).strip()
+    if not text or text.lower() in {"nan", "none"}:
+        return Decimal("0")
+    return Decimal(text)
+
+
+def gross_is_suspect_unit(gross: Any, qty: Any, tare: Any, suspect: Any) -> bool:
+    """单箱毛重不超过 装量 × 阈值 + 皮重 + 0.01 时，怀疑毛重格里填的是单件重。"""
+    limit = (
+        _as_decimal(qty) * _as_decimal(suspect)
+        + _as_decimal(tare)
+        + SUSPECT_UNIT_TOLERANCE_KG
+    )
+    return _as_decimal(gross) <= limit
+
+
+def suspect_unit_weight_kg() -> Decimal:
+    try:
+        from fba_tool.warehouse_db import get_default_rule_profile
+
+        profile = get_default_rule_profile() or {}
+        raw = profile.get("suspect_unit_weight_kg")
+        if raw in (None, ""):
+            return DEFAULT_SUSPECT_UNIT_WEIGHT_KG
+        return _as_decimal(raw)
+    except Exception:
+        return DEFAULT_SUSPECT_UNIT_WEIGHT_KG
+
+
 def check_gross_weight_consistency(
     df: pd.DataFrame,
     tolerance: float = GROSS_WEIGHT_TOLERANCE,
+    suspect_kg: Any = None,
 ) -> List[Dict[str, Any]]:
     """单箱毛重三档：
 
@@ -478,20 +526,31 @@ def check_gross_weight_consistency(
         expected = round(per_box * unit_kg + tare_kg, 3)
 
         if unit_missing and declared is not None and declared > 0:
+            threshold = DEFAULT_SUSPECT_UNIT_WEIGHT_KG if suspect_kg is None else _as_decimal(suspect_kg)
+            if suspect_kg is None:
+                threshold = suspect_unit_weight_kg()
+            suspect = gross_is_suspect_unit(declared, per_box, tare_kg, threshold)
             warnings.append(
                 {
                     "row_index": int(idx),
                     "sku": sku,
-                    "kind": "unit_weight_missing",
+                    "kind": "suspect_unit_in_gross" if suspect else "unit_weight_missing",
                     "requires_confirm": True,
                     "suggested_gross_kg": None,
                     "declared_kg": round(declared, 3),
                     "expected_kg": expected,
                     "diff_kg": None,
                     "deviation_pct": None,
+                    "suspect_unit_weight_kg": float(threshold),
+                    "threshold_note": SUSPECT_THRESHOLD_NOTE,
                     "message": (
-                        f"SKU {sku} 录了单箱毛重 {declared:g} kg，但单个重量为空。"
-                        f"请补单重，或确认沿用录入毛重。不要把空箱重当成建议毛重"
+                        f"SKU {sku} 疑似把单件重填进了单箱毛重（{declared:g} kg）。"
+                        f"{SUSPECT_THRESHOLD_NOTE} {threshold:g} kg"
+                        if suspect
+                        else (
+                            f"SKU {sku} 录了单箱毛重 {declared:g} kg，但单个重量为空。"
+                            f"请补单重，或确认沿用录入毛重。不要把空箱重当成建议毛重"
+                        )
                     ),
                 }
             )

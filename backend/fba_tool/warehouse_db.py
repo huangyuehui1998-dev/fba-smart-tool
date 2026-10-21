@@ -228,7 +228,12 @@ _PROFILE_TEXT = (
     "net_weight_mode", "total_price_rule", "loading_port", "entrust_valid_until_rule",
     "exemption_nature", "transport_mode", "declared_value_basis", "trade_term", "tax_fx_basis",
 )
-_PROFILE_NUM = ("net_minus_per_box", "net_ratio", "forwarder_gross_tolerance_kg")
+_PROFILE_NUM = (
+    "net_minus_per_box",
+    "net_ratio",
+    "forwarder_gross_tolerance_kg",
+    "suspect_unit_weight_kg",
+)
 _PROFILE_BOOL = ("fill_freight", "fill_export_declare_date")
 
 
@@ -244,6 +249,14 @@ DECLARED_VALUE_BASES = ("retail", "fob", "cost")
 
 
 TAX_FX_LOCK_MESSAGE = "出口退税折合率确定后 12 个月内不得变更"
+TAX_FX_ALIAS = {
+    "day": "day",
+    "sale_day": "day",
+    "销售额发生当日": "day",
+    "month_first": "month_first",
+    "当月 1 日": "month_first",
+    "当月 1 日有效的中间价": "month_first",
+}
 
 
 def _plus_twelve_months(day: date) -> date:
@@ -270,7 +283,11 @@ def update_rule_profile(values: Dict[str, Any]) -> Dict[str, Any]:
         incoming["net_ratio"] = 0.95
         ratio = 0.95
     if "tax_fx_basis" in incoming:
-        new_basis = str(incoming.get("tax_fx_basis") or "").strip()
+        raw_basis = str(incoming.get("tax_fx_basis") or "").strip()
+        if raw_basis and raw_basis not in TAX_FX_ALIAS:
+            raise ValueError("出口退税折合率只能是销售额发生当日或当月 1 日")
+        new_basis = TAX_FX_ALIAS.get(raw_basis, raw_basis)
+        incoming["tax_fx_basis"] = new_basis
         old_basis = str(prof.get("tax_fx_basis") or "month_first").strip()
         locked_until = str(prof.get("tax_fx_locked_until") or "").strip()[:10]
         if new_basis and new_basis != old_basis and locked_until and not confirm:
