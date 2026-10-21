@@ -25,6 +25,8 @@ export type LingxingPreviewField = {
   remote_value: string;
   default_checked: boolean;
   sensitive?: boolean;
+  manual_diff?: boolean;
+  difference?: string;
 };
 
 /** S9-step2 A / S9-step2-fix：预览里的价格信息（按会写入的价格字段计算“确认写入后”的申报价）。 */

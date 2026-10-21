@@ -101,7 +101,7 @@ def chargeable_kg(weight: Any, dims: Sequence[Any], divisor: Any = DEFAULT_DIM_D
 
 
 def inches_to_cm_exact(inches: Any) -> Decimal:
-    """存储用的全精度换算。显示仍走 to_cm() 的 1 位。"""
+    """存储用的全精度换算。发票和箱规显示走 to_cm() 的 2 位（17.70 英寸 = 44.96）。"""
     return D(inches) * CM_PER_IN
 
 

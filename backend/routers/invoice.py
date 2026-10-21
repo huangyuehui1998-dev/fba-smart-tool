@@ -72,10 +72,19 @@ def api_export_invoice(body: InvoiceExportRequest):
 
     draft = draft_from_payload(body)
 
+    from fba_tool.invoice_step45 import export_rendered_workbook
     from fba_tool.univer_apply import ApplyRejected, apply_snapshot_values
 
     try:
-        if body.snapshot:
+        rendered = export_rendered_workbook(
+            body.forwarder_id,
+            draft.shipment_id,
+            template_bytes,
+            body.snapshot,
+        )
+        if rendered is not None:
+            out = rendered
+        elif body.snapshot:
             out = apply_snapshot_values(template_bytes, body.snapshot)
         else:
             out = export_invoice_xlsx(template_bytes, draft, forwarder_id=body.forwarder_id)

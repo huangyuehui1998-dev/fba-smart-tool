@@ -32,7 +32,7 @@ def test_migration_adds_columns_to_old_db(tmp_path, monkeypatch):
     init_master_db()  # 重复执行安全
     rec = get_product_by_sku("OLD-1")
     assert rec["declared_value"] == 12.5          # 老数据不丢
-    assert rec["listing_price"] is None and rec["declare_unit"] == ""
+    assert rec["listing_price"] is None and rec["declare_unit"] is None
     with sqlite3.connect(db) as c:
         assert c.execute("PRAGMA user_version").fetchone()[0] >= 2
 

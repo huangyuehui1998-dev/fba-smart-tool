@@ -771,7 +771,7 @@ def export_shipping_sheet(
             if key in ("发货总数", "单箱装量") and val not in ("", None):
                 out: Any = int(round(float(val)))
             elif key in ("箱长(cm)", "箱宽(cm)", "箱高(cm)") and val not in ("", None):
-                out = round(float(val), 1)
+                out = float(val)
             else:
                 out = val
             if key == "SKU简称":
@@ -810,7 +810,7 @@ def export_shipping_sheet(
             elif key == "单箱体积(CBM)" and val not in ("", None):
                 out = round(float(val), 3)
             elif key in ("外箱长(CM)", "外箱宽(CM)", "外箱高(CM)") and val not in ("", None):
-                out = round(float(val), 1)
+                out = float(val)
             else:
                 out = val
             cell = ws.cell(r, ci, out)

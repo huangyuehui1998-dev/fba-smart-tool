@@ -109,6 +109,7 @@ def join_master_db(df: pd.DataFrame, warnings: List[str]) -> pd.DataFrame:
         "master_height_cm",
         "master_unit_kg",
         "master_asin",
+        "master_model",
     ]
     for col in master_cols:
         df[col] = None
@@ -142,6 +143,7 @@ def join_master_db(df: pd.DataFrame, warnings: List[str]) -> pd.DataFrame:
             master.get("carton_weight") or master.get("unit_weight")
         )
         df.at[idx, "master_asin"] = master.get("asin") or ""
+        df.at[idx, "master_model"] = master.get("model_name") or ""
 
     for sku in sorted(missing_skus):
         warnings.append(f"主数据缺少 SKU：{sku}")
@@ -219,7 +221,7 @@ def priority_fallback(
             unit_w_step4,
             row.get("master_unit_kg"),
         )
-        df.at[idx, "model"] = sku
+        df.at[idx, "model"] = str(row.get("master_model") or "").strip()
         df.at[idx, "box_weight_kg"] = weight_step4
 
     return df
@@ -440,13 +442,17 @@ def run_invoice_etl(
     workflow_json: dict | None,
     po_number: str = "",
     catalog: Optional[ProductCatalog] = None,
+    separate_material_purpose: bool | None = None,
 ) -> Tuple[List[InvoiceLineItem], List[str]]:
     """执行完整五段 ETL，返回发票行与 warnings。"""
     warnings: List[str] = []
     mapping = get_forwarder_mapping(forwarder_id) or {}
     group_logic = normalize_group_logic(mapping.get("group_logic"))
     unit_cfg = mapping.get("unit_conversion") or {}
-    separate_mp = bool(mapping.get("separate_material_purpose"))
+    if separate_material_purpose is None:
+        separate_mp = bool(mapping.get("separate_material_purpose"))
+    else:
+        separate_mp = bool(separate_material_purpose)
 
     df = extract_unpivot(ship)
     if df.empty:

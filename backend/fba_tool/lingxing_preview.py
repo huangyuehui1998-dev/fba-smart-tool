@@ -297,7 +297,14 @@ def build_listing_preview(
                 changed=changed,
                 local_val=local_val,
             )
-            if local_sources.get(field) == "manual" and field not in PRICE_FIELDS:
+            manual_price_conflict = (
+                field in PRICE_FIELDS
+                and local_sources.get(field) == "manual"
+                and changed
+            )
+            if manual_price_conflict:
+                checked = False  # 手填售价和领星不同：默认不勾，避免 52 被写成 49.99
+            elif local_sources.get(field) == "manual" and field not in PRICE_FIELDS:
                 checked = False  # 手填锁定：默认不勾，确认时也会跳过
             if needs_review:
                 checked = False  # S8 D10：待人工确认的新品默认不勾，定时自动写入也不会写
@@ -578,6 +585,11 @@ def serialize_preview(run_id: int) -> Dict[str, Any]:
     for row in field_rows:
         msrc = (masters.get(row["sku"]) or {}).get("field_sources") or {}
         # 价格字段不受手填锁定（NEVER_LOCKED_FOR_LINGXING），这里也不显示锁定
+        manual_price_conflict = (
+            row["field"] in PRICE_FIELDS
+            and msrc.get(row["field"]) == "manual"
+            and str(row["local_value"] or "") != str(row["remote_value"] or "")
+        )
         item = {
             "field": row["field"],
             "label": FIELD_LABELS.get(row["field"], row["field"]),
@@ -586,6 +598,12 @@ def serialize_preview(run_id: int) -> Dict[str, Any]:
             "default_checked": row["default_checked"],
             "sensitive": row["field"] in CUSTOMS_SENSITIVE_FIELDS,
             "locked": msrc.get(row["field"]) == "manual" and row["field"] not in PRICE_FIELDS,
+            "manual_diff": manual_price_conflict,
+            "difference": (
+                f"手填 {row['local_value']} 与领星 {row['remote_value']} 不同，默认不覆盖"
+                if manual_price_conflict
+                else ""
+            ),
         }
         by_sku.setdefault(row["sku"], []).append(item)
 

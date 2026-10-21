@@ -582,6 +582,12 @@ def build_invoice_draft(
     parsed_shipment: dict | None = None,
 ) -> Tuple[InvoiceDraft, DeepseekUsageAccumulator | None]:
     usage_acc = DeepseekUsageAccumulator() if api_key else None
+    if forwarder_id:
+        from fba_tool.invoice_step45 import try_adapter_draft
+
+        adapted = try_adapter_draft(forwarder_id, csv_bytes, template_bytes, parsed_shipment)
+        if adapted is not None:
+            return adapted, usage_acc
     cfg = load_invoice_config()
     ship = resolve_csv_shipment(parsed_shipment=parsed_shipment, csv_bytes=csv_bytes or None)
     ratio = float(config_throw_ratio())
@@ -598,6 +604,8 @@ def build_invoice_draft(
 
     if table_layout:
         separate_mp = "material" in table_layout.columns and "purpose" in table_layout.columns
+        if not separate_mp and fwd_mapping and fwd_mapping.get("separate_material_purpose") is not None:
+            separate_mp = bool(fwd_mapping.get("separate_material_purpose"))
         if fwd_mapping:
             line_items, etl_warnings = run_invoice_etl(
                 forwarder_id=forwarder_id or "",
@@ -606,9 +614,8 @@ def build_invoice_draft(
                 workflow_json=workflow_json,
                 po_number=po_number,
                 catalog=None,
+                separate_material_purpose=separate_mp,
             )
-            if fwd_mapping.get("separate_material_purpose") is not None:
-                separate_mp = bool(fwd_mapping.get("separate_material_purpose"))
         elif use_workflow_fill or workflow_json is not None:
             line_items = build_invoice_line_items_workflow(
                 ship,

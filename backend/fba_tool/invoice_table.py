@@ -339,7 +339,7 @@ def build_invoice_line_items(
             "asin": asin,
             "battery": "否",
             "magnet": "否",
-            "model": sku_str,
+            "model": str((master or {}).get("model_name") or "").strip(),
             "total_qty": total_qty,
             "unit": "套",
             "pcs_per_set": pcs if pcs else "",
@@ -350,9 +350,9 @@ def build_invoice_line_items(
             "sku_image": "",
             "shipping_mark": ship.warehouse_code or "",
             "box_weight": round(weight, 2) if weight else "",
-            "length": round(length, 1) if length else "",
-            "width": round(width, 1) if width else "",
-            "height": round(height, 1) if height else "",
+            "length": length if length else "",
+            "width": width if width else "",
+            "height": height if height else "",
         }
 
         sources: Dict[str, str] = {}

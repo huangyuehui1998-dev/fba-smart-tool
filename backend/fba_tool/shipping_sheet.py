@@ -184,9 +184,9 @@ def build_shipping_sheet_df(
                 continue
 
             if spec is not None:
-                length = round(float(spec.get("长(cm)", 0) or 0), 1)
-                width = round(float(spec.get("宽(cm)", 0) or 0), 1)
-                height = round(float(spec.get("高(cm)", 0) or 0), 1)
+                length = float(spec.get("长(cm)", 0) or 0)
+                width = float(spec.get("宽(cm)", 0) or 0)
+                height = float(spec.get("高(cm)", 0) or 0)
                 gross = round(float(spec.get("实重(kg)", 0) or 0), 2)
                 cbm = round(box_cbm(length, width, height), 3)
                 dims = (length, width, height)

@@ -142,6 +142,9 @@ def invoice_generate_payload(body: InvoiceGenerateRequest) -> Dict[str, Any]:
     )
 
     use_workflow = body.workflow_json is not None or bool(body.forwarder_id)
+    from fba_tool.invoice_rules import InvoiceBlocked
+    from routers.invoice_export import WarehouseUndecided
+
     try:
         draft, usage_acc = build_invoice_draft(
             csv_bytes,
@@ -156,6 +159,13 @@ def invoice_generate_payload(body: InvoiceGenerateRequest) -> Dict[str, Any]:
             forwarder_id=body.forwarder_id,
             parsed_shipment=body.parsed_shipment,
         )
+    except InvoiceBlocked as exc:
+        raise HTTPException(status_code=409, detail={"detail": str(exc), "blocking": exc.blocking}) from exc
+    except WarehouseUndecided as exc:
+        raise HTTPException(
+            status_code=422,
+            detail={"detail": str(exc), "warehouse_candidates": exc.candidates},
+        ) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"发票生成失败：{exc}") from exc
 
