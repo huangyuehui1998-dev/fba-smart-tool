@@ -340,6 +340,14 @@ def _catalog_hints(sku: str) -> Dict[str, Any]:
     merged = invoice_hints_from_master(master)
     if master and master.get("unit_weight"):
         merged["单品净重"] = master["unit_weight"]
+    if master:
+        if master.get("product_cost_cny") not in (None, ""):
+            merged["product_cost_cny"] = master["product_cost_cny"]
+        if master.get("purchase_price") not in (None, ""):
+            merged["purchase_cny"] = master["purchase_price"]
+        if master.get("fob_unit_value") not in (None, ""):
+            merged["fob_value"] = master["fob_unit_value"]
+            merged["fob_currency"] = "USD"
     cn = lookup_customs_name(sku)
     if cn:
         merged.setdefault("中文品名", cn)
@@ -361,9 +369,128 @@ def _build_declare_elements(chinese: str, brand: str, model: str, material: str 
     return "|".join(parts)
 
 
+def attach_quote_snapshot(data: Any, raw_rows: List[Dict[str, Any]]) -> None:
+    """把报价时用的 5 个汇率字段写回报关数据，重新导出时沿用。"""
+    for row in raw_rows:
+        snap = row.get("_fx_snapshot") or {}
+        if not snap:
+            continue
+        if snap.get("fx_rate") not in (None, ""):
+            data.fx_rate = snap.get("fx_rate")
+            data.fx_rate_type = str(snap.get("fx_rate_type") or "")
+            data.fx_applicable_month = str(snap.get("fx_applicable_month") or "")
+            data.fx_source_url = str(snap.get("fx_source_url") or "")
+            data.fx_publish_date = str(snap.get("fx_publish_date") or "")
+        notice = str(snap.get("fob_source_notice") or "")
+        if notice and notice not in (data.remarks or ""):
+            data.remarks = f"{data.remarks}{notice}"
+            data.warnings = list(data.warnings or []) + [
+                {"code": "fob_retail_fallback", "skus": [], "message": notice}
+            ]
+        break
+
+
+def _apply_declared_quote(
+    rows: List[Dict[str, Any]],
+    *,
+    declaration_date: str = "",
+    fx_snapshot: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    """按口径走报价引擎。单个货值只进入历史申报价或领星售价，不再直接当单价。"""
+    marked = [row for row in rows if row.get("_quote_hints") is not None]
+    if not marked:
+        return None
+    from fba_tool.declared_value import FxRateRequired, MissingPrice, quote_declared_value
+    from fba_tool.fx_rates import snapshot_for_declaration
+
+    profile = _rule_profile()
+    basis = str(profile.get("declared_value_basis") or "retail")
+    month = ""
+    fx = fx_snapshot
+    if declaration_date:
+        try:
+            fx = snapshot_for_declaration(declaration_date, fx_snapshot=fx_snapshot)
+            month = str((fx or {}).get("fx_applicable_month") or declaration_date[:7])
+        except ValueError:
+            month = ""
+    lines = []
+    for row in marked:
+        hints = row.get("_quote_hints") or {}
+        source = str(hints.get("申报价来源") or "")
+        unit = hints.get("单个货值")
+        retail = hints.get("retail_usd")
+        legacy = hints.get("历史申报价") if hints.get("历史申报价") not in (None, "") else hints.get("legacy_usd")
+        manual_usd = None
+        if source.startswith("lingxing") and unit not in (None, ""):
+            retail = unit
+        elif source == "manual" and unit not in (None, ""):
+            manual_usd = unit
+        elif legacy in (None, "") and unit not in (None, "") and not source.startswith("lingxing"):
+            legacy = unit
+        master_cost = hints.get("product_cost_cny")
+        fob_value = hints.get("fob_value")
+        if fob_value in (None, "") and basis == "fob":
+            fob_value = manual_usd if manual_usd not in (None, "") else hints.get("手填申报价")
+        lines.append({
+            "sku": row.get("sku"),
+            "qty": row.get("qty") or 0,
+            "retail_usd": retail,
+            "legacy_usd": legacy,
+            "manual_usd": manual_usd,
+            "product_cost_cny": master_cost,
+            "purchase_cny": hints.get("purchase_cny") or hints.get("采购价"),
+            "fob_value": fob_value,
+            "fob_currency": hints.get("fob_currency") or "USD",
+        })
+    try:
+        quoted = quote_declared_value(lines, basis, fx, month=month or "0000-00")
+    except MissingPrice:
+        for row in marked:
+            row["unit_price"] = 0.0
+            row["amount"] = 0.0
+            row["price_source"] = "none"
+            row["raw_price"] = None
+            row.pop("_quote_hints", None)
+        return None
+    except FxRateRequired:
+        for row in marked:
+            row.pop("_quote_hints", None)
+        raise
+    notice = str(quoted.get("fob_source_notice") or "")
+    for row, item, line in zip(marked, quoted["lines"], lines):
+        original = line.get("retail_usd")
+        if original in (None, ""):
+            original = line.get("manual_usd")
+        if original in (None, ""):
+            original = line.get("legacy_usd")
+        row["unit_price"] = item["unit_usd"]
+        row["amount"] = item["amount_usd"]
+        row["price_source"] = item["price_source"]
+        row["raw_price"] = original if original not in (None, "") else item["unit_usd"]
+        if item.get("notice"):
+            row["price_notice"] = item["notice"]
+        row.pop("_quote_hints", None)
+    if notice:
+        quoted["fob_source_notice"] = notice
+    rows_meta = quoted
+    for row in marked:
+        row["_fx_snapshot"] = {
+            "fx_rate": quoted.get("fx_rate"),
+            "fx_rate_type": quoted.get("fx_rate_type"),
+            "fx_applicable_month": quoted.get("fx_applicable_month"),
+            "fx_source_url": quoted.get("fx_source_url"),
+            "fx_publish_date": quoted.get("fx_publish_date"),
+            "fob_source_notice": notice,
+        }
+    return rows_meta
+
+
 def _sku_rows_from_pairs(
     pairs: List[ShipmentPair],
     step1_rows: List[Dict[str, Any]],
+    *,
+    declaration_date: str = "",
+    fx_snapshot: Optional[Dict[str, Any]] = None,
 ) -> List[Dict[str, Any]]:
     weight_map = _weight_map_from_step1(step1_rows)
     rows: List[Dict[str, Any]] = []
@@ -410,19 +537,10 @@ def _sku_rows_from_pairs(
                 config_missing = f"{sku_str}（品类 {category}，HS {hs or '空'}）"
             else:
                 purpose = raw_purpose or "宠物用品"
-            # S2-fix D2：没有申报价时不再静默填 0，标记 none，由 build_customs_data 阻断导出
+            # 单个货值只作为报价引擎的输入，不再直接成为单价。
             unit_price = 0.0
             raw_price = None
             price_source = "none"
-            if hints.get("单个货值") not in (None, ""):
-                try:
-                    raw_price = float(hints["单个货值"])  # s2-final：原值留给提示判断，不先四舍五入
-                    unit_price = float(money_half_up(raw_price))
-                    price_source = str(hints.get("申报价来源") or "legacy")
-                except (TypeError, ValueError):
-                    unit_price = 0.0
-            if unit_price <= 0:
-                unit_price, price_source = 0.0, "none"
             legacy_price = hints.get("历史申报价")
             manual_price = hints.get("手填申报价")
             promo_price = hints.get("促销售价")
@@ -470,10 +588,12 @@ def _sku_rows_from_pairs(
                     "manual_price": manual_price,
                     "promo_price": promo_price,
                     "raw_price": raw_price,
+                    "_quote_hints": hints,
                     # 混装箱：同一箱可能出现在多行，合并时按箱去重（件数/毛重不重复计）
                     "box_weights": {f"{pair.shipment_id}#{b}": spec_map.get(b, 0) for b in boxes},
                 }
             )
+    _apply_declared_quote(rows, declaration_date=declaration_date, fx_snapshot=fx_snapshot)
     return rows
 
 

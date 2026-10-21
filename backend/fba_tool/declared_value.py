@@ -195,6 +195,10 @@ def _resolve_line(
         retail = _positive(line.get("retail_usd"))
         if retail is not None:
             return {"unit": retail, "currency": "USD", "price_source": "lingxing", "notices": []}
+        tried.append("manual")
+        manual = _positive(line.get("manual_usd"))
+        if manual is not None:
+            return {"unit": manual, "currency": "USD", "price_source": "manual", "notices": []}
         tried.append("legacy")
         legacy = _positive(line.get("legacy_usd"))
         if legacy is not None:
@@ -500,6 +504,41 @@ def import_retail_rows(
         "retail_source": source,
         "retail_synced_at": synced_at or _now(),
     }
+
+
+def persist_retail_import(
+    rows: Sequence[Dict[str, Any]],
+    *,
+    source: str,
+    fx_by_pair: Optional[Dict[str, Any]] = None,
+    ignored_products: bool = False,
+) -> Dict[str, Any]:
+    """按产品库匹配后写回售价。未匹配的 SKU 不新建。"""
+    from fba_tool.master_db import get_products_by_skus
+    from fba_tool.product_fields import SOURCE_LINGXING, set_product_fields
+
+    mskus = []
+    for row in rows:
+        msku = str(row.get("msku") or row.get("MSKU") or "").strip()
+        if msku:
+            mskus.append(msku)
+    products = get_products_by_skus(mskus)
+    result = import_retail_rows(rows, products, source=source, fx_by_pair=fx_by_pair)
+    for item in result["imported"]:
+        currency = str(item.get("currency") or "USD").upper()
+        set_product_fields(
+            item["msku"],
+            {
+                "listing_price": item["price_usd"],
+                "listing_price_currency": currency,
+                "retail_source": source,
+                "retail_synced_at": result["retail_synced_at"],
+            },
+            SOURCE_LINGXING,
+        )
+    if ignored_products:
+        result["warnings"] = list(result.get("warnings") or []) + ["products 参数已忽略，按产品库匹配"]
+    return result
 
 
 def resolve_retail(

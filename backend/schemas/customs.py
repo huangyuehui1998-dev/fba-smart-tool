@@ -17,6 +17,8 @@ class CustomsPreviewRequest(BaseModel):
     selected_shipment_ids: Optional[List[str]] = Field(
         None, description="本次报关勾选的 FBA 货件编号；None 或空=全选合并报关"
     )
+    declaration_date: str = ""
+    fx_snapshot: Optional[Dict[str, Any]] = None
 
 
 class CustomsExportRequest(BaseModel):
@@ -34,6 +36,8 @@ class CustomsExportRequest(BaseModel):
     export_format: str = Field("xlsx", description="xlsx | xls（v5 Q15 两种都支持）")
     confirm_weight_warnings: bool = False
     weight_rows: Optional[List[Dict[str, Any]]] = None
+    declaration_date: str = ""
+    fx_snapshot: Optional[Dict[str, Any]] = None
 
 
 class ExporterProfileBody(BaseModel):

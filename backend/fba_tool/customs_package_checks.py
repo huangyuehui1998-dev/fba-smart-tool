@@ -227,6 +227,8 @@ def build_customs_data(
     dates: Dict[str, str] | None = None,
     overrides: Dict[str, Any] | None = None,
     selected_shipment_ids: List[str] | None = None,
+    declaration_date: str = "",
+    fx_snapshot: Dict[str, Any] | None = None,
 ) -> CustomsPackageData:
     source_place = str(profile.get("domestic_source") or profile.get("signed_at") or "武汉").strip() or "武汉"
     selected = _normalize_selected_ids(selected_shipment_ids)
@@ -240,7 +242,9 @@ def build_customs_data(
                 or str(r["shipment_id"]).strip().upper() in selected
             ]
     else:
-        raw_rows = _sku_rows_from_pairs(pairs, step1_rows)
+        raw_rows = _sku_rows_from_pairs(
+            pairs, step1_rows, declaration_date=declaration_date, fx_snapshot=fx_snapshot,
+        )
 
     lines = _merge_rows(raw_rows, source_place)
     price_sources, warnings, blocking = price_checks(raw_rows)
@@ -334,6 +338,9 @@ def build_customs_data(
     data = apply_overrides(data, overrides)
     if not data.amount_in_words and data.total_amount:
         data.amount_in_words = amount_to_english_words(data.total_amount)
+    from fba_tool.customs_package import attach_quote_snapshot
+
+    attach_quote_snapshot(data, raw_rows)
     return data
 
 
@@ -418,6 +425,7 @@ def build_customs_from_tickets(
             elements, purpose, cfg_missing = _hs_fields(sku or chinese, category, hs, brand, material, purpose)
             unit = str(ln.get("unit") or hints.get("declare_unit") or hints.get("申报单位") or DEFAULT_UNIT).strip() or DEFAULT_UNIT
             price_source, raw_price, unit_price, amount = "none", None, 0.0, 0.0
+            quote_hints = None
             if ln.get("amount") not in (None, "") and qty:
                 amount_d = to_dec(ln["amount"])
                 raw_price = float(amount_d / qty)
@@ -426,12 +434,12 @@ def build_customs_from_tickets(
                 raw_price = float(to_dec(ln["unit_price"]))
                 amount_d = to_dec(ln["unit_price"]) * qty
                 price_source = "invoice"
-            elif hints.get("单个货值") not in (None, ""):
-                raw_price = float(to_dec(hints["单个货值"]))
-                amount_d = to_dec(hints["单个货值"]) * qty
-                price_source = str(hints.get("申报价来源") or "legacy")
+            elif hints:
+                amount_d = Decimal("0")
+                quote_hints = hints
             else:
                 amount_d = Decimal("0")
+                quote_hints = None
             if raw_price is not None and raw_price > 0:
                 unit_price = float(money_half_up(raw_price))
                 amount = float(amount_d)
@@ -458,6 +466,7 @@ def build_customs_from_tickets(
                 "price_source": price_source, "legacy_price": hints.get("历史申报价"),
                 "manual_price": hints.get("手填申报价"), "raw_price": raw_price,
                 "promo_price": hints.get("促销售价") if str(price_source).startswith("lingxing_") else None,
+                "_quote_hints": quote_hints,
             })
         alloc_rows = raw_rows[row_start:]
         if alloc_rows and not single_key and all(ln.get("box_count") in (None, "") for ln in lines):
@@ -466,6 +475,9 @@ def build_customs_from_tickets(
         msg = "单箱重超过 2 位小数，不做静默舍入，请修正后再导出：" + "、".join(bad_weights)
         blocking_extra.append({"code": "weight_precision", "skus": bad_weights, "message": msg})
 
+    from fba_tool.customs_package import _apply_declared_quote
+
+    _apply_declared_quote(raw_rows, declaration_date=str(dates.get("declare_date") or "") if dates else "")
     lines_out = _merge_rows(raw_rows, source_place)
     price_sources, warnings, blocking = price_checks(raw_rows)
     cfg = list(dict.fromkeys(str(r["config_missing"]) for r in raw_rows if r.get("config_missing")))
@@ -512,6 +524,9 @@ def build_customs_from_tickets(
         if rp.get(attr):
             setattr(data, attr, str(rp[attr]))
     data = apply_overrides(data, overrides)
+    from fba_tool.customs_package import attach_quote_snapshot
+
+    attach_quote_snapshot(data, raw_rows)
     return data
 
 

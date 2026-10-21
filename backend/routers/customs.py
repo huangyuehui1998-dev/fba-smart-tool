@@ -44,17 +44,36 @@ def _build_from_request(body: CustomsPreviewRequest | CustomsExportRequest) -> C
 
     profile = _resolve_profile(body.exporter_id)
     step1_rows = wf.get("input_rows") or wf.get("rows") or []
-    return build_customs_data(
-        pairs,
-        step1_rows,
-        profile,
-        source=body.source,
-        invoice_draft=body.invoice_draft,
-        order_no=body.order_no,
-        dates=body.dates,
-        overrides=body.overrides,
-        selected_shipment_ids=selected_ids,
-    )
+    dates = dict(body.dates or {})
+    declaration_date = str(getattr(body, "declaration_date", "") or dates.get("declare_date") or "")
+    if declaration_date:
+        dates["declare_date"] = declaration_date
+    fx_snapshot = getattr(body, "fx_snapshot", None) or wf.get("fx_snapshot")
+    try:
+        return build_customs_data(
+            pairs,
+            step1_rows,
+            profile,
+            source=body.source,
+            invoice_draft=body.invoice_draft,
+            order_no=body.order_no,
+            dates=dates,
+            overrides=body.overrides,
+            selected_shipment_ids=selected_ids,
+            declaration_date=declaration_date,
+            fx_snapshot=fx_snapshot if isinstance(fx_snapshot, dict) else None,
+        )
+    except Exception as exc:
+        from fba_tool.declared_value import FxRateRequired, MissingPrice
+
+        if isinstance(exc, MissingPrice):
+            raise HTTPException(
+                status_code=409,
+                detail={"code": exc.code, "message": exc.message, "missing": exc.missing},
+            ) from exc
+        if isinstance(exc, FxRateRequired):
+            raise HTTPException(status_code=409, detail={"code": exc.code, "message": exc.message}) from exc
+        raise
 
 
 @router.post("/api/customs/preview")
