@@ -114,6 +114,21 @@ export function updateCustomsRuleProfile(body: Record<string, unknown>) {
   return apiPostJson<Record<string, unknown>>("/api/master-data/customs-rule-profile", body);
 }
 
+export function fetchCustomsRuleProfile() {
+  return apiFetchJson<Record<string, unknown>>("/api/master-data/customs-rule-profile");
+}
+
+export function uploadRetailPrices(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  return apiUpload<{
+    parsed_count: number;
+    imported_count: number;
+    unmatched_count: number;
+    warnings?: string[];
+  }>("/api/master-data/retail-prices/upload", form);
+}
+
 export function patchMasterSkuField(sku: string, field: MasterPatchableField, value: unknown) {
   return apiPatchJson<MasterProduct>(`/api/master-data/sku/${encodeURIComponent(sku)}`, {
     field,

@@ -81,6 +81,14 @@ export interface CustomsPreviewPayload {
   workflow_json?: Record<string, unknown>;
   invoice_draft?: Record<string, unknown> | null;
   selected_shipment_ids?: string[];
+  declaration_date?: string;
+  fx_snapshot?: {
+    fx_rate?: number | null;
+    fx_rate_type?: string;
+    fx_applicable_month?: string;
+    fx_source_url?: string;
+    fx_publish_date?: string;
+  } | null;
 }
 
 export function previewCustoms(body: CustomsPreviewPayload) {

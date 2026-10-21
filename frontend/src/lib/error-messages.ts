@@ -20,6 +20,11 @@ const NETWORK_COPY: ErrorCopy = {
 };
 
 export const ERROR_MESSAGES: Record<string, ErrorCopy> = {
+  FX_RATE_REQUIRED: {
+    what: "这一申报月没有可用的计征汇率",
+    why: "汇率按报关完成申报之日所在月取值，缺了不能改用别的月份。",
+    action: "去录入汇率后再生成预览。",
+  },
   WEIGHT_CONFIRM_REQUIRED: {
     what: "毛重还没确认，导出被拦住了",
     why: "录入的单箱毛重和按单重算出的值不一致，或者混装箱超过了重量上限。",

@@ -16,6 +16,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useCustoms } from "@/hooks/use-customs";
 import { useWorkflow } from "@/context/workflow-context";
+import { ErrorNotice } from "@/components/feedback/error-notice";
 import { StaleDataBanner } from "@/components/stale-data-banner";
 import { Step5DeclaredValue } from "@/components/step5-declared-value";
 import { cn } from "@/lib/utils";
@@ -67,6 +68,9 @@ export function Step5Workspace({ onPrev }: { onPrev?: () => void }) {
     exportFormat,
     setExportFormat,
     error,
+    fxNotice,
+    declarationDate,
+    setDeclarationDate,
     canPreview,
     runPreview,
     runExport,
@@ -96,7 +100,27 @@ export function Step5Workspace({ onPrev }: { onPrev?: () => void }) {
   return (
     <div className="flex h-full flex-col gap-4 p-6 pb-24">
       <StaleDataBanner step={5} staleness={staleness} />
-      <Step5DeclaredValue data={data} onPatch={patchData} />
+      {fxNotice && (
+        <ErrorNotice
+          copy={fxNotice}
+          extra={
+            <button
+              type="button"
+              className="underline"
+              onClick={() => document.getElementById("fx-rate-input")?.focus()}
+            >
+              去录入汇率
+            </button>
+          }
+        />
+      )}
+      <Step5DeclaredValue
+        data={data}
+        onPatch={patchData}
+        declarationDate={declarationDate}
+        onDeclarationDate={setDeclarationDate}
+        onProfileSaved={() => void runPreview()}
+      />
       <div className="flex flex-wrap items-end gap-4">
         <div className="space-y-1.5">
           <Label>出口商</Label>
