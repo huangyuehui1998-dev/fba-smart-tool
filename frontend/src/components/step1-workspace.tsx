@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import {
   Sparkles,
   Download,
@@ -60,6 +61,8 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
   usePreventBrowserFileDrop();
 
   const [onlyIssues, setOnlyIssues] = useState(false);
+  const [fixRow, setFixRow] = useState<number | null>(null);
+  const [fixUnit, setFixUnit] = useState("");
   const {
     rows,
     text,
@@ -76,6 +79,7 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
     weightConfirmOpen,
     keepDeclaredWeights,
     useCalculatedWeights,
+    applyUnitWeightFix,
     parseAction,
     previewLoading,
     error,
@@ -401,6 +405,7 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
                             </div>
                           ) : (
                             <Input
+                              id={col.key === "unitKg" ? `step1-unit-kg-${i}` : undefined}
                               value={r[col.key]}
                               onChange={(e) => update(i, col.key, e.target.value)}
                               className="h-8 border-transparent bg-transparent px-2 text-xs shadow-none focus-visible:border-input focus-visible:bg-background"
@@ -460,7 +465,31 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
               {weightWarnings.map((w) => (
                 <li key={`${w.row_index}-${w.sku}`}>
                   {w.message}
-                  {w.requires_confirm && (
+                  {(w.kind === "suspect_unit_in_gross" || w.kind === "unit_weight_missing") && (
+                    <span className="ml-2 inline-flex gap-1">
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() => document.getElementById(`step1-unit-kg-${w.row_index}`)?.focus()}
+                      >
+                        去填单个重量
+                      </button>
+                      <button
+                        type="button"
+                        className="underline"
+                        onClick={() => {
+                          setFixRow(w.row_index);
+                          setFixUnit("");
+                        }}
+                      >
+                        一键修正
+                      </button>
+                      <button type="button" className="underline" onClick={keepDeclaredWeights}>
+                        保留录入值
+                      </button>
+                    </span>
+                  )}
+                  {w.requires_confirm && w.kind !== "suspect_unit_in_gross" && w.kind !== "unit_weight_missing" && (
                     <span className="ml-2 inline-flex gap-1">
                       <button
                         type="button"
@@ -482,11 +511,30 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
               <p className="mt-2 text-[11px] font-medium">这批录入的毛重还没确认。改动后会再要求确认一次。</p>
             )}
             <p className="mt-2 text-[11px] text-amber-800/90">
-              单重缺失时不会把空箱重当成建议值。导出前仍要确认 requires_confirm 的项。
+              单重缺失时不会把空箱重当成建议值。疑似单件重填进毛重时，阈值是内部经验值。内部阈值，非官方规定。导出前仍要确认。
             </p>
           </AlertDescription>
         </Alert>
       )}
+      <ConfirmDialog
+        open={fixRow != null}
+        title="按单重重算毛重"
+        description="输入单个重量后，单箱毛重改为 装量 × 单重 + 皮重。"
+        confirmLabel="写入"
+        onCancel={() => setFixRow(null)}
+        onConfirm={() => {
+          if (fixRow != null) applyUnitWeightFix(fixRow, fixUnit);
+          setFixRow(null);
+        }}
+      >
+        <Input
+          autoFocus
+          inputMode="decimal"
+          placeholder="单个重量 kg"
+          value={fixUnit}
+          onChange={(e) => setFixUnit(e.target.value)}
+        />
+      </ConfirmDialog>
 
       {validationErrors.length > 0 && (
         <Alert className="border-red-200 bg-red-50 text-red-900">

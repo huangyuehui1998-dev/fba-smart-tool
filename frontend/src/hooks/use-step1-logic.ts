@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 
 import { PREVIEW_DEBOUNCE_MS } from "@/constants";
 import { formatApiError } from "@/lib/format-api-error";
+import { grossFromUnitQtyTare } from "@/lib/suspect-gross";
 import { useWorkflow } from "@/context/workflow-context";
 import {
   computePreview,
@@ -333,6 +334,21 @@ export function useStep1Logic() {
     setAcknowledgedWeightHash(weightRowsHash(rows));
   }, [rows]);
 
+  const applyUnitWeightFix = useCallback((index: number, unitText: string) => {
+    const unit = Number(unitText);
+    if (!Number.isFinite(unit) || unit <= 0) return;
+    markStale("input");
+    setBoxLocked(false);
+    setRows((current) =>
+      current.map((row, i) => {
+        if (i !== index) return row;
+        const gross = grossFromUnitQtyTare(Number(row.perBox) || 0, unit, Number(row.emptyKg) || 0);
+        return { ...row, unitKg: unitText.trim(), grossKg: String(gross) };
+      }),
+    );
+    setAcknowledgedWeightHash(null);
+  }, [markStale, setBoxLocked, setRows]);
+
   const useCalculatedWeights = useCallback(() => {
     setRows((current) =>
       current.map((row, index) => {
@@ -361,6 +377,7 @@ export function useStep1Logic() {
     weightHash,
     keepDeclaredWeights,
     useCalculatedWeights,
+    applyUnitWeightFix,
     parseAction,
     previewLoading,
     error,

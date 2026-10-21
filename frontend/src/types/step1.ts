@@ -67,7 +67,8 @@ export interface GrossWeightWarning {
   diff_kg: number | null;
   deviation_pct: number | null;
   message: string;
-  kind?: "unit_weight_missing" | "gross_missing" | "gross_mismatch" | "mixed_over_limit";
+  kind?: "unit_weight_missing" | "suspect_unit_in_gross" | "gross_missing" | "gross_mismatch" | "mixed_over_limit";
+  threshold_note?: string;
   requires_confirm?: boolean;
   suggested_gross_kg?: number | null;
 }
