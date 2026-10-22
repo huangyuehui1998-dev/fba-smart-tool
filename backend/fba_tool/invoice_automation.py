@@ -886,7 +886,7 @@ def export_invoice_xlsx(
         for f in draft.fields:
             if not f.cell or f.value in (None, ""):
                 continue
-            cell_writes.append({"cell": f.cell, "value": f.value})
+            cell_writes.append({"cell": f.cell, "value": f.value, "field_key": f.key})
 
     if draft.is_table_mode or draft.table_cells:
         from fba_tool.invoice_table import clear_invoice_table_data_zone, detect_invoice_table_layout

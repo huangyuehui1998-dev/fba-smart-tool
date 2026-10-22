@@ -429,6 +429,34 @@ def _csv_sku_totals(box_items) -> tuple[dict[str, int], dict[str, str]]:
     return totals, alias
 
 
+def sku_qty_tokens(box_items) -> set[str]:
+    """每个 SKU 的数量加总，写成整数字符串。52.0 记成 52。
+
+    这是非 send 货代的对照。不是单箱数量，也不是整票总数。
+    """
+    totals, _alias = _csv_sku_totals(box_items)
+    return {str(total) for total in totals.values() if total > 0}
+
+
+def per_box_qty_tokens(box_items) -> set[str]:
+    """单箱数量集合，例如 {"4"}。不能拿它当发票对照。"""
+    if box_items is None or box_items.empty or "数量" not in box_items.columns:
+        return set()
+    return {str(qty) for value in box_items["数量"] if (qty := _whole_qty(value))}
+
+
+def grand_qty_token(box_items) -> str:
+    """整票总数。不能拿它当发票对照。"""
+    if box_items is None or box_items.empty or "数量" not in box_items.columns:
+        return "0"
+    total = 0
+    for value in box_items["数量"]:
+        qty = _whole_qty(value)
+        if qty:
+            total += qty
+    return str(total)
+
+
 def _qty_kind(header: str) -> str | None:
     from fba_tool.invoice_templates import norm
 
@@ -702,26 +730,29 @@ def _shared_address_candidates(forwarder_id: str, ship_to: str, csv_code: str) -
     return None
 
 
-def _compare_original_invoice(forwarder_id: str) -> bool:
-    """目录里的原发票是 SEND 格式。只拿来对照 send。
+def _matches_sku_qty_tokens(data: bytes, box_items) -> tuple[bool, str]:
+    """导出或原发票都按 sku_qty_tokens 对照。单箱数和整票总数对上也不算过。
 
-    九方、琪珞、德速按各自导出里每个 SKU 的加总数量对 CSV，不再用这份 SEND 发票当标准。
+    格子里可以是单箱数量乘箱数（琪珞、德速），或 52.0 这种浮点合计。
+    对照的集合仍是每个 SKU 的加总，不是 {"4"}，也不是整票一个数。
     """
-    return forwarder_id == "send"
-
-
-def test_non_send_forwarders_are_not_scored_against_the_send_invoice():
-    """非 send 货代的数量标准是 CSV 里的 SKU 合计，不是 SEND 原发票。"""
-    assert _compare_original_invoice("send")
-    for forwarder_id in ("jiufang", "qiluo", "qiluo_t5", "qiluo_t6", "deshu"):
-        assert not _compare_original_invoice(forwarder_id)
+    expected, alias = _csv_sku_totals(box_items)
+    tokens = sku_qty_tokens(box_items)
+    per_box = per_box_qty_tokens(box_items)
+    grand = grand_qty_token(box_items)
+    if tokens != {str(value) for value in expected.values() if value > 0}:
+        return False, f"sku_qty_tokens {tokens} 必须是每个 SKU 的加总"
+    ok, detail = _qty_compare(data, expected, alias)
+    if not ok:
+        return False, f"应按 sku_qty_tokens {tokens} 对照，不是单箱 {per_box}，也不是整票 {grand}。{detail}"
+    return True, ""
 
 
 def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tmp_path):
     """真实目录在时先导入仓库地址库，再跑六个货代的自动填写→导出。
 
-    每个货代的导出都按 CSV 里每个 SKU 的合计对数量（52.0 记成 52）。
-    SEND 格式原发票只对照 send；非 send 不再拿那份发票当标准。
+    每个货代的导出和原发票都按 sku_qty_tokens 对照：每个 SKU 的数量加总，52.0 记成 52。
+    单箱数（例如 4）和整票总数（例如 84）对上不算过。
     一个地址对应多个仓库、货件名称里的仓码又不在其中（第 14 批 GYR2 / LGB8 同城多仓就是这种）时，
     九方等要写地址的货代返回 422 和候选仓库列表，不按 200 失败。
     """
@@ -775,8 +806,12 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
                     continue
                 upsert_product(seed)
                 set_product_fields(seed["sku"], {"listing_price": 10, "listing_price_currency": "USD"}, SOURCE_MANUAL)
-            expected, alias = _csv_sku_totals(ship.box_items)
+            expected, _alias = _csv_sku_totals(ship.box_items)
+            tokens = sku_qty_tokens(ship.box_items)
+            per_box = per_box_qty_tokens(ship.box_items)
+            grand = grand_qty_token(ship.box_items)
             assert expected, f"{path.name} 没有正的 SKU 数量"
+            assert tokens == {str(value) for value in expected.values()}
             api_code = _api_warehouse_code(raw)
             for forwarder_id in FORWARDERS:
                 generated = client.post(
@@ -820,23 +855,21 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
                 assert exported.status_code == 200, f"{batch} {path.name} {forwarder_id} export {exported.text[:300]}"
                 texts = _workbook_texts(exported.content)
                 assert ship.shipment_id in texts, f"{forwarder_id} 导出没有货件号 {ship.shipment_id}"
-                export_ok, export_detail = _qty_compare(exported.content, expected, alias)
+                export_ok, export_detail = _matches_sku_qty_tokens(exported.content, ship.box_items)
                 assert export_ok, (
-                    f"{forwarder_id} 导出应按每个 SKU 的合计 {expected} 比对，"
-                    f"52.0 记成 52，不用单箱数量或整票合计做字符串匹配。{export_detail}"
+                    f"{forwarder_id} 导出应按 sku_qty_tokens {tokens} 对照（每个 SKU 加总，52.0 记成 52），"
+                    f"不要单箱数 {per_box} 或整票总数 {grand}。{export_detail}"
                 )
                 pipeline.append((batch, path.name, forwarder_id, ship.shipment_id))
-                if not _compare_original_invoice(forwarder_id):
-                    continue
                 for invoice in invoices:
                     if ship.shipment_id and ship.shipment_id in invoice.name.upper().replace("-", ""):
                         invoice_bytes = invoice.read_bytes()
                         invoice_texts = _workbook_texts(invoice_bytes)
                         assert ship.shipment_id in invoice_texts
-                        invoice_ok, invoice_detail = _qty_compare(invoice_bytes, expected, alias)
+                        invoice_ok, invoice_detail = _matches_sku_qty_tokens(invoice_bytes, ship.box_items)
                         assert invoice_ok, (
-                            f"{invoice.name} 和 CSV 数量对不上：应按每个 SKU 的合计 {expected}，"
-                            f"发票里的 52.0 记成 52，而不是去对字符串 \"4\" 或 \"84\"。{invoice_detail}"
+                            f"{invoice.name} 和 CSV 数量对不上：应按 sku_qty_tokens {tokens}，"
+                            f"发票里的 52.0 记成 52，不是单箱 {per_box}，也不是整票 {grand}。{invoice_detail}"
                         )
                         compared.append((forwarder_id, ship.shipment_id, invoice.name))
     assert pipeline
@@ -998,14 +1031,18 @@ def _grid_xlsx(rows: list[list], *, float_cells: dict[int, str] | None = None) -
 
 
 def test_float_qty_compares_sku_totals_not_per_box_strings():
-    """原发票把 SKU 合计存成 52.0 / 32.0。不能再和单箱 "4" 或整票 "84" 做字符串交。"""
+    """原发票把 SKU 合计存成 52.0 / 32.0。对照集合是 sku_qty_tokens，不是单箱 "4" 或整票 "84"。"""
     import pandas as pd
 
     rows = [{"SKU": "SKU-A", "FNSKU": "X00TESTA", "数量": 4.0} for _ in range(13)]
     rows += [{"SKU": "SKU-B", "FNSKU": "X00TESTB", "数量": 4.0} for _ in range(8)]
-    expected, alias = _csv_sku_totals(pd.DataFrame(rows))
+    frame = pd.DataFrame(rows)
+    expected, _alias = _csv_sku_totals(frame)
     assert expected == {"SKU-A": 52, "SKU-B": 32}
     assert sum(expected.values()) == 84
+    assert sku_qty_tokens(frame) == {"52", "32"}
+    assert per_box_qty_tokens(frame) == {"4"}
+    assert grand_qty_token(frame) == "84"
 
     invoice = _grid_xlsx(
         [
@@ -1035,11 +1072,13 @@ def test_float_qty_compares_sku_totals_not_per_box_strings():
     assert "52.0" in invoice_texts and "32.0" in invoice_texts
     assert not ({"4"} & invoice_texts)
     assert "84" not in invoice_texts
+    # 52.0 的文本不是 "52"。对照认的是 sku_qty_tokens，不和单元格字符串求交。
+    assert not (sku_qty_tokens(frame) & invoice_texts)
     for blob in (invoice, per_box, per_box_by_sku):
         texts = _workbook_texts(blob)
         assert not ({"4"} & texts)
         assert "84" not in texts
-        ok, detail = _qty_compare(blob, expected, alias)
+        ok, detail = _matches_sku_qty_tokens(blob, frame)
         assert ok, detail
 
     text_qty = _grid_xlsx([
@@ -1047,8 +1086,25 @@ def test_float_qty_compares_sku_totals_not_per_box_strings():
         ["SKU-A", "52.0"],
         ["SKU-B", "32.0"],
     ])
-    ok, detail = _qty_compare(text_qty, expected, alias)
+    ok, detail = _matches_sku_qty_tokens(text_qty, frame)
     assert ok, detail
+
+    bare_per_box = _grid_xlsx([
+        ["FBAID*", "单箱内数量*"],
+        ["FBAFLOAT", 4],
+        ["FBAFLOAT", 4],
+    ])
+    ok, detail = _matches_sku_qty_tokens(bare_per_box, frame)
+    assert not ok, detail
+    assert "sku_qty_tokens" in detail and "单箱" in detail
+
+    grand_only = _grid_xlsx([
+        ["品名", "总数量"],
+        ["物品", 84],
+    ])
+    ok, detail = _matches_sku_qty_tokens(grand_only, frame)
+    assert not ok, detail
+    assert "sku_qty_tokens" in detail and "整票" in detail
 
 
 def _float_forwarder_csv() -> bytes:
@@ -1102,8 +1158,11 @@ def test_each_forwarder_export_matches_float_invoice_sku_totals(monkeypatch, tmp
     init_master_db()
     raw = _float_forwarder_csv()
     ship = parse_csv_shipment(raw, file_name="float.csv", allow_unassigned_fba=True)
-    expected, alias = _csv_sku_totals(ship.box_items)
+    expected, _alias = _csv_sku_totals(ship.box_items)
     assert expected == {"FLOAT-A": 8, "FLOAT-B": 12}
+    assert sku_qty_tokens(ship.box_items) == {"8", "12"}
+    assert per_box_qty_tokens(ship.box_items) == {"4"}
+    assert grand_qty_token(ship.box_items) == "20"
     invoice = _grid_xlsx(
         [
             ["箱号 Box No", "SKU", "SKU个数\nTotal Qty"],
@@ -1116,7 +1175,7 @@ def test_each_forwarder_export_matches_float_invoice_sku_totals(monkeypatch, tmp
     assert "8.0" in invoice_texts and "12.0" in invoice_texts
     assert not ({"4"} & invoice_texts)
     assert "20" not in invoice_texts
-    ok, detail = _qty_compare(invoice, expected, alias)
+    ok, detail = _matches_sku_qty_tokens(invoice, ship.box_items)
     assert ok, detail
 
     library = _warehouse_xlsx([
@@ -1173,8 +1232,11 @@ def test_each_forwarder_export_matches_float_invoice_sku_totals(monkeypatch, tmp
                 },
             )
             assert exported.status_code == 200, f"{forwarder_id} export {exported.text[:300]}"
-            export_ok, export_detail = _qty_compare(exported.content, expected, alias)
-            assert export_ok, f"{forwarder_id} {export_detail}"
+            export_ok, export_detail = _matches_sku_qty_tokens(exported.content, ship.box_items)
+            assert export_ok, (
+                f"{forwarder_id} 导出应按 sku_qty_tokens {sku_qty_tokens(ship.box_items)} 对照，"
+                f"不要单箱数或整票总数。{export_detail}"
+            )
     finally:
         delete_product_by_sku("FLOAT-A")
         delete_product_by_sku("FLOAT-B")

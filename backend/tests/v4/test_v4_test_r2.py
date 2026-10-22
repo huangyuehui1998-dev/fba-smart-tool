@@ -1209,6 +1209,181 @@ def test_direct_api_without_field_key_still_coerces_qiluo_columns():
         delete_product_by_sku(sku)
 
 
+def _xlsx_bytes(book) -> bytes:
+    buf = io.BytesIO()
+    book.save(buf)
+    book.close()
+    return buf.getvalue()
+
+
+def test_column_fallback_coerces_when_header_is_blocked_or_merged():
+    """无 field_key、只给单元格时按列兜底。中间夹了说明、或表头是合并格，数量仍写成 int。
+
+    HS、邮编、电话保持文本。8,12 这种逗号分开的多个数量不能变成 812。箱序号保持文本。
+    """
+    from fba_tool.univer_apply import apply_cell_writes
+
+    noted = openpyxl.Workbook()
+    sheet = noted.active
+    for col, text in enumerate(
+        ("箱序号*", "海关编码*", "单箱内数量*", "申报单价 (USD)*", "单件实重*", "长*", "宽*", "高*", "邮编", "电话"),
+        start=1,
+    ):
+        sheet.cell(1, col, text)
+    sheet["C2"] = "见说明"
+    noted_bytes = _xlsx_bytes(noted)
+    noted_out = apply_cell_writes(
+        noted_bytes,
+        [
+            {"cell": "C3", "value": "4.0"},
+            {"cell": "D3", "value": "39.99"},
+            {"cell": "D4", "value": "1,234.50"},
+            {"cell": "B3", "value": "9507100090"},
+            {"cell": "E3", "value": "1.2"},
+            {"cell": "A3", "value": "1-2"},
+            {"cell": "A4", "value": "1,2"},
+            {"cell": "I2", "value": "00000"},
+            {"cell": "J2", "value": "02158881234"},
+        ],
+    )
+    wb = _book(noted_out)
+    try:
+        ws = wb.active
+        _assert_numeric(ws["C3"], integer=True, value=4)
+        _assert_numeric(ws["D3"], value=39.99)
+        _assert_numeric(ws["D4"], value=1234.5)
+        _assert_numeric(ws["E3"], value=1.2)
+        assert isinstance(ws["B3"].value, str) and ws["B3"].value == "9507100090"
+        assert isinstance(ws["A3"].value, str) and ws["A3"].value == "1-2"
+        assert isinstance(ws["A4"].value, str) and ws["A4"].value == "1,2"
+        assert isinstance(ws["I2"].value, str) and ws["I2"].value == "00000"
+        assert isinstance(ws["J2"].value, str) and ws["J2"].value == "02158881234"
+    finally:
+        wb.close()
+
+    merged = openpyxl.Workbook()
+    sheet = merged.active
+    sheet["A1"] = "箱序号*"
+    sheet["B1"] = "海关编码*"
+    sheet["C1"] = "单箱内数量*"
+    sheet.merge_cells("C1:D1")
+    sheet["E1"] = "申报单价 (USD)*"
+    sheet["F1"] = "单件实重*"
+    sheet["G1"] = "长*"
+    sheet["H1"] = "宽*"
+    merged_bytes = _xlsx_bytes(merged)
+    merged_out = apply_cell_writes(
+        merged_bytes,
+        [
+            {"cell": "D2", "value": "4.0"},
+            {"cell": "E2", "value": "39.99"},
+            {"cell": "B2", "value": "9507100090"},
+            {"cell": "A2", "value": "1"},
+        ],
+    )
+    wb = _book(merged_out)
+    try:
+        ws = wb.active
+        _assert_numeric(ws["D2"], integer=True, value=4)
+        _assert_numeric(ws["E2"], value=39.99)
+        assert isinstance(ws["B2"].value, str) and ws["B2"].value == "9507100090"
+        assert isinstance(ws["A2"].value, str) and ws["A2"].value == "1"
+    finally:
+        wb.close()
+
+
+def test_qiluo_t5_export_without_field_key_coerces_by_column():
+    """琪珞 T5 的 fields 只有单元格坐标时，个数和货值按列表头转数值。HS、邮编、电话和 8,12 保持文本。"""
+    from fastapi.testclient import TestClient
+
+    from fba_tool import invoice_step45
+    from fba_tool.master_db import delete_product_by_sku
+    from main import app
+
+    sku, fnsku, asin = "B13-T5COL", "X00TESTT5C", "B0B13T5C01"
+    delete_product_by_sku(sku)
+    _seed(sku, fnsku, asin, "型号戊", listing_price=39.99)
+    raw = _csv("FBA13T5C1", sku, fnsku, asin)
+    client = TestClient(app)
+    try:
+        generated = client.post(
+            "/api/invoice/generate",
+            json={
+                "shipment_id": "FBA13T5C1",
+                "forwarder_id": "qiluo_t5",
+                "csv_base64": base64.b64encode(raw).decode(),
+            },
+        )
+        assert generated.status_code == 200, generated.text[:400]
+        body = generated.json()
+        invoice_step45._CACHE.clear()
+        exported = client.post(
+            "/api/export_invoice",
+            json={
+                "template_hash": body["template_hash"],
+                "forwarder_id": "qiluo_t5",
+                "shipment_id": body["shipment_id"],
+                "warehouse_code": body["warehouse_code"],
+                "template_sheet": body["template_sheet"],
+                "fields": [
+                    {"cell": "H10", "value": "4.0"},
+                    {"cell": "I10", "key": "I10", "value": "39.99"},
+                    {"cell": "A10", "value": "9507100090"},
+                    {"cell": "F7", "value": "00000"},
+                    {"cell": "E7", "value": "02158881234"},
+                    {"cell": "H11", "value": "8,12"},
+                    {"cell": "J10", "value": "1.0"},
+                    {"cell": "K10", "value": "10.5"},
+                ],
+            },
+        )
+        assert exported.status_code == 200, exported.text[:400]
+        wb = _book(exported.content)
+        try:
+            ws = wb.worksheets[0]
+            _assert_numeric(ws["H10"], integer=True, value=4)
+            _assert_numeric(ws["I10"], value=39.99)
+            _assert_numeric(ws["J10"], integer=True, value=1)
+            _assert_numeric(ws["K10"], value=10.5)
+            assert isinstance(ws["A10"].value, str) and ws["A10"].value == "9507100090"
+            assert isinstance(ws["F7"].value, str) and ws["F7"].value == "00000"
+            assert isinstance(ws["E7"].value, str) and ws["E7"].value == "02158881234"
+            assert isinstance(ws["H11"].value, str) and ws["H11"].value == "8,12"
+        finally:
+            wb.close()
+    finally:
+        delete_product_by_sku(sku)
+
+
+def test_qiluo_t6_box_index_stays_text_when_export_has_no_field_key():
+    """箱序号列即使请求里的 key 是单元格坐标，也不要被上方的预报件数转成数值。"""
+    from fba_tool.forwarder_registry import get_template_bytes
+    from fba_tool.univer_apply import apply_cell_writes
+
+    template = get_template_bytes("qiluo_t6")
+    out = apply_cell_writes(
+        template,
+        [
+            {"cell": "A14", "key": "A14", "value": "1"},
+            {"cell": "A15", "value": "1,2"},
+            {"cell": "F14", "value": "4.0"},
+            {"cell": "G14", "value": "39.99"},
+            {"cell": "L14", "value": "9507100090"},
+        ],
+        "发票",
+    )
+    wb = _book(out)
+    try:
+        ws = wb["发票"]
+        assert isinstance(ws["A14"].value, str) and ws["A14"].value == "1"
+        assert isinstance(ws["A15"].value, str) and ws["A15"].value == "1,2"
+        _assert_numeric(ws["F14"], integer=True, value=4)
+        _assert_numeric(ws["G14"], value=39.99)
+        assert isinstance(ws["L14"].value, str) and ws["L14"].value == "9507100090"
+    finally:
+        wb.close()
+
+
 def _cell_color(color) -> tuple | None:
     if color is None:
         return None

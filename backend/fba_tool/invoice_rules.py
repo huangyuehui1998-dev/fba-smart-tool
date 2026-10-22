@@ -146,16 +146,34 @@ def header_number_kind(text: Any) -> str:
         if any(bad in key for bad in ("重量", "货值", "金额", "单价", "价格", "编码", "邮编", "电话")):
             return ""
         return "qty"
+    # 「个数(多个用,隔开)」这种带说明的列也是数量。箱序号不含「个数」，仍保持文本。
+    if "个数" in key and not any(bad in key for bad in ("重量", "货值", "金额", "单价", "价格", "编码", "邮编", "电话")):
+        return "qty"
     if any(bit in key for bit in _FLOAT_HEADER_BITS) or key in {"weight", "kg"}:
         return "float"
     return ""
 
 
+def _cell_ref_key(field_key: str | None) -> str:
+    """单元格坐标不是字段名。F2 这种 key 要按列兜底，不能当成已经知道类型。"""
+    key = str(field_key or "").strip()
+    if re.fullmatch(r"[A-Za-z]{1,3}\d+", key):
+        return ""
+    return key
+
+
+def _comma_list(value: Any) -> bool:
+    """8,12 是多个数量，不是千分位。转成数值会变成 812。"""
+    if not isinstance(value, str) or not re.search(r"[,，]", value):
+        return False
+    return re.fullmatch(r"[+-]?\d{1,3}([,，]\d{3})+(\.\d+)?", value.strip()) is None
+
+
 def coerce_export_number(value: Any, *, field_key: str | None = None, header: Any = None) -> Any:
     """导出写入前把数量/价格/重量/尺寸从文本转成数值。HS、邮编、电话保持原文本。"""
-    if value in (None, ""):
+    if value in (None, "") or _comma_list(value):
         return value
-    key = str(field_key or "").strip()
+    key = _cell_ref_key(field_key)
     if key in TEXT_KEEP_FIELDS:
         return value
     if key in QTY_INT_FIELDS:

@@ -211,7 +211,14 @@ def _keep_numeric(cell: Any, value: Any) -> Any:
 def _cell_text(ws: Worksheet, row: int, col: int) -> str:
     cell = ws.cell(row, col)
     if isinstance(cell, MergedCell):
-        return ""
+        for merged in ws.merged_cells.ranges:
+            if merged.min_row <= row <= merged.max_row and merged.min_col <= col <= merged.max_col:
+                cell = ws.cell(merged.min_row, merged.min_col)
+                break
+        else:
+            return ""
+        if isinstance(cell, MergedCell):
+            return ""
     value = cell.value
     if value in (None, ""):
         return ""
@@ -231,10 +238,46 @@ def _plain_number(text: str) -> bool:
     return True
 
 
+def _table_column_header(ws: Worksheet, row: int, col: int) -> str:
+    """这一列在表头行上的名字。数据格和表头之间夹了说明时，最近一行对不上也还能按列认。
+
+    表头必须在数据格上面。琪珞 T6 的「预报件数」在装箱表上方，不能拿来认箱序号。
+    """
+    from fba_tool.invoice_rules import header_number_kind
+
+    cached = getattr(ws, "_fba_table_header", None)
+    if cached is None:
+        best_row = 0
+        best_score = 0
+        best: Dict[int, str] = {}
+        max_row = min(ws.max_row or 1, 40)
+        max_col = min(ws.max_column or 1, 40)
+        for header_row in range(1, max_row + 1):
+            headers: Dict[int, str] = {}
+            score = 0
+            for header_col in range(1, max_col + 1):
+                text = _cell_text(ws, header_row, header_col)
+                if not text or _plain_number(text):
+                    continue
+                headers[header_col] = text
+                if header_number_kind(text):
+                    score += 1
+            if score > best_score:
+                best_score = score
+                best_row = header_row
+                best = headers
+        cached = {"row": best_row, "headers": best} if best_score >= 2 else {"row": 0, "headers": {}}
+        setattr(ws, "_fba_table_header", cached)
+    if cached["row"] <= 0 or cached["row"] >= row:
+        return ""
+    return str(cached["headers"].get(col) or "")
+
+
 def column_context_label(ws: Worksheet, row: int, col: int) -> str:
-    """这一格正上方最近的表头；表头对不上时再看同一行左侧的字段名。
+    """这一格正上方最近的表头；对不上时按这一列的表头兜底，再看左侧字段名。
 
     只跳过空格和纯数字，避免把更上面另一块区域的「预报件数」错当成箱序号的表头。
+    中间夹了「见说明」、或表头是合并单元格时，仍用这一列自己的表头。
     """
     from fba_tool.invoice_rules import header_number_kind
 
@@ -247,6 +290,9 @@ def column_context_label(ws: Worksheet, row: int, col: int) -> str:
         break
     if header_number_kind(header):
         return header
+    column_header = _table_column_header(ws, row, col)
+    if header_number_kind(column_header):
+        return column_header
     if col > 1:
         left = _cell_text(ws, row, col - 1)
         if left and not _plain_number(left) and header_number_kind(left):
@@ -255,9 +301,13 @@ def column_context_label(ws: Worksheet, row: int, col: int) -> str:
 
 
 def coerce_sheet_value(ws: Worksheet, row: int, col: int, value: Any, field_key: str = "") -> Any:
-    from fba_tool.invoice_rules import coerce_export_number
+    from fba_tool.invoice_rules import _cell_ref_key, coerce_export_number
 
-    return coerce_export_number(value, field_key=field_key, header=column_context_label(ws, row, col))
+    return coerce_export_number(
+        value,
+        field_key=_cell_ref_key(field_key),
+        header=column_context_label(ws, row, col),
+    )
 
 
 def _stored_type_matches(current: Any, value: Any) -> bool:
