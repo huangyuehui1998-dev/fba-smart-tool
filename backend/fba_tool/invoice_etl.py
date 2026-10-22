@@ -69,6 +69,48 @@ def _pick_source(step12: Any, step4: Any, catalog: Any) -> Tuple[Any, str]:
     return "", "red"
 
 
+def _string_dtype(dtype) -> bool:
+    name = str(getattr(dtype, "name", "") or dtype)
+    return name in {"str", "string"}
+
+
+def _numeric_cell(column: str, value: Any) -> Any:
+    """空值留空。数字保持数值：整数数量写成 int，价格和尺寸保持 float。"""
+    if isinstance(value, bool) or value in (None, ""):
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    if isinstance(value, str):
+        from fba_tool.invoice_rules import to_number
+
+        parsed = to_number(value)
+        if isinstance(parsed, bool) or not isinstance(parsed, (int, float)):
+            return None
+        value = parsed
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    if column in {"qty_per_box", "qty", "total_qty", "box_count", "pcs_per_set"} and number.is_integer():
+        return int(number)
+    return number
+
+
+def _put_numeric(df: pd.DataFrame, idx, column: str, value: Any) -> None:
+    """数值列用 object 承接，避免 pandas 3 先看到空字符串就把列收成 str。"""
+    value = _numeric_cell(column, value)
+    if column not in df.columns:
+        df[column] = pd.Series([None] * len(df), index=df.index, dtype=object)
+    elif _string_dtype(df[column].dtype):
+        df[column] = df[column].astype(object)
+    df.at[idx, column] = value
+
+
 def _format_box_range(boxes: List[int], separator: str = "-") -> str:
     if not boxes:
         return ""
@@ -143,7 +185,7 @@ def join_master_db(df: pd.DataFrame, warnings: List[str]) -> pd.DataFrame:
         "master_model",
     ]
     for col in master_cols:
-        df[col] = None
+        df[col] = pd.Series([None] * len(df), index=df.index, dtype=object)
 
     from fba_tool.product_fields import resolve_declared_price
 
@@ -163,7 +205,7 @@ def join_master_db(df: pd.DataFrame, warnings: List[str]) -> pd.DataFrame:
         df.at[idx, "master_material"] = master.get("material") or ""
         df.at[idx, "master_purpose"] = master.get("purpose") or ""
         price, _source = resolve_declared_price(master)
-        df.at[idx, "master_declared_price"] = price
+        _put_numeric(df, idx, "master_declared_price", price)
         df.at[idx, "master_length_cm"] = _to_float(
             master.get("carton_length") or master.get("unit_length")
         )
@@ -216,46 +258,52 @@ def priority_fallback(
         df.at[idx, "brand"], _ = _pick_source("", "", row.get("master_brand"))
         df.at[idx, "material"], _ = _pick_source("", "", row.get("master_material"))
         df.at[idx, "purpose"], _ = _pick_source("", "", row.get("master_purpose"))
-        df.at[idx, "declared_price"], _ = _pick_source("", "", row.get("master_declared_price"))
+        declared_price, _ = _pick_source("", "", row.get("master_declared_price"))
+        _put_numeric(df, idx, "declared_price", declared_price)
 
         qty_step4 = _to_float(row.get("qty"))
         qty_step12 = wf.per_box if wf else None
-        df.at[idx, "qty_per_box"], _ = _pick_source(qty_step12, qty_step4, "")
+        qty_per_box, _ = _pick_source(qty_step12, qty_step4, "")
+        _put_numeric(df, idx, "qty_per_box", qty_per_box)
 
         len_s12 = wf.length_cm if wf else None
         len_fwd = wf.length_cm_fwd if wf else None
-        df.at[idx, "length_cm"], _ = _pick_source(
+        length_cm, _ = _pick_source(
             len_s12 or len_fwd,
             length_step4,
             row.get("master_length_cm"),
         )
+        _put_numeric(df, idx, "length_cm", length_cm)
         wid_s12 = wf.width_cm if wf else None
         wid_fwd = wf.width_cm_fwd if wf else None
-        df.at[idx, "width_cm"], _ = _pick_source(
+        width_cm, _ = _pick_source(
             wid_s12 or wid_fwd,
             width_step4,
             row.get("master_width_cm"),
         )
+        _put_numeric(df, idx, "width_cm", width_cm)
         ht_s12 = wf.height_cm if wf else None
         ht_fwd = wf.height_cm_fwd if wf else None
-        df.at[idx, "height_cm"], _ = _pick_source(
+        height_cm, _ = _pick_source(
             ht_s12 or ht_fwd,
             height_step4,
             row.get("master_height_cm"),
         )
+        _put_numeric(df, idx, "height_cm", height_cm)
 
         unit_w_step12 = wf.unit_kg if wf else None
         unit_w_fwd = wf.unit_weight_kg if wf else None
         unit_w_step4 = None
         if weight_step4 and qty_step4:
             unit_w_step4 = round(weight_step4 / qty_step4, 3)
-        df.at[idx, "unit_weight_kg"], _ = _pick_source(
+        unit_weight_kg, _ = _pick_source(
             unit_w_step12 or unit_w_fwd,
             unit_w_step4,
             row.get("master_unit_kg"),
         )
+        _put_numeric(df, idx, "unit_weight_kg", unit_weight_kg)
         df.at[idx, "model"] = str(row.get("master_model") or "").strip()
-        df.at[idx, "box_weight_kg"] = weight_step4
+        _put_numeric(df, idx, "box_weight_kg", weight_step4)
 
     return df
 
@@ -519,5 +567,8 @@ def run_invoice_etl(
         ]
         missing = [sku for sku in missing if sku]
         if missing:
-            warnings.append("申报单价为空：" + "、".join(missing) + "。请填写售价后再导出")
+            from fba_tool.invoice_rules import InvoiceBlocked
+
+            message = "以下 SKU 没有申报价，不能导出：" + "、".join(missing) + "。请在产品库导入领星售价或手填申报价。"
+            raise InvoiceBlocked([{"code": "price_missing", "skus": missing, "message": message}])
     return line_items, warnings

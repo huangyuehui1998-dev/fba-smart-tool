@@ -439,6 +439,39 @@ def test_qiluo_multi_sku_rows_and_declared_total():
             delete_product_by_sku(sku)
 
 
+@pytest.mark.parametrize("forwarder_id", FORWARDERS)
+def test_empty_declared_price_blocks_every_forwarder(forwarder_id):
+    """空申报价有报关风险。六家生成都 409，qiluo 不再只警告后继续导出。"""
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import delete_product_by_sku
+    from main import app
+
+    sku, fnsku, asin = "B13-NOPRICE", "X00TESTNOP", "B0B13NOP01"
+    delete_product_by_sku(sku)
+    _seed(sku, fnsku, asin, "型号乙", listing_price=None, declared_value=None)
+    raw = _csv("FBA13NOPR", sku, fnsku, asin)
+    client = TestClient(app)
+    try:
+        generated = client.post(
+            "/api/invoice/generate",
+            json={
+                "shipment_id": "FBA13NOPR",
+                "forwarder_id": forwarder_id,
+                "csv_base64": base64.b64encode(raw).decode(),
+            },
+        )
+        assert generated.status_code == 409, generated.text[:500]
+        detail = generated.json()["detail"]
+        blocking = detail["blocking"]
+        assert any(item.get("code") == "price_missing" for item in blocking)
+        text = json.dumps(blocking, ensure_ascii=False)
+        assert "不能导出" in text
+        assert sku in text or fnsku in text
+    finally:
+        delete_product_by_sku(sku)
+
+
 def test_send_and_jiufang_take_asin_from_csv_when_product_asin_is_empty():
     from fastapi.testclient import TestClient
 

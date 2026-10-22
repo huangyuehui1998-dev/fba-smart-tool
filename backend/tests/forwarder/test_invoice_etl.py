@@ -1,6 +1,7 @@
 """invoice_etl 五段流水线单元测试。"""
 from __future__ import annotations
 
+import pytest
 import pandas as pd
 
 from fba_tool.invoice_etl import (
@@ -232,6 +233,8 @@ def test_qiluo_etl_declared_total_keeps_every_sku():
     assert {it.values["model"] for it in items} == {"共用型号"}
     prices = sorted(float(it.values["declared_price"]) for it in items)
     assert prices == [10.0, 49.99]
+    assert {type(it.values["declared_price"]) for it in items} == {float}
+    assert {type(it.values["qty_per_box"]) for it in items} == {int}
     total = round(sum(float(it.values["total_declared_value_usd"]) for it in items), 2)
     assert total == 239.96
 
@@ -240,7 +243,6 @@ def test_qiluo_declared_price_uses_listing_price_like_send():
     """只有手填售价和发票扩展字段时，申报单价与 SEND 的 resolve_declared_price 相同。"""
     import json
 
-    from fba_tool.invoice_table import InvoiceTableLayout, table_cells_from_line_items
     from fba_tool.master_db import init_master_db, upsert_product
     from fba_tool.product_fields import SOURCE_MANUAL, resolve_declared_price, set_product_fields
 
@@ -309,17 +311,66 @@ def test_qiluo_declared_price_uses_listing_price_like_send():
             "extra_data": json.dumps({"invoice": {"unit": "个", "purchase_price": 5}}, ensure_ascii=False),
         }
     )
-    blank_items, blank_warnings = run_invoice_etl(
-        forwarder_id="qiluo",
-        ship=empty,
-        csv_bytes=b"",
-        workflow_json=None,
+    from fba_tool.invoice_rules import InvoiceBlocked
+
+    with pytest.raises(InvoiceBlocked) as blocked:
+        run_invoice_etl(
+            forwarder_id="qiluo",
+            ship=empty,
+            csv_bytes=b"",
+            workflow_json=None,
+        )
+    reason = blocked.value.blocking[0]
+    assert reason["code"] == "price_missing"
+    assert reason["skus"] == ["SKU-PRICE-EMPTY"]
+    assert "不能导出" in reason["message"]
+
+
+def test_qiluo_mixed_empty_price_stays_numeric_then_blocks():
+    """空价在前时 pandas 3 不能把 49.99 写进 str 列；空申报价与另外五家一样拦截。"""
+    import json
+
+    from fba_tool.invoice_rules import InvoiceBlocked
+    from fba_tool.master_db import init_master_db, upsert_product
+    from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
+
+    init_master_db()
+    upsert_product(
+        {
+            "sku": "SKU-MIX-PRICE",
+            "chinese_name": "有价",
+            "hs_code": "9507100090",
+            "model_name": "型号",
+            "extra_data": json.dumps({"invoice": {"unit": "个"}}, ensure_ascii=False),
+        }
     )
-    assert blank_items[0].values["declared_price"] == ""
-    assert any("申报单价为空" in item and "SKU-PRICE-EMPTY" in item for item in blank_warnings)
-    layout = InvoiceTableLayout(header_row=1, first_data_row=2, columns={"sku": 4, "declared_price": 7})
-    cells = table_cells_from_line_items(layout, blank_items, {})
-    price_cell = next(cell for cell in cells if cell["field_key"] == "declared_price")
-    assert price_cell["cell"] == "G2"
-    assert price_cell["value"] == ""
-    assert price_cell["required"] is True
+    set_product_fields("SKU-MIX-PRICE", {"listing_price": 49.99, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+    upsert_product(
+        {
+            "sku": "SKU-MIX-EMPTY",
+            "chinese_name": "无价",
+            "hs_code": "9507100090",
+            "model_name": "型号",
+            "extra_data": json.dumps({"invoice": {"unit": "个"}}, ensure_ascii=False),
+        }
+    )
+
+    def ship(order):
+        return CsvShipment(
+            shipment_id="FBAMIX",
+            warehouse_code="ONT8",
+            box_count=len(order),
+            box_items=pd.DataFrame([{"箱号": i + 1, "SKU": sku, "数量": 4} for i, sku in enumerate(order)]),
+            box_specs=pd.DataFrame(
+                [{"箱号": i + 1, "长(cm)": 30, "宽(cm)": 20, "高(cm)": 10, "实重(kg)": 2.0} for i in range(len(order))]
+            ),
+            box_fba_ids={i + 1: f"FBAMIXU{i + 1:06d}" for i in range(len(order))},
+        )
+
+    for order in (["SKU-MIX-EMPTY", "SKU-MIX-PRICE"], ["SKU-MIX-PRICE", "SKU-MIX-EMPTY"]):
+        with pytest.raises(InvoiceBlocked) as blocked:
+            run_invoice_etl(forwarder_id="qiluo", ship=ship(order), csv_bytes=b"", workflow_json=None)
+        reason = blocked.value.blocking[0]
+        assert reason["code"] == "price_missing"
+        assert reason["skus"] == ["SKU-MIX-EMPTY"]
+        assert "不能导出" in reason["message"]
