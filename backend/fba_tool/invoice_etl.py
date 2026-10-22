@@ -136,6 +136,27 @@ def _consecutive_runs(box_ids: List[int]) -> List[Tuple[int, int]]:
     return runs
 
 
+def _format_box_runs(boxes: List[int]) -> str:
+    parts: List[str] = []
+    for start, end in _consecutive_runs(boxes):
+        parts.append(str(start) if start == end else f"{start}-{end}")
+    return ",".join(parts)
+
+
+def _unassigned_shipment_id(shipment_id: str) -> bool:
+    """刷箱 / FIST 的货件编号是「待分配」，解析后仍是这个值。"""
+    return str(shipment_id or "").strip() in {"待分配", "UNASSIGNED"}
+
+
+def _positive_whole(val: Any) -> int:
+    if isinstance(val, bool):
+        return 0
+    number = _to_float(val)
+    if number is None or not float(number).is_integer():
+        return 0
+    return int(number)
+
+
 def extract_unpivot(ship: CsvShipment) -> pd.DataFrame:
     """Step 1: 箱-SKU 长表。"""
     items = ship.box_items.copy()
@@ -435,6 +456,52 @@ def _group_by_box_range(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
+def _group_unassigned_by_sku(df: pd.DataFrame) -> pd.DataFrame:
+    """待分配货件（刷箱 / FIST）箱规经常一箱一个尺寸，按箱合并会留下一串单箱数。
+
+    琪珞模板没有 SKU 列，读表的人只能看到数量格子。每个 SKU 只留一行，
+    单箱内数量和总数都写成 CSV 里该 SKU 的数量加总，与 send 的 sku_qty_tokens 一致。
+    """
+    if df.empty:
+        return df
+
+    work = df.copy()
+    if "sku" not in work.columns:
+        work["sku"] = ""
+    work["sku"] = work["sku"].fillna("").astype(str).str.strip()
+    if "box_id" in work.columns:
+        work["_box_num"] = _resolve_box_num(work["box_id"])
+    else:
+        work["_box_num"] = 0
+    if "qty" not in work.columns:
+        work["qty"] = 0
+
+    order: List[str] = []
+    seen: set[str] = set()
+    for sku in work["sku"].tolist():
+        if sku not in seen:
+            seen.add(sku)
+            order.append(sku)
+
+    rows: List[Dict[str, Any]] = []
+    for sku in order:
+        grp = work[work["sku"] == sku]
+        boxes = sorted({int(box) for box in grp["_box_num"].tolist() if int(box) > 0})
+        qty = sum(_positive_whole(value) for value in grp["qty"].tolist())
+        row = grp.iloc[0].to_dict()
+        row.pop("_box_num", None)
+        row["sku"] = sku
+        row["box_range"] = _format_box_runs(boxes)
+        row["box_count"] = len(boxes) if boxes else int(len(grp))
+        row["total_qty"] = qty
+        row["qty_per_box"] = qty
+        row["qty"] = qty
+        if boxes:
+            row["box_id"] = boxes[0]
+        rows.append(row)
+    return pd.DataFrame(rows)
+
+
 def dataframe_to_line_items(
     df: pd.DataFrame,
     ship: CsvShipment,
@@ -552,7 +619,11 @@ def run_invoice_etl(
     df = join_master_db(df, warnings)
     df = priority_fallback(df, workflow_json, csv_bytes, catalog)
     df = apply_unit_conversion(df, unit_cfg)
-    grouped = group_by_logic(df, group_logic)
+    # 命名 FBA 仍按箱号段合并，单箱数乘箱数等于 SKU 合计。待分配对不上箱规，必须直接写加总。
+    if str(forwarder_id or "").strip().casefold() == "qiluo" and _unassigned_shipment_id(ship.shipment_id):
+        grouped = _group_unassigned_by_sku(df)
+    else:
+        grouped = group_by_logic(df, group_logic)
     line_items = dataframe_to_line_items(
         grouped,
         ship,

@@ -391,3 +391,58 @@ def test_qiluo_mixed_empty_price_stays_numeric_then_blocks():
         assert "SKU SKU-" not in reason["message"]
         assert "FNSKU X00TESTMIX0" in reason["message"]
         assert "不能导出" in reason["message"]
+
+
+def _rebox_ship(shipment_id: str) -> CsvShipment:
+    """12 箱 × 4 = 48，20 箱 × 4 = 80。每箱长度不同，按箱号段合并不成一行。"""
+    pairs = [(box, "FIST48-A") for box in range(1, 13)] + [(box, "FIST80-B") for box in range(13, 33)]
+    return CsvShipment(
+        shipment_id=shipment_id,
+        warehouse_code="ONT8",
+        box_count=32,
+        box_items=pd.DataFrame([{"箱号": box, "SKU": sku, "数量": 4} for box, sku in pairs]),
+        box_specs=pd.DataFrame(
+            [{"箱号": box, "长(cm)": 30 + box, "宽(cm)": 20, "高(cm)": 10, "实重(kg)": 2.0} for box, _sku in pairs]
+        ),
+        box_fba_ids={box: f"{shipment_id}U{box:06d}" for box, _sku in pairs},
+    )
+
+
+def test_qiluo_unassigned_groups_by_sku_total_named_fba_stays_per_box():
+    """待分配写成每个 SKU 的加总。同样的多箱在命名 FBA 上仍是单箱数。"""
+    from fba_tool.master_db import delete_product_by_sku, init_master_db, upsert_product
+
+    init_master_db()
+    for sku in ("FIST48-A", "FIST80-B"):
+        upsert_product({"sku": sku, "chinese_name": "鱼竿", "hs_code": "9507100090", "declared_value": 10})
+    try:
+        unassigned, _warnings = run_invoice_etl(
+            forwarder_id="qiluo",
+            ship=_rebox_ship("待分配"),
+            csv_bytes=b"",
+            workflow_json=None,
+        )
+        assert len(unassigned) == 2
+        by_sku = {item.values["sku"]: item.values for item in unassigned}
+        assert int(by_sku["FIST48-A"]["qty_per_box"]) == 48
+        assert int(by_sku["FIST48-A"]["total_qty"]) == 48
+        assert by_sku["FIST48-A"]["box_range"] == "1-12"
+        assert int(by_sku["FIST48-A"]["box_count"]) == 12
+        assert int(by_sku["FIST80-B"]["qty_per_box"]) == 80
+        assert int(by_sku["FIST80-B"]["total_qty"]) == 80
+        assert by_sku["FIST80-B"]["box_range"] == "13-32"
+        assert int(by_sku["FIST80-B"]["box_count"]) == 20
+        assert {round(float(item.values["total_declared_value_usd"]), 2) for item in unassigned} == {480.0, 800.0}
+
+        named, _warnings = run_invoice_etl(
+            forwarder_id="qiluo",
+            ship=_rebox_ship("FBA19NAMED"),
+            csv_bytes=b"",
+            workflow_json=None,
+        )
+        assert len(named) == 32
+        assert {int(item.values["qty_per_box"]) for item in named} == {4}
+        assert {int(item.values["total_qty"]) for item in named} == {4}
+    finally:
+        delete_product_by_sku("FIST48-A")
+        delete_product_by_sku("FIST80-B")
