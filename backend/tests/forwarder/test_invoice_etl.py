@@ -300,10 +300,18 @@ def test_qiluo_declared_price_uses_listing_price_like_send():
     empty = CsvShipment(
         shipment_id="FBAPRICEEMPTY",
         warehouse_code="ONT8",
-        box_count=1,
-        box_items=pd.DataFrame([{"箱号": 1, "SKU": "SKU-PRICE-EMPTY", "数量": 1}]),
-        box_specs=pd.DataFrame([{"箱号": 1, "长(cm)": 30, "宽(cm)": 20, "高(cm)": 10, "实重(kg)": 2.0}]),
-        box_fba_ids={1: "FBAPRICEEMPTYU000001"},
+        box_count=3,
+        box_items=pd.DataFrame([
+            {"箱号": 1, "SKU": "SKU-PRICE-EMPTY", "数量": 1, "FNSKU": "X00TESTEMPTY"},
+            {"箱号": 2, "SKU": "SKU-PRICE-EMPTY", "数量": 2, "FNSKU": "X00TESTEMPTY"},
+            {"箱号": 3, "SKU": "sku-price-empty", "数量": 1, "FNSKU": "X00TESTEMPTY"},
+        ]),
+        box_specs=pd.DataFrame([
+            {"箱号": 1, "长(cm)": 30, "宽(cm)": 20, "高(cm)": 10, "实重(kg)": 2.0},
+            {"箱号": 2, "长(cm)": 30, "宽(cm)": 20, "高(cm)": 18, "实重(kg)": 2.0},
+            {"箱号": 3, "长(cm)": 30, "宽(cm)": 20, "高(cm)": 12, "实重(kg)": 2.0},
+        ]),
+        box_fba_ids={1: "FBAPRICEEMPTYU000001", 2: "FBAPRICEEMPTYU000002", 3: "FBAPRICEEMPTYU000003"},
     )
     upsert_product(
         {
@@ -323,8 +331,10 @@ def test_qiluo_declared_price_uses_listing_price_like_send():
         )
     reason = blocked.value.blocking[0]
     assert reason["code"] == "price_missing"
-    assert reason["skus"] == ["SKU SKU-PRICE-EMPTY / FNSKU X00TESTEMPTY"]
-    assert "SKU SKU-PRICE-EMPTY" in reason["message"]
+    assert reason["skus"] == ["SKU-PRICE-EMPTY / FNSKU X00TESTEMPTY"]
+    assert len(reason["skus"]) == 1
+    assert reason["message"].casefold().count("sku-price-empty") == 1
+    assert "sku sku-" not in reason["message"].casefold()
     assert "FNSKU X00TESTEMPTY" in reason["message"]
     assert "不能导出" in reason["message"]
 
@@ -376,7 +386,8 @@ def test_qiluo_mixed_empty_price_stays_numeric_then_blocks():
             run_invoice_etl(forwarder_id="qiluo", ship=ship(order), csv_bytes=b"", workflow_json=None)
         reason = blocked.value.blocking[0]
         assert reason["code"] == "price_missing"
-        assert reason["skus"] == ["SKU SKU-MIX-EMPTY / FNSKU X00TESTMIX0"]
-        assert "SKU SKU-MIX-EMPTY" in reason["message"]
+        assert reason["skus"] == ["SKU-MIX-EMPTY / FNSKU X00TESTMIX0"]
+        assert reason["message"].count("SKU-MIX-EMPTY") == 1
+        assert "SKU SKU-" not in reason["message"]
         assert "FNSKU X00TESTMIX0" in reason["message"]
         assert "不能导出" in reason["message"]

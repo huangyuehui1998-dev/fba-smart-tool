@@ -22,8 +22,10 @@ from fba_tool.univer_apply import (
     _raise_conflicts,
     _slave_map,
     _snapshot_sheets,
+    _stored_type_matches,
     _values_equal,
     _write,
+    coerce_sheet_value,
 )
 
 REFERENCE_ID_EMPTY_HINT = "Reference ID 为空，请上传货件 PDF"
@@ -210,7 +212,28 @@ def export_rendered_workbook(
     return _apply_user_edits(rendered, template_bytes, snapshot)
 
 
-def _apply_user_edits(rendered: bytes, template: bytes, snapshot: Dict[str, Any]) -> bytes:
+def export_field_keys(draft: InvoiceDraft) -> Dict[str, str]:
+    """单元格 → 字段名。直接调导出接口时用它识别数量/价格列，不依赖表头猜。"""
+    keys: Dict[str, str] = {}
+    for item in draft.table_cells or []:
+        cell = str(item.get("cell") or "").replace("$", "").strip().upper()
+        key = str(item.get("field_key") or "").strip()
+        if cell and key:
+            keys[cell] = key
+    for field in draft.fields or []:
+        cell = str(field.cell or "").replace("$", "").strip().upper()
+        key = str(field.key or "").strip()
+        if cell and key and cell not in keys:
+            keys[cell] = key
+    return keys
+
+
+def _apply_user_edits(
+    rendered: bytes,
+    template: bytes,
+    snapshot: Dict[str, Any],
+    field_keys: Optional[Dict[str, str]] = None,
+) -> bytes:
     filled = openpyxl.load_workbook(io.BytesIO(rendered))
     blank = openpyxl.load_workbook(io.BytesIO(template))
     formula_cells: List[str] = []
@@ -245,9 +268,12 @@ def _apply_user_edits(rendered: bytes, template: bytes, snapshot: Dict[str, Any]
                     continue
                 if "v" not in payload and "f" not in payload:
                     continue
-                if _values_equal(cell.value, snap) or _values_equal(template_value, snap):
+                if _values_equal(template_value, snap):
                     continue
-                _write(cell, payload)
+                value = coerce_sheet_value(ws, row, col, snap, (field_keys or {}).get(ref, ""))
+                if (_values_equal(cell.value, value) or _values_equal(cell.value, snap)) and _stored_type_matches(cell.value, value):
+                    continue
+                _write(cell, {**payload, "v": value})
         _raise_conflicts(formula_cells, slave_cells)
         buf = io.BytesIO()
         filled.save(buf)
@@ -326,9 +352,11 @@ def overlay_preview_edits(base: bytes, official: bytes, preview: bytes) -> bytes
                     if _is_formula(dest) or _is_formula(src.cell(cell.row, cell.column)):
                         formula_cells.append(coord)
                         continue
-                    if _values_equal(dest.value, cell.value):
+                    raw = _json_cell(cell.value) if isinstance(cell.value, (datetime, date)) else cell.value
+                    value = raw if isinstance(cell.value, (datetime, date)) else coerce_sheet_value(src, cell.row, cell.column, raw)
+                    if _values_equal(dest.value, value) and _stored_type_matches(dest.value, value):
                         continue
-                    _write(dest, {"v": _json_cell(cell.value) if isinstance(cell.value, (datetime, date)) else cell.value})
+                    _write(dest, {"v": value})
         _raise_conflicts(formula_cells, slave_cells)
         buf = io.BytesIO()
         filled.save(buf)

@@ -26,7 +26,7 @@ def draft_from_payload(data: InvoiceExportRequest) -> InvoiceDraft:
     fields = []
     for item in data.fields:
         cell = str(item.get("cell", item.get("单元格", ""))).strip()
-        field_key = str(item.get("key", item.get("字段", "")))
+        field_key = str(item.get("field_key") or item.get("key") or item.get("字段") or "")
         value = item.get("value", item.get("值", ""))
         required = bool(item.get("required", item.get("必填") == "是"))
         if cell:

@@ -702,10 +702,26 @@ def _shared_address_candidates(forwarder_id: str, ship_to: str, csv_code: str) -
     return None
 
 
-def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tmp_path):
-    """真实目录在时先导入仓库地址库，再跑六个货代的自动填写→导出，并和同票发票按 SKU 合计对数量。
+def _compare_original_invoice(forwarder_id: str) -> bool:
+    """目录里的原发票是 SEND 格式。只拿来对照 send。
 
-    原发票把合计存成 52.0 时按 52 比，不和单箱数量 "4" 或整票 "84" 做字符串交。
+    九方、琪珞、德速按各自导出里每个 SKU 的加总数量对 CSV，不再用这份 SEND 发票当标准。
+    """
+    return forwarder_id == "send"
+
+
+def test_non_send_forwarders_are_not_scored_against_the_send_invoice():
+    """非 send 货代的数量标准是 CSV 里的 SKU 合计，不是 SEND 原发票。"""
+    assert _compare_original_invoice("send")
+    for forwarder_id in ("jiufang", "qiluo", "qiluo_t5", "qiluo_t6", "deshu"):
+        assert not _compare_original_invoice(forwarder_id)
+
+
+def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tmp_path):
+    """真实目录在时先导入仓库地址库，再跑六个货代的自动填写→导出。
+
+    每个货代的导出都按 CSV 里每个 SKU 的合计对数量（52.0 记成 52）。
+    SEND 格式原发票只对照 send；非 send 不再拿那份发票当标准。
     一个地址对应多个仓库、货件名称里的仓码又不在其中（第 14 批 GYR2 / LGB8 同城多仓就是这种）时，
     九方等要写地址的货代返回 422 和候选仓库列表，不按 200 失败。
     """
@@ -810,6 +826,8 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
                     f"52.0 记成 52，不用单箱数量或整票合计做字符串匹配。{export_detail}"
                 )
                 pipeline.append((batch, path.name, forwarder_id, ship.shipment_id))
+                if not _compare_original_invoice(forwarder_id):
+                    continue
                 for invoice in invoices:
                     if ship.shipment_id and ship.shipment_id in invoice.name.upper().replace("-", ""):
                         invoice_bytes = invoice.read_bytes()

@@ -560,25 +560,32 @@ def run_invoice_etl(
         separate_material_purpose=separate_mp,
     )
     if "declared_price" in (mapping.get("columns_mapping") or {}):
-        from fba_tool.invoice_rules import InvoiceBlocked, missing_price_label
+        from fba_tool.invoice_rules import InvoiceBlocked, unique_missing_price_labels
+        from fba_tool.sku_keys import sku_key
 
-        missing: List[str] = []
-        seen: set[str] = set()
+        entries: List[Tuple[str, str, str]] = []
         for item in line_items:
             if item.values.get("declared_price") not in (None, ""):
                 continue
             sku = str(item.values.get("sku") or "").strip()
-            if not sku or sku in seen:
+            if not sku:
                 continue
-            seen.add(sku)
-            fnsku = str((get_product_by_sku(sku) or {}).get("fnsku") or "").strip()
-            if not fnsku and "FNSKU" in ship.box_items.columns:
+            product = get_product_by_sku(sku) or {}
+            fnsku = str(product.get("fnsku") or "").strip()
+            box_fnsku = ""
+            if "FNSKU" in ship.box_items.columns:
                 for _, rec in ship.box_items.iterrows():
-                    if str(rec.get("SKU") or "").strip() == sku:
-                        fnsku = str(rec.get("FNSKU") or "").strip()
-                        if fnsku:
+                    if sku_key(rec.get("SKU")) == sku_key(sku):
+                        box_fnsku = str(rec.get("FNSKU") or "").strip()
+                        if box_fnsku:
                             break
-            missing.append(missing_price_label(sku=sku, fnsku=fnsku, fallback=sku))
+            if not fnsku or sku_key(fnsku) == sku_key(sku):
+                if box_fnsku and sku_key(box_fnsku) != sku_key(sku):
+                    fnsku = box_fnsku
+                elif fnsku and sku_key(fnsku) == sku_key(sku):
+                    fnsku = ""
+            entries.append((sku, fnsku, sku))
+        missing = unique_missing_price_labels(entries)
         if missing:
             message = "以下 SKU 没有申报价，不能导出：" + "、".join(missing) + "。请在产品库导入领星售价或手填申报价。"
             raise InvoiceBlocked([{"code": "price_missing", "skus": missing, "message": message}])

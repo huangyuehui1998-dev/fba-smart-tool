@@ -45,11 +45,12 @@ def apply_cell_writes(data: bytes, writes: List[Dict[str, Any]], sheet_name: Opt
             from openpyxl.utils.cell import coordinate_to_tuple
 
             row, col = coordinate_to_tuple(ref)
-            from fba_tool.invoice_rules import coerce_invoice_number
-
-            value = coerce_invoice_number(
-                str(item.get("field_key") or item.get("key") or ""),
+            value = coerce_sheet_value(
+                ws,
+                row,
+                col,
                 item.get("value"),
+                str(item.get("field_key") or item.get("key") or ""),
             )
             if (row, col) in slaves:
                 master = ws.cell(*slaves[(row, col)])
@@ -61,7 +62,7 @@ def apply_cell_writes(data: bytes, writes: List[Dict[str, Any]], sheet_name: Opt
                 if _norm_formula(value) != _norm_formula(cell.value):
                     formula_cells.append(ref)
                 continue
-            if _values_equal(cell.value, value):
+            if _values_equal(cell.value, value) and _stored_type_matches(cell.value, value):
                 continue
             _write(cell, {"v": value})
         _raise_conflicts(formula_cells, slave_cells)
@@ -100,9 +101,10 @@ def apply_snapshot_values(data: bytes, snapshot: Dict[str, Any]) -> bytes:
                     continue
                 if "v" not in payload and "f" not in payload:
                     continue
-                if _values_equal(cell.value, payload.get("v")):
+                value = coerce_sheet_value(ws, row, col, payload.get("v"))
+                if _values_equal(cell.value, value) or _values_equal(cell.value, payload.get("v")):
                     continue
-                _write(cell, payload)
+                _write(cell, {**payload, "v": value})
         _raise_conflicts(formula_cells, slave_cells)
         buf = io.BytesIO()
         wb.save(buf)
@@ -204,6 +206,69 @@ def _keep_numeric(cell: Any, value: Any) -> Any:
     if isinstance(current, int) and float(num) == int(num):
         return int(num)
     return int(num) if isinstance(num, int) else float(num)
+
+
+def _cell_text(ws: Worksheet, row: int, col: int) -> str:
+    cell = ws.cell(row, col)
+    if isinstance(cell, MergedCell):
+        return ""
+    value = cell.value
+    if value in (None, ""):
+        return ""
+    if isinstance(value, str) and value.startswith("="):
+        return ""
+    return str(value).strip()
+
+
+def _plain_number(text: str) -> bool:
+    token = text.replace(",", "").strip()
+    if not token:
+        return False
+    try:
+        float(token)
+    except ValueError:
+        return False
+    return True
+
+
+def column_context_label(ws: Worksheet, row: int, col: int) -> str:
+    """这一格正上方最近的表头；表头对不上时再看同一行左侧的字段名。
+
+    只跳过空格和纯数字，避免把更上面另一块区域的「预报件数」错当成箱序号的表头。
+    """
+    from fba_tool.invoice_rules import header_number_kind
+
+    header = ""
+    for above in range(row - 1, max(0, row - 45), -1):
+        text = _cell_text(ws, above, col)
+        if not text or _plain_number(text):
+            continue
+        header = text
+        break
+    if header_number_kind(header):
+        return header
+    if col > 1:
+        left = _cell_text(ws, row, col - 1)
+        if left and not _plain_number(left) and header_number_kind(left):
+            return left
+    return ""
+
+
+def coerce_sheet_value(ws: Worksheet, row: int, col: int, value: Any, field_key: str = "") -> Any:
+    from fba_tool.invoice_rules import coerce_export_number
+
+    return coerce_export_number(value, field_key=field_key, header=column_context_label(ws, row, col))
+
+
+def _stored_type_matches(current: Any, value: Any) -> bool:
+    """数量要落成 int，价格落成 float。文本格里的 "4.0" 不算已经写对。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return True
+    if isinstance(current, bool) or not isinstance(current, (int, float)):
+        return False
+    if type(value) is int:
+        return type(current) is int
+    return type(current) in {int, float}
 
 
 def _write(cell: Any, payload: Dict[str, Any]) -> None:

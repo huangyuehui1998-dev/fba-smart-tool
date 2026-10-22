@@ -997,6 +997,218 @@ def test_numeric_columns_stay_numbers_after_ui_export(forwarder_id):
         delete_product_by_sku(sku)
 
 
+def _direct_text_body(body: dict) -> dict:
+    """不经过界面：生成结果里的数字改成文本，只留 field_key，不抄成 key。"""
+    from openpyxl.utils import coordinate_to_tuple
+
+    fields = []
+    cell_data: dict = {}
+    for item in body["cells"]:
+        value = item.get("value")
+        if value in (None, ""):
+            continue
+        text = str(value)
+        key = str(item.get("field_key") or "")
+        if key in {"qty_per_box", "total_qty", "box_count", "pcs_per_set"}:
+            try:
+                number = float(value)
+            except (TypeError, ValueError):
+                number = None
+            if number is not None and number == int(number):
+                text = f"{int(number)}.0"
+        fields.append({
+            "cell": item["cell"],
+            "value": text,
+            "field_key": key,
+            "source": item.get("source") or "green",
+            "required": bool(item.get("required")),
+        })
+        row, col = coordinate_to_tuple(str(item["cell"]))
+        cell_data.setdefault(str(row - 1), {})[str(col - 1)] = {"v": text, "t": 1}
+    snapshot = {
+        "sheetOrder": ["s0"],
+        "sheets": {"s0": {"name": body["template_sheet"], "cellData": cell_data}},
+    }
+    return {
+        "template_hash": body["template_hash"],
+        "forwarder_id": body.get("forwarder_id"),
+        "shipment_id": body["shipment_id"],
+        "warehouse_code": body["warehouse_code"],
+        "template_sheet": body["template_sheet"],
+        "fields": fields,
+        "snapshot": snapshot,
+    }
+
+
+def _generated_value(body: dict, coord: str):
+    for item in body["cells"]:
+        if str(item.get("cell") or "").upper() == coord.upper():
+            return item.get("value")
+    return None
+
+
+@pytest.mark.parametrize("forwarder_id", FORWARDERS)
+def test_direct_api_text_numbers_export_as_numbers(forwarder_id):
+    """直接把数量、价格、重量、尺寸当文本传给导出接口时，格子仍是数值。HS、邮编、电话保持文本。"""
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import delete_product_by_sku
+    from main import app
+
+    sku, fnsku, asin = "B13-TEXTNUM", "X00TESTTXT", "B0B13TXT01"
+    delete_product_by_sku(sku)
+    _seed(sku, fnsku, asin, "型号丙", listing_price=39.99)
+    raw = _csv("FBA13TXT1", sku, fnsku, asin)
+    client = TestClient(app)
+    try:
+        generated = client.post(
+            "/api/invoice/generate",
+            json={
+                "shipment_id": "FBA13TXT1",
+                "forwarder_id": forwarder_id,
+                "csv_base64": base64.b64encode(raw).decode(),
+                "po_number": "PO-TXT",
+            },
+        )
+        assert generated.status_code == 200, generated.text[:400]
+        body = generated.json()
+        payload = _direct_text_body(body)
+        payload["forwarder_id"] = forwarder_id
+        exported = client.post("/api/export_invoice", json=payload)
+        assert exported.status_code == 200, exported.text[:400]
+        wb = _book(exported.content)
+        try:
+            if forwarder_id == "qiluo":
+                ws = wb["发票"]
+                _assert_numeric(ws["F2"], integer=True, value=4)
+                _assert_numeric(ws["G2"], value=39.99)
+                for coord in ("M2", "N2", "O2", "P2"):
+                    _assert_numeric(ws[coord])
+                assert isinstance(ws["A2"].value, str)
+                assert isinstance(ws["L2"].value, str)
+                assert ws["L2"].value == "9507100090"
+            elif forwarder_id == "send":
+                ws = next(sheet for sheet in wb.worksheets if "Invoice" in sheet.title)
+                _assert_numeric(ws["F15"], integer=True, value=4)
+                _assert_numeric(ws["R15"], value=39.99)
+                _assert_numeric(ws["Q15"], integer=True, value=5)
+                _assert_numeric(ws["S15"], value=39.99)
+                _assert_numeric(ws["C15"])
+                assert isinstance(ws["M15"].value, str)
+                assert ws["M15"].value == "9507100090"
+            elif forwarder_id == "jiufang":
+                inv, pk = wb["Invoice"], wb["Packing list"]
+                _assert_numeric(inv["O25"], integer=True, value=4)
+                _assert_numeric(inv["R25"], value=39.99)
+                _assert_numeric(inv["Q25"], integer=True)
+                _assert_numeric(inv["S25"], value=159.96)
+                _assert_numeric(pk["H6"], integer=True, value=4)
+                for coord in ("I6", "J6", "K6", "L6", "M6"):
+                    _assert_numeric(pk[coord])
+                assert isinstance(inv["N25"].value, str)
+                assert inv["N25"].value == "9507100090"
+                assert isinstance(inv["B8"].value, str)
+                assert inv["B8"].value == _generated_value(body, "B8")
+                assert isinstance(inv["B15"].value, str)
+                assert inv["B15"].value == "00000"
+            elif forwarder_id == "qiluo_t6":
+                ws = wb["发票"]
+                _assert_numeric(ws["F14"], integer=True, value=4)
+                _assert_numeric(ws["G14"], value=39.99)
+                _assert_numeric(ws["B6"], integer=True, value=1)
+                for coord in ("N14", "O14", "P14"):
+                    _assert_numeric(ws[coord])
+                assert isinstance(ws["L14"].value, str)
+                assert ws["L14"].value == "9507100090"
+                assert isinstance(ws["A14"].value, str)
+                assert ws["A14"].value == "1"
+            elif forwarder_id == "qiluo_t5":
+                ws = wb.worksheets[0]
+                _assert_numeric(ws["H10"], integer=True, value=4)
+                _assert_numeric(ws["I10"], value=39.99)
+                _assert_numeric(ws["J10"], integer=True, value=1)
+                for coord in ("K10", "L10", "M10", "N10"):
+                    _assert_numeric(ws[coord])
+                assert isinstance(ws["A10"].value, str)
+                assert ws["A10"].value == "9507100090"
+                assert isinstance(ws["F7"].value, str)
+                assert ws["F7"].value == "00000"
+            elif forwarder_id == "deshu":
+                ws = wb["发票填写模板"]
+                _assert_numeric(ws["N21"], integer=True, value=4)
+                _assert_numeric(ws["R21"], value=39.99)
+                _assert_numeric(ws["P21"], integer=True)
+                _assert_numeric(ws["Q21"], integer=True, value=5)
+                _assert_numeric(ws["G4"], integer=True, value=4)
+                for coord in ("U21", "V21", "W21"):
+                    _assert_numeric(ws[coord])
+                assert isinstance(ws["G21"].value, str)
+                assert ws["G21"].value == "9507100090"
+                assert isinstance(wb["填写示例"]["N21"].value, str)
+        finally:
+            wb.close()
+    finally:
+        delete_product_by_sku(sku)
+
+
+def test_direct_api_without_field_key_still_coerces_qiluo_columns():
+    """只传单元格和文本、不带 field_key 时，按表头把数量和价格写成数值，海关编码仍是文本。"""
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import delete_product_by_sku
+    from main import app
+
+    sku, fnsku, asin = "B13-NOKEY", "X00TESTNOK", "B0B13NOK01"
+    delete_product_by_sku(sku)
+    _seed(sku, fnsku, asin, "型号丁", listing_price=39.99)
+    raw = _csv("FBA13NOK1", sku, fnsku, asin)
+    client = TestClient(app)
+    try:
+        generated = client.post(
+            "/api/invoice/generate",
+            json={
+                "shipment_id": "FBA13NOK1",
+                "forwarder_id": "qiluo",
+                "csv_base64": base64.b64encode(raw).decode(),
+            },
+        )
+        assert generated.status_code == 200, generated.text[:400]
+        body = generated.json()
+        fields = []
+        for item in body["cells"]:
+            value = item.get("value")
+            if value in (None, ""):
+                continue
+            text = f"{int(value)}.0" if item.get("field_key") == "qty_per_box" else str(value)
+            fields.append({"cell": item["cell"], "value": text})
+        exported = client.post(
+            "/api/export_invoice",
+            json={
+                "template_hash": body["template_hash"],
+                "forwarder_id": "qiluo",
+                "shipment_id": body["shipment_id"],
+                "warehouse_code": body["warehouse_code"],
+                "template_sheet": body["template_sheet"],
+                "fields": fields,
+            },
+        )
+        assert exported.status_code == 200, exported.text[:400]
+        wb = _book(exported.content)
+        try:
+            ws = wb["发票"]
+            _assert_numeric(ws["F2"], integer=True, value=4)
+            _assert_numeric(ws["G2"], value=39.99)
+            for coord in ("M2", "N2", "O2", "P2"):
+                _assert_numeric(ws[coord])
+            assert isinstance(ws["L2"].value, str)
+            assert ws["L2"].value == "9507100090"
+            assert isinstance(ws["A2"].value, str)
+        finally:
+            wb.close()
+    finally:
+        delete_product_by_sku(sku)
+
+
 def _cell_color(color) -> tuple | None:
     if color is None:
         return None

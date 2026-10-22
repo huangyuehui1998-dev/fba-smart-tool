@@ -91,7 +91,7 @@ def api_export_invoice(body: InvoiceExportRequest):
     draft = draft_from_payload(body)
 
     from fba_tool.invoice_step45 import overlay_preview_edits, recall_render
-    from fba_tool.invoice_step45 import _apply_user_edits
+    from fba_tool.invoice_step45 import _apply_user_edits, export_field_keys
     from fba_tool.univer_apply import ApplyRejected, apply_cell_writes
 
     try:
@@ -107,7 +107,7 @@ def api_export_invoice(body: InvoiceExportRequest):
         if preview_bytes is not None:
             out = overlay_preview_edits(out, template_bytes, preview_bytes)
         if body.snapshot:
-            out = _apply_user_edits(out, template_bytes, body.snapshot)
+            out = _apply_user_edits(out, template_bytes, body.snapshot, export_field_keys(draft))
     except ApplyRejected as exc:
         raise HTTPException(
             status_code=400,
