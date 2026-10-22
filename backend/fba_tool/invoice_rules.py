@@ -57,6 +57,34 @@ def to_number(v: Any) -> Any:
     return int(d) if d == d.to_integral_value() and "." not in s and "e" not in s.lower() else float(d)
 
 
+# 发票数量列：整数值写成 int。价格、重量、尺寸保持小数。
+QTY_INT_FIELDS = frozenset({"qty_per_box", "total_qty", "box_count", "pcs_per_set"})
+NUMBER_FIELDS = QTY_INT_FIELDS | frozenset({
+    "declared_price",
+    "purchase_price",
+    "total_declared_value_usd",
+    "unit_weight_kg",
+    "box_weight",
+    "length",
+    "width",
+    "height",
+})
+
+
+def coerce_invoice_number(field_key: str | None, value: Any) -> Any:
+    """文本数字按列写成数值。整数数量写成 int，申报价这类小数保持 float。"""
+    if not field_key or field_key not in NUMBER_FIELDS or value in (None, ""):
+        return value
+    num = to_number(value)
+    if isinstance(num, bool) or not isinstance(num, (int, float)):
+        return value
+    if field_key in QTY_INT_FIELDS and float(num) == int(num):
+        return int(num)
+    if isinstance(num, int):
+        return num
+    return float(num)
+
+
 def dec(v: Any) -> Optional[Decimal]:
     if v in (None, ""):
         return None

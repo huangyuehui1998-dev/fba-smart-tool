@@ -582,12 +582,14 @@ def table_cells_from_line_items(
     source_labels: Dict[str, str],
 ) -> List[Dict[str, Any]]:
     """映射发票行到单元格。清空脏数据由 export 侧处理，此处不批量下发 clear cells（避免 FortuneSheet 崩溃）。"""
+    from fba_tool.invoice_rules import coerce_invoice_number
+
     cells: List[Dict[str, Any]] = []
     always_include = {"reference_id", "sku_image", "declared_price"}
     for row_offset, item in enumerate(line_items):
         row = layout.first_data_row + row_offset
         for field_key, col in layout.columns.items():
-            val = item.values.get(field_key, "")
+            val = coerce_invoice_number(field_key, item.values.get(field_key, ""))
             if val in (None, "") and field_key not in always_include:
                 continue
             src_kind = item.sources.get(field_key, "green")

@@ -251,8 +251,6 @@ def write_jiufang(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, An
             for col, v in vals.items():
                 pk[f"{col}{row}"] = v
             if first:
-                _numeric_format(pk, row, "IJK", "0.00")
-                _numeric_format(pk, row, "H", "0")
                 total_cbm += box_cbm or 0
                 total_w += b.weight or 0
             row += 1

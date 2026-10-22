@@ -815,3 +815,308 @@ def test_jiufang_total_merge_follows_the_total_row(monkeypatch):
             assert header_now == kept
         finally:
             wb.close()
+
+
+def _ui_text(item: dict) -> str:
+    """界面把格子读成字符串再导出。整数数量在这一步会变成 \"4.0\"。"""
+    value = item.get("value")
+    if value in (None, ""):
+        return ""
+    key = str(item.get("field_key") or "")
+    if key in {"qty_per_box", "total_qty", "box_count", "pcs_per_set"}:
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            return str(value)
+        if number == int(number):
+            return f"{int(number)}.0"
+    return str(value)
+
+
+def _ui_export_body(body: dict) -> dict:
+    from openpyxl.utils import coordinate_to_tuple
+
+    fields = []
+    cell_data: dict = {}
+    for item in body["cells"]:
+        text = _ui_text(item)
+        fields.append({**item, "value": text, "key": item.get("field_key") or item.get("key") or ""})
+        if not text:
+            continue
+        row, col = coordinate_to_tuple(str(item["cell"]))
+        cell_data.setdefault(str(row - 1), {})[str(col - 1)] = {"v": text}
+    snapshot = {
+        "sheetOrder": ["s0"],
+        "sheets": {"s0": {"name": body["template_sheet"], "cellData": cell_data}},
+    }
+    return {
+        "template_hash": body["template_hash"],
+        "forwarder_id": body.get("forwarder_id"),
+        "shipment_id": body["shipment_id"],
+        "warehouse_code": body["warehouse_code"],
+        "template_sheet": body["template_sheet"],
+        "fields": fields,
+        "snapshot": snapshot,
+    }
+
+
+def _assert_numeric(cell, *, integer: bool = False, value=None) -> None:
+    assert cell.data_type == "n", (cell.coordinate, repr(cell.value), cell.data_type)
+    assert not isinstance(cell.value, str)
+    if integer:
+        assert type(cell.value) is int, (cell.coordinate, type(cell.value).__name__, cell.value)
+    if value is not None:
+        assert float(cell.value) == float(value)
+
+
+@pytest.mark.parametrize("forwarder_id", FORWARDERS)
+def test_numeric_columns_stay_numbers_after_ui_export(forwarder_id):
+    """Step 4.5 把预览读成文本再导出时，数量和价格仍是数值格。整数数量是 int。"""
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import delete_product_by_sku
+    from main import app
+
+    sku, fnsku, asin = "B13-NUM", "X00TESTNUM", "B0B13NUM01"
+    delete_product_by_sku(sku)
+    _seed(sku, fnsku, asin, "型号乙", listing_price=39.99)
+    raw = _csv("FBA13DS01", sku, fnsku, asin)
+    client = TestClient(app)
+    try:
+        generated = client.post(
+            "/api/invoice/generate",
+            json={
+                "shipment_id": "FBA13DS01",
+                "forwarder_id": forwarder_id,
+                "csv_base64": base64.b64encode(raw).decode(),
+                "po_number": "PO-13",
+            },
+        )
+        assert generated.status_code == 200, generated.text[:400]
+        body = generated.json()
+        if forwarder_id == "qiluo":
+            qty = next(item["value"] for item in body["cells"] if item.get("field_key") == "qty_per_box")
+            price = next(item["value"] for item in body["cells"] if item.get("field_key") == "declared_price")
+            assert type(qty) is int and qty == 4
+            assert type(price) is float and price == 39.99
+        exported = client.post("/api/export_invoice", json={**_ui_export_body(body), "forwarder_id": forwarder_id})
+        assert exported.status_code == 200, exported.text[:400]
+        wb = _book(exported.content)
+        try:
+            if forwarder_id == "qiluo":
+                ws = wb["发票"]
+                _assert_numeric(ws["F2"], integer=True, value=4)
+                _assert_numeric(ws["G2"], value=39.99)
+                for coord in ("M2", "N2", "O2", "P2"):
+                    _assert_numeric(ws[coord])
+                assert isinstance(ws["A2"].value, str)
+                assert isinstance(ws["L2"].value, str)
+            elif forwarder_id == "send":
+                ws = next(sheet for sheet in wb.worksheets if "Invoice" in sheet.title)
+                _assert_numeric(ws["F15"], integer=True, value=4)
+                _assert_numeric(ws["R15"], value=39.99)
+                _assert_numeric(ws["Q15"], integer=True, value=5)
+                _assert_numeric(ws["S15"], value=39.99)
+                _assert_numeric(ws["C15"])
+                assert isinstance(ws["M15"].value, str)
+            elif forwarder_id == "jiufang":
+                inv, pk = wb["Invoice"], wb["Packing list"]
+                _assert_numeric(inv["O25"], integer=True, value=4)
+                _assert_numeric(inv["R25"], value=39.99)
+                _assert_numeric(inv["Q25"], integer=True)
+                _assert_numeric(inv["S25"], value=159.96)
+                _assert_numeric(pk["H6"], integer=True, value=4)
+                for coord in ("I6", "J6", "K6", "L6", "M6"):
+                    _assert_numeric(pk[coord])
+                assert isinstance(inv["N25"].value, str)
+            elif forwarder_id == "qiluo_t6":
+                ws = wb["发票"]
+                _assert_numeric(ws["F14"], integer=True, value=4)
+                _assert_numeric(ws["G14"], value=39.99)
+                _assert_numeric(ws["B6"], integer=True, value=1)
+                for coord in ("N14", "O14", "P14"):
+                    _assert_numeric(ws[coord])
+                assert isinstance(ws["L14"].value, str)
+                assert isinstance(ws["A14"].value, str)
+            elif forwarder_id == "qiluo_t5":
+                ws = wb.worksheets[0]
+                _assert_numeric(ws["H10"], integer=True, value=4)
+                _assert_numeric(ws["I10"], value=39.99)
+                _assert_numeric(ws["J10"], integer=True, value=1)
+                for coord in ("K10", "L10", "M10", "N10"):
+                    _assert_numeric(ws[coord])
+                assert isinstance(ws["A10"].value, str)
+            elif forwarder_id == "deshu":
+                ws = wb["发票填写模板"]
+                _assert_numeric(ws["N21"], integer=True, value=4)
+                _assert_numeric(ws["R21"], value=39.99)
+                _assert_numeric(ws["P21"], integer=True)
+                _assert_numeric(ws["Q21"], integer=True, value=5)
+                _assert_numeric(ws["G4"], integer=True, value=4)
+                for coord in ("U21", "V21", "W21"):
+                    _assert_numeric(ws[coord])
+                assert isinstance(ws["G21"].value, str)
+                assert isinstance(wb["填写示例"]["N21"].value, str)
+        finally:
+            wb.close()
+    finally:
+        delete_product_by_sku(sku)
+
+
+def _cell_color(color) -> tuple | None:
+    if color is None:
+        return None
+    if color.type == "rgb":
+        return ("rgb", color.rgb)
+    if color.type == "theme":
+        return ("theme", color.theme, color.tint)
+    if color.type == "indexed":
+        return ("indexed", color.indexed)
+    return (color.type, str(color.value))
+
+
+def _border_side(side) -> tuple | None:
+    if side is None or side.style is None:
+        return None
+    return (side.style, _cell_color(side.color))
+
+
+def _cell_style(cell) -> tuple:
+    from openpyxl.cell.cell import MergedCell
+
+    if isinstance(cell, MergedCell):
+        return ("MERGED",)
+    font, fill, border, align = cell.font, cell.fill, cell.border, cell.alignment
+    return (
+        font.name,
+        font.size,
+        bool(font.bold),
+        bool(font.italic),
+        font.underline,
+        _cell_color(font.color),
+        fill.patternType,
+        _cell_color(fill.fgColor),
+        _cell_color(fill.bgColor),
+        _border_side(border.left),
+        _border_side(border.right),
+        _border_side(border.top),
+        _border_side(border.bottom),
+        align.horizontal,
+        align.vertical,
+        bool(align.wrap_text),
+        cell.number_format,
+    )
+
+
+def _style_diffs(blank, filled, sheet_name: str, data_start: int, prototype: int, total_proto: int, count: int) -> list[str]:
+    src, dst = blank[sheet_name], filled[sheet_name]
+    max_col = max(min(src.max_column or 1, 30), min(dst.max_column or 1, 30))
+    diffs = []
+    last = data_start + count
+    for row in range(1, last + 1):
+        if data_start <= row < data_start + count:
+            template_row = prototype
+        elif row == last:
+            template_row = total_proto
+        else:
+            template_row = row
+        if template_row < 1 or template_row > (src.max_row or 1):
+            continue
+        for col in range(1, max_col + 1):
+            got = _cell_style(dst.cell(row, col))
+            want = _cell_style(src.cell(template_row, col))
+            if got != want:
+                diffs.append(f"{sheet_name}!{dst.cell(row, col).coordinate} vs row {template_row}: {want} != {got}")
+    return diffs
+
+
+def test_jiufang_step45_styles_match_the_template():
+    """九方 Step 4.5 逐格对照空白模板：数据行、合计行的字体、边框、对齐和数字格式不变。"""
+    from fastapi.testclient import TestClient
+
+    from fba_tool.invoice_export import _template_bytes, export_invoice, get_export_forwarder
+    from fba_tool.master_db import delete_product_by_sku
+    from fba_tool.shipment_parser import parse_csv_shipment
+    from main import app
+
+    fw = get_export_forwarder("jiufang")
+    blank = _book(_template_bytes(fw))
+    warehouse = {"address1": "1 Test Road", "city": "STEP45VILLE", "state": "ZZ", "zip": "00000"}
+
+    def products(count: int) -> dict:
+        out = {}
+        for index in range(1, count + 1):
+            fnsku = f"X00TESTY{index}"
+            out[fnsku] = {
+                "sku": f"B13-Y{index}",
+                "fnsku": fnsku,
+                "asin": f"B0STYL{index:02d}",
+                "listing_price": 10.0,
+                "english_name": "Item",
+                "chinese_name": "物品",
+                "brand": "B",
+                "material": "铁",
+                "purpose": "用",
+                "hs_code": "7326909000",
+                "model_name": "无",
+                "invoice": {
+                    "unit": "个",
+                    "purchase_price": 5,
+                    "material_en": "iron",
+                    "purpose_en": "use",
+                    "pcs_per_set": 1,
+                },
+            }
+        return out
+
+    try:
+        for count in (1, 3):
+            ship = parse_csv_shipment(_lines_csv(count).replace(b"B13-L", b"B13-Y").replace(b"X00TESTL", b"X00TESTY"), file_name="lines.csv")
+            result = export_invoice(
+                "jiufang",
+                shipment=ship,
+                products=products(count),
+                reference_id="R",
+                warehouse="TST1",
+                warehouse_info=warehouse,
+                order_no="LCLX",
+            )
+            filled = _book(result["bytes"])
+            try:
+                diffs = _style_diffs(blank, filled, "Invoice", 25, 25, 26, count)
+                diffs += _style_diffs(blank, filled, "Packing list", 6, 6, 7, count)
+                assert diffs == [], "\n".join(diffs[:12])
+                assert filled["Packing list"]["H6"].number_format == blank["Packing list"]["H6"].number_format
+                assert filled["Packing list"]["I6"].number_format == blank["Packing list"]["I6"].number_format
+            finally:
+                filled.close()
+
+        sku = "B13-Y1"
+        delete_product_by_sku(sku)
+        _seed(sku, "X00TESTY1", "B0STYL01", "无", material="铁", purpose="用", listing_price=10)
+        client = TestClient(app)
+        generated = client.post(
+            "/api/invoice/generate",
+            json={
+                "shipment_id": "FBA13LINE",
+                "forwarder_id": "jiufang",
+                "csv_base64": base64.b64encode(
+                    _lines_csv(1).replace(b"B13-L", b"B13-Y").replace(b"X00TESTL", b"X00TESTY").replace(b"FBA13LINE", b"FBA13LINE")
+                ).decode(),
+                "po_number": "PO-13",
+            },
+        )
+        assert generated.status_code == 200, generated.text[:400]
+        body = generated.json()
+        exported = client.post("/api/export_invoice", json={**_ui_export_body(body), "forwarder_id": "jiufang"})
+        assert exported.status_code == 200, exported.text[:400]
+        stepped = _book(exported.content)
+        try:
+            diffs = _style_diffs(blank, stepped, "Invoice", 25, 25, 26, 1)
+            diffs += _style_diffs(blank, stepped, "Packing list", 6, 6, 7, 1)
+            assert diffs == [], "\n".join(diffs[:12])
+        finally:
+            stepped.close()
+            delete_product_by_sku(sku)
+    finally:
+        blank.close()

@@ -14,6 +14,7 @@ import {
   buildClipboardHtmlTable,
   cellMetaFromFills,
   formatCellRef,
+  numericFillValue,
   parseCellRef,
   type CellMeta,
   type InvoiceCellFill,
@@ -64,7 +65,7 @@ interface SnapshotSheet {
 interface CellEdit {
   sheet: string;
   cell: string;
-  value: string;
+  value: string | number;
 }
 
 function normFormula(value: string): string {
@@ -91,9 +92,11 @@ function overlayEdits(snapshot: WorkbookSnapshot, edits: CellEdit[]): WorkbookSn
     const row = (cellData[String(pos.row)] ||= {});
     const prev = { ...(row[String(pos.col)] || {}) };
     const formula = typeof prev.f === "string" ? prev.f : "";
-    if (formula && normFormula(formula) === normFormula(edit.value)) continue;
+    if (formula && normFormula(formula) === normFormula(String(edit.value))) continue;
     delete prev.f;
     prev.v = edit.value;
+    if (typeof edit.value === "number") prev.t = 2;
+    else delete prev.t;
     row[String(pos.col)] = prev;
   }
   return snapshot;
@@ -379,18 +382,19 @@ export const InvoiceSpreadsheet = forwardRef<InvoiceSpreadsheetHandle, InvoiceSp
     const writeFill = useCallback((fill: InvoiceCellFill) => {
       if (!fill.cell) return;
       const upper = fill.cell.toUpperCase();
-      const text = fill.value == null ? "" : String(fill.value);
+      const written = numericFillValue(fill);
+      const text = written === "" ? "" : String(written);
       valuesRef.current[upper] = text;
       const api = mountRef.current?.univerAPI;
       const sheetName = activeSheetName(api);
-      editsRef.current[`${sheetName}!${upper}`] = { sheet: sheetName, cell: upper, value: text };
+      editsRef.current[`${sheetName}!${upper}`] = { sheet: sheetName, cell: upper, value: written };
       const sheet = api?.getActiveWorkbook()?.getActiveSheet();
       if (!sheet) return;
       const source = cellMetaRef.current[upper]?.source ?? "preview";
       programmaticDepthRef.current += 1;
       suppressEditsRef.current = true;
       try {
-        sheet.getRange(upper).setValue(text);
+        sheet.getRange(upper).setValue(written);
         if (!fill.clear && text) sheet.getRange(upper).setBackgroundColor(SOURCE_BG_HEX[source]);
       } catch {
         // 非法单元格引用跳过

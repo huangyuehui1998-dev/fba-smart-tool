@@ -345,7 +345,7 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
       </div>
 
       {(referenceIdHint || missingLabels.some((label) => label.includes("Reference ID"))) && (
-        <Alert className="border-amber-300 bg-amber-50" data-testid="reference-id-hint">
+        <Alert className="sticky top-0 z-20 border-amber-300 bg-amber-50 shadow-sm" data-testid="reference-id-banner">
           <AlertTriangle className="h-4 w-4 !text-amber-600" />
           <AlertTitle className="text-sm font-semibold text-amber-900">Reference ID 为空</AlertTitle>
           <AlertDescription className="text-xs text-amber-800">
@@ -454,6 +454,11 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
       </Dialog>
 
       <div data-bottom-bar className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur transition-[left] duration-300 ease-in-out supports-[backdrop-filter]:bg-card/80">
+        {(referenceIdHint || missingLabels.some((label) => label.includes("Reference ID"))) && (
+          <p className="mb-2 text-xs font-medium text-amber-800" data-testid="reference-id-hint">
+            Reference ID 为空。{referenceIdHint || "请上传货件 PDF。Reference ID 在货件 PDF 里，产品库没有这一项。"}
+          </p>
+        )}
         <div className="flex items-center justify-between gap-4">
           <Button variant="outline" size="lg" onClick={onPrev} className="gap-2">
             <ArrowLeft className="h-4 w-4" />

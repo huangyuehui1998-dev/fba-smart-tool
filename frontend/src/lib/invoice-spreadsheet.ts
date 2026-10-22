@@ -39,6 +39,32 @@ export interface CellMeta {
   required?: boolean;
 }
 
+const INTEGER_NUMBER_FIELDS = new Set(["qty_per_box", "total_qty", "box_count", "pcs_per_set"]);
+const NUMBER_FIELDS = new Set([
+  ...INTEGER_NUMBER_FIELDS,
+  "declared_price",
+  "purchase_price",
+  "total_declared_value_usd",
+  "unit_weight_kg",
+  "box_weight",
+  "length",
+  "width",
+  "height",
+]);
+
+/** 数量、价格、重量、尺寸按数值写入。整数数量写成整数，不把 4 写成文本 "4.0"。 */
+export function numericFillValue(fill: { field_key?: string; value?: string | number | null }): string | number {
+  const raw = fill.value == null ? "" : fill.value;
+  if (raw === "") return "";
+  if (!NUMBER_FIELDS.has(fill.field_key || "")) return String(raw);
+  const parsed = typeof raw === "number" ? raw : Number(String(raw).replace(/,/g, "").trim());
+  if (!Number.isFinite(parsed)) return String(raw);
+  if (INTEGER_NUMBER_FIELDS.has(fill.field_key || "") && Math.abs(parsed - Math.round(parsed)) < 1e-9) {
+    return Math.round(parsed);
+  }
+  return parsed;
+}
+
 /** FortuneSheet `bg` 属性使用的十六进制色值 */
 export const SOURCE_BG_HEX: Record<CellSourceKind, string> = {
   preview: "#ffffff",
@@ -295,12 +321,13 @@ export function applyFillsToSheets(sheets: Sheet[], fills: InvoiceCellFill[]): S
       try {
         const { row, col } = parseCellRef(fill.cell);
         const source = meta[fill.cell.toUpperCase()]?.source ?? "preview";
-        if (fill.value === "" || fill.value == null) {
+        const written = numericFillValue(fill);
+        if (written === "") {
           writeCell(data, row, col, { v: "", m: "" });
         } else {
           const patch: Partial<Cell> = {
-            v: fill.value,
-            m: String(fill.value),
+            v: written,
+            m: String(written),
           };
           if (!fill.clear) {
             patch.bg = SOURCE_BG_HEX[source];

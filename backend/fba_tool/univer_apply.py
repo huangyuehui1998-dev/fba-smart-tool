@@ -45,7 +45,12 @@ def apply_cell_writes(data: bytes, writes: List[Dict[str, Any]], sheet_name: Opt
             from openpyxl.utils.cell import coordinate_to_tuple
 
             row, col = coordinate_to_tuple(ref)
-            value = item.get("value")
+            from fba_tool.invoice_rules import coerce_invoice_number
+
+            value = coerce_invoice_number(
+                str(item.get("field_key") or item.get("key") or ""),
+                item.get("value"),
+            )
             if (row, col) in slaves:
                 master = ws.cell(*slaves[(row, col)])
                 if not _values_equal(master.value, value):
@@ -184,12 +189,35 @@ def _values_equal(orig: Any, snap: Any) -> bool:
     return str(orig) == str(snap)
 
 
+def _keep_numeric(cell: Any, value: Any) -> Any:
+    """已经是数值的格子，快照里的文本数字仍写回数值，避免把 4 盖成 \"4.0\"。"""
+    if isinstance(value, bool) or not isinstance(value, str):
+        return value
+    current = cell.value
+    if isinstance(current, bool) or not isinstance(current, (int, float)):
+        return value
+    from fba_tool.invoice_rules import to_number
+
+    num = to_number(value.strip())
+    if isinstance(num, bool) or not isinstance(num, (int, float)):
+        return value
+    if isinstance(current, int) and float(num) == int(num):
+        return int(num)
+    return int(num) if isinstance(num, int) else float(num)
+
+
 def _write(cell: Any, payload: Dict[str, Any]) -> None:
-    value = payload.get("v")
+    value = _keep_numeric(cell, payload.get("v"))
     kind = payload.get("t")
     if kind == 3 or isinstance(value, bool):
         cell.value = bool(value)
         return
+    if kind == 2 and isinstance(value, str):
+        from fba_tool.invoice_rules import to_number
+
+        num = to_number(value.strip())
+        if isinstance(num, (int, float)) and not isinstance(num, bool):
+            value = int(num) if isinstance(num, float) and num == int(num) else num
     if kind == 2 or isinstance(value, (int, float)):
         cell.value = value
         return
