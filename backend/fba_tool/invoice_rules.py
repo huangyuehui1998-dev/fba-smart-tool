@@ -275,6 +275,19 @@ def invoice_fields(product: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def missing_price_label(*, sku: str = "", fnsku: str = "", fallback: str = "") -> str:
+    """空申报价同时点名 SKU 和 FNSKU。只有一边时只列那一边；都没有再用原来的标识。"""
+    sku_text = str(sku or "").strip()
+    fnsku_text = str(fnsku or "").strip()
+    if sku_text and fnsku_text:
+        return f"SKU {sku_text} / FNSKU {fnsku_text}"
+    if sku_text:
+        return f"SKU {sku_text}"
+    if fnsku_text:
+        return f"FNSKU {fnsku_text}"
+    return str(fallback or "").strip()
+
+
 def price_rows(products: Dict[str, Dict[str, Any]], fnskus: Iterable[str]) -> List[Dict[str, Any]]:
     from fba_tool.product_fields import resolve_declared_price
 
@@ -291,7 +304,9 @@ def price_rows(products: Dict[str, Dict[str, Any]], fnskus: Iterable[str]) -> Li
         from fba_tool.product_fields import promo_info
 
         promo = promo_info(p) if p else None  # D-12
-        rows.append({"sku": f, "price_source": src or "none", "unit_price": price,
+        rows.append({"sku": f, "product_sku": str(p.get("sku") or "").strip(),
+                     "fnsku": str(p.get("fnsku") or f or "").strip(),
+                     "price_source": src or "none", "unit_price": price,
                      "legacy_price": legacy, "manual_price": manual, "raw_price": price,
                      "promo_price": promo["listing_price"] if promo else None})
     return rows

@@ -308,6 +308,7 @@ def test_qiluo_declared_price_uses_listing_price_like_send():
     upsert_product(
         {
             "sku": "SKU-PRICE-EMPTY",
+            "fnsku": "X00TESTEMPTY",
             "extra_data": json.dumps({"invoice": {"unit": "个", "purchase_price": 5}}, ensure_ascii=False),
         }
     )
@@ -322,7 +323,9 @@ def test_qiluo_declared_price_uses_listing_price_like_send():
         )
     reason = blocked.value.blocking[0]
     assert reason["code"] == "price_missing"
-    assert reason["skus"] == ["SKU-PRICE-EMPTY"]
+    assert reason["skus"] == ["SKU SKU-PRICE-EMPTY / FNSKU X00TESTEMPTY"]
+    assert "SKU SKU-PRICE-EMPTY" in reason["message"]
+    assert "FNSKU X00TESTEMPTY" in reason["message"]
     assert "不能导出" in reason["message"]
 
 
@@ -348,6 +351,7 @@ def test_qiluo_mixed_empty_price_stays_numeric_then_blocks():
     upsert_product(
         {
             "sku": "SKU-MIX-EMPTY",
+            "fnsku": "X00TESTMIX0",
             "chinese_name": "无价",
             "hs_code": "9507100090",
             "model_name": "型号",
@@ -372,5 +376,7 @@ def test_qiluo_mixed_empty_price_stays_numeric_then_blocks():
             run_invoice_etl(forwarder_id="qiluo", ship=ship(order), csv_bytes=b"", workflow_json=None)
         reason = blocked.value.blocking[0]
         assert reason["code"] == "price_missing"
-        assert reason["skus"] == ["SKU-MIX-EMPTY"]
+        assert reason["skus"] == ["SKU SKU-MIX-EMPTY / FNSKU X00TESTMIX0"]
+        assert "SKU SKU-MIX-EMPTY" in reason["message"]
+        assert "FNSKU X00TESTMIX0" in reason["message"]
         assert "不能导出" in reason["message"]

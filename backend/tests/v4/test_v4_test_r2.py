@@ -467,7 +467,8 @@ def test_empty_declared_price_blocks_every_forwarder(forwarder_id):
         assert any(item.get("code") == "price_missing" for item in blocking)
         text = json.dumps(blocking, ensure_ascii=False)
         assert "不能导出" in text
-        assert sku in text or fnsku in text
+        assert f"SKU {sku}" in text
+        assert f"FNSKU {fnsku}" in text
     finally:
         delete_product_by_sku(sku)
 

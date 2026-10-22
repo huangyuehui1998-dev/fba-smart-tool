@@ -560,15 +560,26 @@ def run_invoice_etl(
         separate_material_purpose=separate_mp,
     )
     if "declared_price" in (mapping.get("columns_mapping") or {}):
-        missing = [
-            str(item.values.get("sku") or "").strip()
-            for item in line_items
-            if item.values.get("declared_price") in (None, "")
-        ]
-        missing = [sku for sku in missing if sku]
-        if missing:
-            from fba_tool.invoice_rules import InvoiceBlocked
+        from fba_tool.invoice_rules import InvoiceBlocked, missing_price_label
 
+        missing: List[str] = []
+        seen: set[str] = set()
+        for item in line_items:
+            if item.values.get("declared_price") not in (None, ""):
+                continue
+            sku = str(item.values.get("sku") or "").strip()
+            if not sku or sku in seen:
+                continue
+            seen.add(sku)
+            fnsku = str((get_product_by_sku(sku) or {}).get("fnsku") or "").strip()
+            if not fnsku and "FNSKU" in ship.box_items.columns:
+                for _, rec in ship.box_items.iterrows():
+                    if str(rec.get("SKU") or "").strip() == sku:
+                        fnsku = str(rec.get("FNSKU") or "").strip()
+                        if fnsku:
+                            break
+            missing.append(missing_price_label(sku=sku, fnsku=fnsku, fallback=sku))
+        if missing:
             message = "以下 SKU 没有申报价，不能导出：" + "、".join(missing) + "。请在产品库导入领星售价或手填申报价。"
             raise InvoiceBlocked([{"code": "price_missing", "skus": missing, "message": message}])
     return line_items, warnings
