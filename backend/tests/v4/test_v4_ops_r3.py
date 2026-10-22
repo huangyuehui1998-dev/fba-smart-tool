@@ -360,26 +360,60 @@ def test_run_app_candidate_ports_skip_8010():
     assert 8010 not in ports
 
 
-def _rebox_or_fist_path(path: Path) -> bool:
-    """刷箱 / FIST 目录和文件名里的「待分配」不是第 13/14 批命名货件。"""
+def _relative_parts(path: Path, root: Path) -> tuple[str, ...]:
+    try:
+        return path.relative_to(root).parts
+    except ValueError:
+        return path.parts
+
+
+def _is_fist_part(folded: str) -> bool:
+    """目录名或文件名是 FIST。不把别的词里夹着的 fist 算进去。"""
+    if folded == "fist":
+        return True
+    stem, dot, _ext = folded.rpartition(".")
+    if dot and stem == "fist":
+        return True
+    return folded.startswith("fist") and len(folded) > 4 and not folded[4].isalnum()
+
+
+def _rebox_or_fist_path(path: Path, root: Path) -> bool:
+    """刷箱、FIST、golden samples，以及文件名里的「待分配」，不是第 13/14 批命名货件。"""
     if "待分配" in path.name:
         return True
-    for part in path.parts:
+    rel_parts = _relative_parts(path, root)
+    folded_parts = [part.strip().casefold() for part in rel_parts]
+    for part, folded in zip(rel_parts, folded_parts):
         text = part.strip()
-        if "刷箱" in text or text.casefold() == "fist":
+        if "刷箱" in text or _is_fist_part(folded):
+            return True
+        if "golden" in folded and "sample" in folded:
+            return True
+        if folded == "golden":
+            return True
+    for left, right in zip(folded_parts, folded_parts[1:]):
+        if "golden" in left and "sample" in right:
             return True
     return False
+
+
+def _packing_or_send_boxlist(path: Path, root: Path) -> bool:
+    """只留装箱明细，以及 SEND 的箱单。刷箱里的 SEND 不是这种箱单。"""
+    text = str(Path(*_relative_parts(path, root)))
+    if "装箱明细" in text:
+        return True
+    return "箱单" in text and "send" in text.casefold()
 
 
 def _batch_csvs(root: Path) -> dict[str, list[Path]]:
     found = {"13": [], "14": []}
     for path in root.rglob("*.csv"):
-        if path.name.startswith("~$") or _rebox_or_fist_path(path):
+        if path.name.startswith("~$") or _rebox_or_fist_path(path, root) or not _packing_or_send_boxlist(path, root):
             continue
-        text = str(path)
-        if "第13批" in text or "/13/" in text.replace("\\", "/"):
+        text = str(path).replace("\\", "/")
+        if "第13批" in text or "/13/" in text:
             found["13"].append(path)
-        elif "第14批" in text or "/14/" in text.replace("\\", "/"):
+        elif "第14批" in text or "/14/" in text:
             found["14"].append(path)
     return found
 
@@ -387,7 +421,7 @@ def _batch_csvs(root: Path) -> dict[str, list[Path]]:
 def _invoice_files(root: Path) -> list[Path]:
     found = []
     for path in root.rglob("*"):
-        if not path.is_file() or path.name.startswith("~$") or _rebox_or_fist_path(path):
+        if not path.is_file() or path.name.startswith("~$") or _rebox_or_fist_path(path, root):
             continue
         if path.suffix.lower() not in {".xlsx", ".xlsm"}:
             continue
@@ -400,31 +434,51 @@ def _invoice_files(root: Path) -> list[Path]:
 
 
 def test_batch_csv_scan_skips_fist_and_rebox_dirs(tmp_path):
-    """rglob 会走进刷箱/FIST。命名货件留下，待分配目录不进第 13/14 批对照。"""
-    named13 = tmp_path / "第13批" / "第一票"
-    named13.mkdir(parents=True)
-    (named13 / "第一票.csv").write_text("named", encoding="utf-8")
-    (named13 / "FBA19TEST13发票.xlsx").write_bytes(b"")
+    """rglob 会走进刷箱/FIST、刷箱/SEND 和 golden samples。只留装箱明细和 SEND/箱单。"""
+    packing13 = tmp_path / "第13批" / "装箱明细"
+    packing13.mkdir(parents=True)
+    (packing13 / "第一票.csv").write_text("named", encoding="utf-8")
+    (packing13 / "FBA19TEST13发票.xlsx").write_bytes(b"")
+    loose = tmp_path / "第13批" / "第一票"
+    loose.mkdir(parents=True)
+    (loose / "loose.csv").write_text("loose", encoding="utf-8")
     rebox = tmp_path / "第13批" / "刷箱" / "FIST"
     rebox.mkdir(parents=True)
     (rebox / "fist.csv").write_text("dirty", encoding="utf-8")
     (rebox / "待分配发票.xlsx").write_bytes(b"")
+    send_rebox = tmp_path / "第13批" / "刷箱" / "SEND"
+    send_rebox.mkdir(parents=True)
+    (send_rebox / "send.csv").write_text("dirty", encoding="utf-8")
+    golden = tmp_path / "第13批" / "golden samples"
+    golden.mkdir(parents=True)
+    (golden / "gold.csv").write_text("dirty", encoding="utf-8")
+    (golden / "FBA19GOLD发票.xlsx").write_bytes(b"")
+    nested = tmp_path / "golden" / "samples" / "第13批" / "装箱明细"
+    nested.mkdir(parents=True)
+    (nested / "nested.csv").write_text("dirty", encoding="utf-8")
+    send_box = tmp_path / "第13批" / "SEND" / "箱单"
+    send_box.mkdir(parents=True)
+    (send_box / "send-box.csv").write_text("named", encoding="utf-8")
     (tmp_path / "第13批" / "待分配.csv").write_text("dirty", encoding="utf-8")
-    named14 = tmp_path / "第14批" / "第四票"
-    named14.mkdir(parents=True)
-    (named14 / "第四票.csv").write_text("named", encoding="utf-8")
+    packing14 = tmp_path / "第14批" / "装箱明细"
+    packing14.mkdir(parents=True)
+    (packing14 / "第四票.csv").write_text("named", encoding="utf-8")
     (tmp_path / "第14批" / "待分配发票.xlsx").write_bytes(b"")
+    (tmp_path / "第14批" / "SEND").mkdir(parents=True)
+    (tmp_path / "第14批" / "SEND" / "not-box.csv").write_text("dirty", encoding="utf-8")
     (tmp_path / "batches" / "13" / "刷箱").mkdir(parents=True)
     (tmp_path / "batches" / "13" / "刷箱" / "a.csv").write_text("dirty", encoding="utf-8")
-    (tmp_path / "batches" / "13" / "FBA19TEST").mkdir(parents=True)
-    (tmp_path / "batches" / "13" / "FBA19TEST" / "ship.csv").write_text("named", encoding="utf-8")
+    (tmp_path / "batches" / "13" / "装箱明细").mkdir(parents=True)
+    (tmp_path / "batches" / "13" / "装箱明细" / "ship.csv").write_text("named", encoding="utf-8")
     (tmp_path / "batches" / "14" / "FIST").mkdir(parents=True)
     (tmp_path / "batches" / "14" / "FIST" / "a.csv").write_text("dirty", encoding="utf-8")
     (tmp_path / "batches" / "14" / "named").mkdir(parents=True)
-    (tmp_path / "batches" / "14" / "named" / "b.csv").write_text("named", encoding="utf-8")
+    (tmp_path / "batches" / "14" / "named" / "loose14.csv").write_text("loose", encoding="utf-8")
+    (tmp_path / "batches" / "14" / "SEND" / "箱单").mkdir(parents=True)
+    (tmp_path / "batches" / "14" / "SEND" / "箱单" / "b.csv").write_text("named", encoding="utf-8")
 
     found = _batch_csvs(tmp_path)
-    assert {path.name for path in found["13"]} == {"第一票.csv", "ship.csv"}
+    assert {path.name for path in found["13"]} == {"第一票.csv", "send-box.csv", "ship.csv"}
     assert {path.name for path in found["14"]} == {"第四票.csv", "b.csv"}
     assert {path.name for path in _invoice_files(tmp_path)} == {"FBA19TEST13发票.xlsx"}
 
@@ -496,6 +550,45 @@ def grand_qty_token(box_items) -> str:
         if qty:
             total += qty
     return str(total)
+
+
+def _csv_segment_totals(box_items) -> list[int]:
+    """同一 SKU、单箱数量相同、箱号连续的一段，把这段里的数量加总。
+
+    箱号中间断开就另起一段。琪珞和琪珞 T6 没有 SKU 列，一行就是这样一段。
+    """
+    if box_items is None or box_items.empty or "SKU" not in getattr(box_items, "columns", []):
+        return []
+    grouped: dict[str, list[tuple[int, int]]] = {}
+    for _, rec in box_items.iterrows():
+        sku = str(rec.get("SKU") or "").strip()
+        qty = _whole_qty(rec.get("数量"))
+        box = _whole_qty(rec.get("箱号"))
+        if not sku or qty is None or box is None:
+            continue
+        grouped.setdefault(sku, []).append((box, qty))
+    totals: list[int] = []
+    for pairs in grouped.values():
+        pairs.sort()
+        run_box = None
+        run_per = None
+        run_sum = 0
+        for box, qty in pairs:
+            if run_box is None:
+                run_box, run_per, run_sum = box, qty, qty
+                continue
+            if box == run_box:
+                run_sum += qty
+                continue
+            if box == run_box + 1 and qty == run_per:
+                run_box = box
+                run_sum += qty
+                continue
+            totals.append(run_sum)
+            run_box, run_per, run_sum = box, qty, qty
+        if run_sum:
+            totals.append(run_sum)
+    return totals
 
 
 def _qty_kind(header: str) -> str | None:
@@ -635,13 +728,23 @@ def _sheet_sku_totals(rows, alias: dict[str, str], *, multiply: bool = True) -> 
     return keyed, anonymous
 
 
-def _qty_compare(data: bytes, expected: dict[str, int], alias: dict[str, str]) -> tuple[bool, str]:
-    """发票或导出里的数量先变成整数，再按每个 SKU 的合计和 CSV 比。"""
+def _qty_compare(
+    data: bytes,
+    expected: dict[str, int],
+    alias: dict[str, str],
+    segments: list[int] | None = None,
+) -> tuple[bool, str]:
+    """有 SKU 列就按 SKU 加总。没有 SKU 列就按连续箱段加总，再和 CSV 的段合计比。
+
+    没有 SKU 列时，一行一个 SKU 合计（琪珞 T5 把各 SKU 合计写在一格）也认。
+    单箱数列表和整票一个数对上不算过。
+    """
     import openpyxl
 
     if not expected:
         return False, "CSV 没有正的 SKU 数量"
-    target = sorted(expected.values())
+    sku_target = sorted(expected.values())
+    segment_target = sorted(segments or [])
     details: list[str] = []
     wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
     try:
@@ -656,8 +759,12 @@ def _qty_compare(data: bytes, expected: dict[str, int], alias: dict[str, str]) -
                 keyed, anonymous = _sheet_sku_totals(rows, alias, multiply=multiply)
                 if keyed == expected:
                     return True, ""
-                if not keyed and anonymous and sorted(anonymous) == target:
-                    return True, ""
+                if not keyed and anonymous:
+                    got = sorted(anonymous)
+                    if segment_target and got == segment_target:
+                        return True, ""
+                    if got == sku_target:
+                        return True, ""
                 if recorded is None and (keyed or anonymous):
                     recorded = (keyed, anonymous)
             if recorded:
@@ -665,10 +772,11 @@ def _qty_compare(data: bytes, expected: dict[str, int], alias: dict[str, str]) -
                 if keyed:
                     details.append(f"{ws.title} 按 SKU {keyed}")
                 elif anonymous:
-                    details.append(f"{ws.title} 按行 {anonymous}")
+                    details.append(f"{ws.title} 按段 {anonymous}")
     finally:
         wb.close()
-    return False, "读到 " + ("；".join(details) if details else "没有数量")
+    segment_note = f"；段合计应为 {segment_target}" if segment_target and segment_target != sku_target else ""
+    return False, "读到 " + ("；".join(details) if details else "没有数量") + segment_note
 
 
 def _workbook_texts(data: bytes) -> set[str]:
@@ -784,17 +892,20 @@ def _shared_address_candidates(forwarder_id: str, ship_to: str, csv_code: str) -
 def _matches_sku_qty_tokens(data: bytes, box_items) -> tuple[bool, str]:
     """导出或原发票都按 sku_qty_tokens 对照。单箱数和整票总数对上也不算过。
 
-    格子里可以是单箱数量乘箱数（命名 FBA 的琪珞、德速），或 52.0 这种浮点合计。
+    有 SKU 列时，各行按 SKU 加总，对照每个 SKU 的合计。
+    没有 SKU 列时，先按连续箱段把单箱数量乘上箱数，再和 CSV 里同样的段合计比。
+    箱号不连续时，一段不是整个 SKU，行列表本身对不上 SKU 合计。
+    格子里也可以直接是 SKU 合计（52.0，或琪珞 T5 用逗号把各 SKU 合计写在一格）。
     待分配琪珞把加总直接写进单箱内数量，箱号段仍跨多箱，这种也不乘箱数再认一次。
-    对照的集合仍是每个 SKU 的加总，不是 {"4"}，也不是整票一个数。
     """
     expected, alias = _csv_sku_totals(box_items)
     tokens = sku_qty_tokens(box_items)
     per_box = per_box_qty_tokens(box_items)
     grand = grand_qty_token(box_items)
+    segments = _csv_segment_totals(box_items)
     if tokens != {str(value) for value in expected.values() if value > 0}:
         return False, f"sku_qty_tokens {tokens} 必须是每个 SKU 的加总"
-    ok, detail = _qty_compare(data, expected, alias)
+    ok, detail = _qty_compare(data, expected, alias, segments)
     if not ok:
         return False, f"应按 sku_qty_tokens {tokens} 对照，不是单箱 {per_box}，也不是整票 {grand}。{detail}"
     return True, ""
@@ -804,8 +915,9 @@ def test_real_batches_13_and_14_autofill_export_matches_invoices(monkeypatch, tm
     """真实目录在时先导入仓库地址库，再跑六个货代的自动填写→导出。
 
     每个货代的导出和原发票都按 sku_qty_tokens 对照：每个 SKU 的数量加总，52.0 记成 52。
+    有 SKU 列时按 SKU 加总。没有 SKU 列时按连续箱段加总后再比，不拿行列表去对 SKU 合计。
     单箱数（例如 4）和整票总数（例如 84）对上不算过。
-    只扫第 13/14 批命名货件目录。刷箱、FIST 和文件名里的待分配不进来。
+    只扫第 13/14 批的装箱明细和 SEND/箱单。刷箱、FIST、golden samples 和文件名里的待分配不进来。
     一个地址对应多个仓库、货件名称里的仓码又不在其中（第 14 批 GYR2 / LGB8 同城多仓就是这种）时，
     九方等要写地址的货代返回 422 和候选仓库列表，不按 200 失败。
     """
@@ -1473,3 +1585,162 @@ def test_qiluo_unassigned_shipment_writes_sku_totals(monkeypatch, tmp_path):
     finally:
         delete_product_by_sku("FIST48-A")
         delete_product_by_sku("FIST80-B")
+
+
+def _nonconsecutive_box_csv() -> bytes:
+    """两 SKU 箱号不连续：A 在 1、2、5，B 在 3、4。每箱 4。段合计 8、4、8，SKU 合计 12 和 8。"""
+    headers = ["SKU", "商品名称", "ASIN", "FNSKU", "状况", "预处理类型", "商品总数"]
+    headers += [f"箱子 {index} 的商品数量" for index in range(1, 6)]
+    left = ["SEG-A", "rod", "B0SEGA0001", "X00TESTSEGA", "新品", "无", "12", "4", "4", "", "", "4"]
+    right = ["SEG-B", "rod", "B0SEGB0001", "X00TESTSEGB", "新品", "无", "8", "", "", "4", "4", ""]
+    marks = ["", "", "", "", "", "", "箱号"] + [f"FBA19SEG1U{index:06d}" for index in range(1, 6)]
+    weight = ["", "", "", "", "", "", "包装箱重量（磅）："] + ["10"] * 5
+    length = ["", "", "", "", "", "", "包装箱长度（英寸）："] + ["10"] * 5
+    width = ["", "", "", "", "", "", "包装箱宽度（英寸）："] + ["10"] * 5
+    height = ["", "", "", "", "", "", "包装箱高度（英寸）："] + ["10"] * 5
+
+    def quoted(cells: list[object]) -> str:
+        return ",".join(f'"{cell}"' for cell in cells)
+
+    return "\n".join([
+        '"货件编号","FBA19SEG1"',
+        '"货件名称","PLAIN"',
+        '"配送地址","ONLYVILLE, ZZ"',
+        '"箱子数量","5"',
+        "",
+        '"多件商品（5 箱）"',
+        quoted(headers),
+        quoted(left),
+        quoted(right),
+        "",
+        quoted(marks),
+        quoted(weight),
+        quoted(length),
+        quoted(width),
+        quoted(height),
+    ]).encode("utf-8")
+
+
+def test_qiluo_nonconsecutive_boxes_match_segment_totals(monkeypatch, tmp_path):
+    """箱号不连续时，无 SKU 列的琪珞按连续箱段加总，不拿每一行去对 SKU 合计。"""
+    import base64
+    import json
+
+    from fastapi.testclient import TestClient
+
+    from fba_tool.master_db import delete_product_by_sku, init_master_db, upsert_product
+    from fba_tool.product_fields import SOURCE_MANUAL, set_product_fields
+    from fba_tool.shipment_parser import parse_csv_shipment
+    from fba_tool.warehouse_db import apply_warehouse_import
+    from main import create_app
+
+    monkeypatch.setenv("FBA_APP_DATA_DIR", str(tmp_path / "app"))
+    monkeypatch.setenv("FBA_DISABLE_SCHEDULER", "1")
+    init_master_db()
+    raw = _nonconsecutive_box_csv()
+    ship = parse_csv_shipment(raw, file_name="segment.csv", allow_unassigned_fba=True)
+    expected, _alias = _csv_sku_totals(ship.box_items)
+    assert expected == {"SEG-A": 12, "SEG-B": 8}
+    assert sorted(_csv_segment_totals(ship.box_items)) == [4, 8, 8]
+    assert sku_qty_tokens(ship.box_items) == {"12", "8"}
+    assert per_box_qty_tokens(ship.box_items) == {"4"}
+    assert grand_qty_token(ship.box_items) == "20"
+
+    segments = _grid_xlsx([
+        ["箱序号*", "FBAID*", "单箱内数量*"],
+        ["1-2", "FBA19SEG1", 4],
+        ["5", "FBA19SEG1", 4],
+        ["3-4", "FBA19SEG1", 4],
+    ])
+    ok, detail = _matches_sku_qty_tokens(segments, ship.box_items)
+    assert ok, detail
+    already_summed = _grid_xlsx([
+        ["箱序号*", "FBAID*", "单箱内数量*"],
+        ["1-2", "FBA19SEG1", 8],
+        ["5", "FBA19SEG1", 4],
+        ["3-4", "FBA19SEG1", 8],
+    ])
+    ok, detail = _matches_sku_qty_tokens(already_summed, ship.box_items)
+    assert ok, detail
+    by_sku = _grid_xlsx([
+        ["箱序号*", "FBAID*", "单箱内数量*"],
+        ["1-2,5", "FBA19SEG1", 12],
+        ["3-4", "FBA19SEG1", 8],
+    ])
+    ok, detail = _matches_sku_qty_tokens(by_sku, ship.box_items)
+    assert ok, detail
+    per_box_rows = _grid_xlsx(
+        [["箱序号*", "FBAID*", "单箱内数量*"]]
+        + [[str(index), "FBA19SEG1", 4] for index in range(1, 6)]
+    )
+    ok, detail = _matches_sku_qty_tokens(per_box_rows, ship.box_items)
+    assert not ok, detail
+    assert "12" in detail and "8" in detail
+    grand_only = _grid_xlsx([
+        ["品名", "总数量"],
+        ["物品", 20],
+    ])
+    ok, detail = _matches_sku_qty_tokens(grand_only, ship.box_items)
+    assert not ok, detail
+    assert "整票" in detail
+
+    library = _warehouse_xlsx([
+        ("ONL1", "ONL1", "Amazon", "00001", "1 Only Road", "", "", "US", "ONLYVILLE", "ZZ", ""),
+    ])
+    assert apply_warehouse_import(library, "synthetic-warehouse.xlsx")["written"] == 1
+    for sku, fnsku, asin in (
+        ("SEG-A", "X00TESTSEGA", "B0SEGA0001"),
+        ("SEG-B", "X00TESTSEGB", "B0SEGB0001"),
+    ):
+        upsert_product(
+            {
+                "sku": sku,
+                "fnsku": fnsku,
+                "asin": asin,
+                "english_name": "Fishing rod",
+                "chinese_name": "鱼竿",
+                "brand": "Acme",
+                "material": "棉",
+                "purpose": "宠物",
+                "hs_code": "9507100090",
+                "model_name": "型号甲",
+                "extra_data": json.dumps(
+                    {"invoice": {"unit": "个", "purchase_price": 5, "material_en": "cotton", "purpose_en": "pet", "pcs_per_set": 1}},
+                    ensure_ascii=False,
+                ),
+            }
+        )
+        set_product_fields(sku, {"listing_price": 10, "listing_price_currency": "USD"}, SOURCE_MANUAL)
+    client = TestClient(create_app())
+    try:
+        for forwarder_id in FORWARDERS:
+            generated = client.post(
+                "/api/invoice/generate",
+                json={
+                    "shipment_id": ship.shipment_id,
+                    "forwarder_id": forwarder_id,
+                    "csv_base64": base64.b64encode(raw).decode(),
+                },
+            )
+            assert generated.status_code == 200, f"{forwarder_id} {generated.text[:400]}"
+            body = generated.json()
+            exported = client.post(
+                "/api/export_invoice",
+                json={
+                    "template_hash": body["template_hash"],
+                    "forwarder_id": forwarder_id,
+                    "shipment_id": body["shipment_id"],
+                    "warehouse_code": body["warehouse_code"],
+                    "template_sheet": body["template_sheet"],
+                    "fields": body["cells"],
+                },
+            )
+            assert exported.status_code == 200, f"{forwarder_id} export {exported.text[:300]}"
+            export_ok, export_detail = _matches_sku_qty_tokens(exported.content, ship.box_items)
+            assert export_ok, (
+                f"{forwarder_id} 导出应按段合计 {[4, 8, 8]} 或 sku_qty_tokens {{'12', '8'}} 对照，"
+                f"不要一串单箱 4。{export_detail}"
+            )
+    finally:
+        delete_product_by_sku("SEG-A")
+        delete_product_by_sku("SEG-B")
