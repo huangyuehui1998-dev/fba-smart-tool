@@ -57,6 +57,138 @@ def to_number(v: Any) -> Any:
     return int(d) if d == d.to_integral_value() and "." not in s and "e" not in s.lower() else float(d)
 
 
+# 发票数量列：整数值写成 int。价格、重量、尺寸保持小数。
+QTY_INT_FIELDS = frozenset({"qty_per_box", "total_qty", "box_count", "pcs_per_set"})
+NUMBER_FIELDS = QTY_INT_FIELDS | frozenset({
+    "declared_price",
+    "purchase_price",
+    "total_declared_value_usd",
+    "unit_weight_kg",
+    "box_weight",
+    "length",
+    "width",
+    "height",
+})
+
+
+def coerce_invoice_number(field_key: str | None, value: Any) -> Any:
+    """文本数字按列写成数值。整数数量写成 int，申报价这类小数保持 float。"""
+    if not field_key or field_key not in NUMBER_FIELDS or value in (None, ""):
+        return value
+    num = to_number(value)
+    if isinstance(num, bool) or not isinstance(num, (int, float)):
+        return value
+    if field_key in QTY_INT_FIELDS and float(num) == int(num):
+        return int(num)
+    if isinstance(num, int):
+        return num
+    return float(num)
+
+
+# 这些列看起来像数字，导出仍保持文本（前导零、海关编码位数不能丢）。
+TEXT_KEEP_FIELDS = frozenset({
+    "hs_code",
+    "dest_hs_code",
+    "zip",
+    "postal_code",
+    "phone",
+    "tel",
+    "mobile",
+    "box_range",
+    "shipment_id",
+    "reference_id",
+    "fba_id",
+    "sku",
+    "fnsku",
+    "asin",
+})
+
+_TEXT_HEADER_BITS = (
+    "海关编码", "清关编码", "hscode", "hs编码", "h.s.code",
+    "邮编", "邮政编码", "postalcode", "zipcode",
+    "电话", "手机", "联系电话", "telephone", "phone", "mobile",
+)
+_QTY_HEADER_BITS = (
+    "单箱内数量", "每箱数量", "箱内数量", "sku个数", "totalqty", "总数量", "商品总数",
+    "产品个数", "numberofunits", "unit个数", "商品数量", "每套个数", "总箱数", "总件数",
+    "预报件数", "箱数", "件数",
+)
+_FLOAT_HEADER_BITS = (
+    "申报单价", "单价", "declaredvalue", "单个货值", "货值", "采购单价", "采购价",
+    "总申报金额", "申报总价", "listingvalue", "单件实重", "单件重量", "单件毛重",
+    "单箱重量", "单箱毛重", "单箱实重", "包装箱重量", "货箱重量", "毛重", "净重",
+    "实重", "重量", "cbm", "体积",
+)
+
+
+def _norm_header(text: Any) -> str:
+    s = str(text or "").replace("（", "(").replace("）", ")").replace("\xa0", " ").replace("\n", "")
+    return re.sub(r"[\s*：:]+", "", s).casefold()
+
+
+def header_number_kind(text: Any) -> str:
+    """表头属于数量、价格/重量/尺寸，还是必须保持文本的 HS/邮编/电话。空字符串表示不转。"""
+    key = _norm_header(text)
+    if not key:
+        return ""
+    if any(bit in key for bit in _TEXT_HEADER_BITS) or key in {"zip", "tel", "hs"}:
+        return "text"
+    dim = re.sub(r"\(cm\)|\(kg\)|\(lb\)", "", key)
+    if dim in {"长", "宽", "高", "length", "width", "height"} or any(
+        bit in dim for bit in ("长度", "宽度", "高度", "length", "width", "height")
+    ):
+        return "float"
+    if dim.endswith(("长", "宽", "高")) and (
+        "(cm)" in key or dim.startswith(("l", "w", "h", "单", "货", "外")) or len(dim) <= 3
+    ):
+        return "float"
+    if any(bit in key for bit in _QTY_HEADER_BITS) or key in {"个数", "qty", "quantity", "数量", "ctns", "pcs"}:
+        if any(bad in key for bad in ("重量", "货值", "金额", "单价", "价格", "编码", "邮编", "电话")):
+            return ""
+        return "qty"
+    # 「个数(多个用,隔开)」这种带说明的列也是数量。箱序号不含「个数」，仍保持文本。
+    if "个数" in key and not any(bad in key for bad in ("重量", "货值", "金额", "单价", "价格", "编码", "邮编", "电话")):
+        return "qty"
+    if any(bit in key for bit in _FLOAT_HEADER_BITS) or key in {"weight", "kg"}:
+        return "float"
+    return ""
+
+
+def _cell_ref_key(field_key: str | None) -> str:
+    """单元格坐标不是字段名。F2 这种 key 要按列兜底，不能当成已经知道类型。"""
+    key = str(field_key or "").strip()
+    if re.fullmatch(r"[A-Za-z]{1,3}\d+", key):
+        return ""
+    return key
+
+
+def _comma_list(value: Any) -> bool:
+    """8,12 是多个数量，不是千分位。转成数值会变成 812。"""
+    if not isinstance(value, str) or not re.search(r"[,，]", value):
+        return False
+    return re.fullmatch(r"[+-]?\d{1,3}([,，]\d{3})+(\.\d+)?", value.strip()) is None
+
+
+def coerce_export_number(value: Any, *, field_key: str | None = None, header: Any = None) -> Any:
+    """导出写入前把数量/价格/重量/尺寸从文本转成数值。HS、邮编、电话保持原文本。"""
+    if value in (None, "") or _comma_list(value):
+        return value
+    key = _cell_ref_key(field_key)
+    if key in TEXT_KEEP_FIELDS:
+        return value
+    if key in QTY_INT_FIELDS:
+        kind = "qty"
+    elif key in NUMBER_FIELDS:
+        kind = "float"
+    else:
+        kind = header_number_kind(header)
+    if kind == "qty":
+        return coerce_invoice_number("total_qty", value)
+    if kind == "float":
+        return coerce_invoice_number("declared_price", value)
+    return value
+
+
 def dec(v: Any) -> Optional[Decimal]:
     if v in (None, ""):
         return None
@@ -140,6 +272,20 @@ class RangeRow:
         return str(self.start) if self.start == self.end else f"{self.start}-{self.end}"
 
 
+def _range_spec_key(
+    weight: Optional[float],
+    dims: Tuple[Optional[float], Optional[float], Optional[float]],
+) -> Tuple[Optional[float], Tuple[Optional[float], Optional[float], Optional[float]]]:
+    """合并键按两位小数比。10.004 和 10.001 是同一箱规，7.50 和 7.60 仍然分开。"""
+
+    def rounded(value: Optional[float]) -> Optional[float]:
+        if value is None:
+            return None
+        return round2(value)
+
+    return (rounded(weight), tuple(rounded(item) for item in dims))
+
+
 def box_ranges(boxes: List[Box]) -> List[RangeRow]:
     """合并连续箱号：同一 SKU、单箱数量相同、单箱重相同、尺寸相同才合并；混装箱单独成行。"""
     rows: List[RangeRow] = []
@@ -151,7 +297,7 @@ def box_ranges(boxes: List[Box]) -> List[RangeRow]:
             prev = None
             continue
         sku, q = b.items[0]
-        key = (sku, q, b.weight, b.dims)
+        key = (sku, q, *_range_spec_key(b.weight, b.dims))
         if prev is not None and prev == key and rows and rows[-1].end == b.no - 1 and not rows[-1].mixed:
             rows[-1].end = b.no
             rows[-1].qty += q
@@ -183,6 +329,19 @@ def _invoice_unit(inv: Dict[str, Any], product: Dict[str, Any]) -> str:
     return str(product.get("declare_unit") or "").strip()
 
 
+def invoice_english_name(catalog_name: Any, fallback: Any = "") -> str:
+    """英文品名用产品库。产品库没有时才用领星/货件标题。"""
+    name = str(catalog_name or "").strip()
+    if name.lower() == "nan":
+        name = ""
+    if name:
+        return name
+    other = str(fallback or "").strip()
+    if other.lower() == "nan":
+        return ""
+    return other
+
+
 def invoice_fields(product: Dict[str, Any]) -> Dict[str, Any]:
     """产品库 → 发票字段。发票专用字段放在 extra_data.invoice（单位、每套个数、采购价、英文材质/用途、目的港 HS）。"""
     p = dict(product or {})
@@ -203,7 +362,7 @@ def invoice_fields(product: Dict[str, Any]) -> Dict[str, Any]:
         "sku": p.get("sku") or "",
         "fnsku": str(p.get("fnsku") or "").upper(),
         "asin": p.get("asin") or "",
-        "english_name": p.get("english_name") or "",
+        "english_name": invoice_english_name(p.get("english_name")),
         "chinese_name": p.get("chinese_name") or "",
         "brand": p.get("brand") or "",
         "model": p.get("model_name") or inv.get("model") or "无",
@@ -218,6 +377,61 @@ def invoice_fields(product: Dict[str, Any]) -> Dict[str, Any]:
         "has_battery": inv.get("has_battery") or "否",
         "category": p.get("category") or "",
     }
+
+
+def _tagged_id(kind: str, text: str) -> str:
+    """标识本身已经以 SKU / FNSKU 开头时不再加一遍，避免「SKU SKU-…」。"""
+    raw = str(text or "").strip()
+    if not raw:
+        return ""
+    if raw.casefold().startswith(kind.casefold()):
+        return raw
+    return f"{kind} {raw}"
+
+
+def missing_price_label(*, sku: str = "", fnsku: str = "", fallback: str = "") -> str:
+    """空申报价同时点名 SKU 和 FNSKU。只有一边时只列那一边；都没有再用原来的标识。"""
+    sku_text = _tagged_id("SKU", sku)
+    fnsku_text = _tagged_id("FNSKU", fnsku)
+    if sku_text and fnsku_text:
+        return f"{sku_text} / {fnsku_text}"
+    if sku_text:
+        return sku_text
+    if fnsku_text:
+        return fnsku_text
+    return str(fallback or "").strip()
+
+
+def unique_missing_price_labels(entries: Iterable[Tuple[str, str, str]]) -> List[str]:
+    """同一 SKU 只出现一次。大小写或全角不同的写法并成一条，FNSKU 与 SKU 相同时不重复写。"""
+    from fba_tool.sku_keys import sku_key
+
+    order: List[str] = []
+    grouped: Dict[str, Dict[str, Any]] = {}
+    for sku, fnsku, fallback in entries:
+        sku_text = str(sku or "").strip()
+        fnsku_text = str(fnsku or "").strip()
+        if sku_text and fnsku_text and sku_key(sku_text) == sku_key(fnsku_text):
+            fnsku_text = ""
+        token = sku_key(sku_text) or sku_key(fnsku_text) or sku_key(fallback)
+        if not token:
+            continue
+        slot = grouped.get(token)
+        if slot is None:
+            grouped[token] = {"sku": sku_text, "fnskus": [], "fallback": fallback}
+            order.append(token)
+            slot = grouped[token]
+        if fnsku_text and all(sku_key(fnsku_text) != sku_key(old) for old in slot["fnskus"]):
+            slot["fnskus"].append(fnsku_text)
+    labels: List[str] = []
+    for token in order:
+        slot = grouped[token]
+        labels.append(missing_price_label(
+            sku=slot["sku"],
+            fnsku="、".join(slot["fnskus"]),
+            fallback=str(slot["fallback"] or ""),
+        ))
+    return [label for label in labels if label]
 
 
 def price_rows(products: Dict[str, Dict[str, Any]], fnskus: Iterable[str]) -> List[Dict[str, Any]]:
@@ -236,7 +450,9 @@ def price_rows(products: Dict[str, Dict[str, Any]], fnskus: Iterable[str]) -> Li
         from fba_tool.product_fields import promo_info
 
         promo = promo_info(p) if p else None  # D-12
-        rows.append({"sku": f, "price_source": src or "none", "unit_price": price,
+        rows.append({"sku": f, "product_sku": str(p.get("sku") or "").strip(),
+                     "fnsku": str(p.get("fnsku") or f or "").strip(),
+                     "price_source": src or "none", "unit_price": price,
                      "legacy_price": legacy, "manual_price": manual, "raw_price": price,
                      "promo_price": promo["listing_price"] if promo else None})
     return rows

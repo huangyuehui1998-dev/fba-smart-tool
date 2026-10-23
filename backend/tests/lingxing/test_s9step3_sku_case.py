@@ -167,11 +167,11 @@ def test_lingxing_local_legacy_conflict_needs_review(env):
 
 # ---------------- 其他匹配点 ----------------
 def test_fnsku_resolve_case_insensitive_and_conflict():
-    assert resolve_fnsku("demo-fn", master_map={"DEMO-FN": "X00DEMO001"}, json_map={}) == "X00DEMO001"
-    assert resolve_fnsku("Demo-Fn", master_map={"DEMO-FN": "X00DEMO001", "demo-fn": "X00DEMO002"}, json_map={}) == ""
-    assert resolve_fnsku("demo-fn", master_map={"DEMO-FN": "X00DEMO001", "demo-fn": "X00DEMO002"}, json_map={}) == "X00DEMO002"
-    assert build_fnsku_map(["ＤＥＭＯ－ＦＮ"], step1_map={"DEMO-FN": "X00DEMO003"}, master_map={}, json_map={}) == {
-        "ＤＥＭＯ－ＦＮ": "X00DEMO003"}
+    assert resolve_fnsku("demo-fn", master_map={"DEMO-FN": "X00TEST001"}, json_map={}) == "X00TEST001"
+    assert resolve_fnsku("Demo-Fn", master_map={"DEMO-FN": "X00TEST001", "demo-fn": "X00TEST002"}, json_map={}) == ""
+    assert resolve_fnsku("demo-fn", master_map={"DEMO-FN": "X00TEST001", "demo-fn": "X00TEST002"}, json_map={}) == "X00TEST002"
+    assert build_fnsku_map(["ＤＥＭＯ－ＦＮ"], step1_map={"DEMO-FN": "X00TEST003"}, master_map={}, json_map={}) == {
+        "ＤＥＭＯ－ＦＮ": "X00TEST003"}
 
 
 def test_shipment_cross_check_key_and_display():

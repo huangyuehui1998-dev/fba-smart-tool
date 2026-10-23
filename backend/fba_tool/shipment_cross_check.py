@@ -14,6 +14,7 @@ from fba_tool.shipment_parser import (
     format_box_u_label,
     join_wrapped_sku,
     normalize_fba_box_id,
+    snapshot_box_id,
 )
 
 MIXED_SKU_RE = re.compile(r"mixed\s*sku", re.I)
@@ -357,9 +358,10 @@ def _declared_specs_by_box(pairs: List[Any]) -> Dict[Tuple[str, int], Dict[str, 
             length = float(row.get("长(cm)") or 0)
             width = float(row.get("宽(cm)") or 0)
             height = float(row.get("高(cm)") or 0)
+            ids = getattr(pair.csv, "box_fba_ids", {}) or {}
             out[(pair.shipment_id, box_no)] = {
                 "warehouse": pair.warehouse_code,
-                "fba_box_id": str(row.get("FBA箱号") or "").strip(),
+                "fba_box_id": snapshot_box_id(row, ids),
                 "weight_kg": float(row.get("实重(kg)") or 0),
                 "volume_cm3": length * width * height,
                 "length_cm": length,

@@ -13,16 +13,42 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence, Tuple
 
-import fitz  # PyMuPDF
-import numpy as np
+class _LazyModule:
+    """推迟导入。PyMuPDF 会在 import 时加载版面模型，不能放进进程启动。"""
 
-try:
-    from scipy import ndimage as scipy_ndimage
+    def __init__(self, name: str) -> None:
+        object.__setattr__(self, "_name", name)
+        object.__setattr__(self, "_mod", None)
 
-    _HAS_SCIPY = True
-except ImportError:  # pragma: no cover
-    scipy_ndimage = None  # type: ignore
-    _HAS_SCIPY = False
+    def _load(self):
+        mod = object.__getattribute__(self, "_mod")
+        if mod is None:
+            import importlib
+
+            mod = importlib.import_module(object.__getattribute__(self, "_name"))
+            object.__setattr__(self, "_mod", mod)
+        return mod
+
+    def __getattr__(self, item: str):
+        return getattr(self._load(), item)
+
+
+fitz = _LazyModule("fitz")
+np = _LazyModule("numpy")
+
+_scipy_state: Any = None
+
+
+def _scipy_ndimage():
+    global _scipy_state
+    if _scipy_state is None:
+        try:
+            from scipy import ndimage as ndi
+
+            _scipy_state = ndi
+        except ImportError:  # pragma: no cover
+            _scipy_state = False
+    return _scipy_state or None
 
 MM_PER_INCH = 25.4
 PT_PER_INCH = 72.0
@@ -409,10 +435,11 @@ class PDFLabelProcessor:
     def _dilate(self, mask: np.ndarray, radius: int) -> np.ndarray:
         if radius <= 0:
             return mask
-        if _HAS_SCIPY:
+        ndi = _scipy_ndimage()
+        if ndi is not None:
             size = radius * 2 + 1
             struct = np.ones((size, size), dtype=bool)
-            return scipy_ndimage.binary_dilation(mask, structure=struct)
+            return ndi.binary_dilation(mask, structure=struct)
         return self._dilate_numpy(mask, radius)
 
     @staticmethod
@@ -433,11 +460,12 @@ class PDFLabelProcessor:
     def _connected_components(self, mask: np.ndarray) -> List[Tuple[int, int, int, int]]:
         if not mask.any():
             return []
-        if _HAS_SCIPY:
-            labeled, count = scipy_ndimage.label(mask)
+        ndi = _scipy_ndimage()
+        if ndi is not None:
+            labeled, count = ndi.label(mask)
             if count == 0:
                 return []
-            slices = scipy_ndimage.find_objects(labeled)
+            slices = ndi.find_objects(labeled)
             boxes: List[Tuple[int, int, int, int]] = []
             for slc in slices:
                 if slc is None:

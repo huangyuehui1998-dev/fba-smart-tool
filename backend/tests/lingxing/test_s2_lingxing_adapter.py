@@ -26,7 +26,7 @@ def test_map_real_listing_rows():
     out = [map_listing_row(r) for r in _rows()]
     first = out[0]
     assert first["sku"] == "DEMO-MSKU-001-FBA"
-    assert first["fnsku"] == "X00DEMO001"
+    assert first["fnsku"] == "X00TEST001"
     assert first["asin"] == "B0DEMO0001"
     assert first["listing_price"] == 15.99
     assert first["listing_price_currency"] == "USD"
@@ -43,6 +43,6 @@ def test_price_fallback_and_invalid():
 
 
 def test_excel_header_aliases():
-    row = {"MSKU": "A-1", "FNSKU": "X000000001", "价格": "19.99"}
+    row = {"MSKU": "A-1", "FNSKU": "X00TEST001", "价格": "19.99"}
     m = map_listing_row(row)
     assert m["sku"] == "A-1" and m["listing_price"] == 19.99

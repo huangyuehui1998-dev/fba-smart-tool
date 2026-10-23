@@ -48,11 +48,21 @@ CONFIG_WHITELIST: Dict[str, str] = {
     "sku_mapping.default.json": RELEASE,
     "exporter_profiles.default.json": RELEASE,
     "invoice_template_map.json": RELEASE,
+    # 首次启动会在 import 时读 policy.json。bundled_default 只认 policy.default.json，
+    # 缺了就落到不存在的 policy.json，便携版启动即 FileNotFoundError。
+    # 品类、箱规渠道、商品分段、STA 下拉是装箱和发货预检要用的出厂规则，不是客户数据。
+    # invoice_history.default.json 含业务参考，不进白名单。
+    "policy.default.json": REPO,
+    "category_map.default.json": REPO,
+    "item_size_policy.default.json": REPO,
+    "forwarder_registry.default.json": REPO,
+    "sta_dropdowns.default.json": REPO,
 }
 
 RELEASE_SUBDIR = "release_templates"
 
-# Marco 2026-10-20 决定：这 3 份真实数据模板原样留在仓库，不打进安装包。
+# Marco 2026-10-20 决定：这 3 份样表留在仓库，不打进安装包。
+# 发货录入样表的 SKU / FNSKU 已换成 DEMO-SKU / X0DEMO。工厂表、货代表仍不进包。
 # 文本扫描不解包它们；新增的其它真实二进制由 test_manifest_excludes_real_data_files 拦截。
 ALLOWED_REAL_TEMPLATES_DECISION_DATE = "2026-10-20"
 ALLOWED_REAL_TEMPLATES = (
@@ -91,16 +101,66 @@ def entries(root: Path = None) -> List[Tuple[Path, str]]:
     return out
 
 
+def bundle_relpaths(root: Path = None) -> List[str]:
+    """包内相对路径，一律正斜杠，例如 templates/forwarders/qiluo.xlsx。"""
+    return [dest.replace("\\", "/") for _src, dest in entries(root)]
+
+
+def _datas_dest_dir(bundle_rel: str) -> str:
+    """PyInstaller datas 的第二项是目标目录，文件名由它自己接上。"""
+    parent = Path(bundle_rel).parent.as_posix()
+    return "." if parent in ("", ".") else parent
+
+
 def pyinstaller_datas(root: Path = None) -> List[Tuple[str, str]]:
-    """spec 用：[(源文件, 包内目录)]。缺文件直接报错，免得悄悄打出一个缺模板的包。"""
-    missing = [str(src) for src, _ in entries(root) if not src.is_file()]
+    """spec 用：[(源文件, 包内目录)]。缺文件或两条白名单挤到同一路径时直接报错。
+
+    每个白名单文件单独一条，不要把 backend/templates 整目录塞进去。
+    PyInstaller 会把源文件名接到目录后面，得到 bundle_relpaths() 里的路径。
+    spec 在 Analysis 之后调用 assert_collected。finish_portable_dist 只验收
+    _internal 里的这些文件，缺了就失败，不在那里补拷贝。
+    """
+    missing: List[str] = []
+    seen = set()
+    out: List[Tuple[str, str]] = []
+    for src, dest in entries(root):
+        if not src.is_file():
+            missing.append(str(src))
+            continue
+        bundle = dest.replace("\\", "/")
+        dest_dir = _datas_dest_dir(bundle)
+        rebuilt = src.name if dest_dir == "." else "%s/%s" % (dest_dir, src.name)
+        if rebuilt != bundle:
+            raise ValueError("白名单路径和文件名不一致：%s / %s" % (bundle, rebuilt))
+        if bundle in seen:
+            raise ValueError("包内路径冲突，PyInstaller 只会留下一个：%s" % bundle)
+        seen.add(bundle)
+        out.append((str(src), dest_dir))
     if missing:
         raise FileNotFoundError("白名单文件缺失：%s" % "; ".join(missing))
-    return [(str(src), str(Path(dest).parent).replace("\\", "/")) for src, dest in entries(root)]
+    return out
+
+
+def missing_collected(datas, root: Path = None) -> List[str]:
+    """datas 条目是 (包内路径, ...) 。路径里的反斜杠按 Windows 打包结果归一成正斜杠。"""
+    got = {str(entry[0]).replace("\\", "/") for entry in datas}
+    return [rel for rel in bundle_relpaths(root) if rel not in got]
+
+
+def assert_collected(datas, root: Path = None) -> None:
+    """白名单文件必须已经在 Analysis.datas 里。缺了就停，不要事后拷进 _internal。"""
+    missing = missing_collected(datas, root)
+    if missing:
+        raise SystemExit(
+            "白名单文件没有进入 PyInstaller datas，不要在 finish_portable_dist 里补拷贝：%s"
+            % "; ".join(missing)
+        )
 
 
 FORBIDDEN_REAL_NAMES = ("lingxing_listing_prices.xlsx",)
-# 真实领星在售导出不得进仓库。合成用例只用内存里的 xlsx，不落这个文件名。
+# 文件名带 listing 的 xlsx 视为真实领星在售导出，不得进仓库。
+# 合成夹具用别的文件名（backend/tests/fixtures/synthetic/）。
+# 本机私有导出用环境变量 FBA_LINGXING_OWNER_XLSX，不要把文件放进仓库。
 FORBIDDEN_REAL_GLOBS = ("*listing*.xlsx",)
 
 
@@ -113,7 +173,8 @@ def forbidden_real_hits(root: Path = None) -> List[str]:
             continue
         if not path.is_file():
             continue
+        rel = path.relative_to(base).as_posix()
         name = path.name.lower()
         if name in FORBIDDEN_REAL_NAMES or ("listing" in name and name.endswith(".xlsx")):
-            hits.append(str(path.relative_to(base)))
+            hits.append(rel)
     return hits

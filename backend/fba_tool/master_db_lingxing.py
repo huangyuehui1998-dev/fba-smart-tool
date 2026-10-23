@@ -336,6 +336,31 @@ def get_last_lingxing_sync_success_at() -> Optional[str]:
     return row[0] if row and row[0] else None
 
 
+def set_lingxing_run_file_meta(
+    run_id: int,
+    source_file: Optional[str] = None,
+    export_at: Optional[str] = None,
+    backup_path: Optional[str] = None,
+) -> None:
+    sets: List[str] = []
+    params: List[Any] = []
+    if source_file is not None:
+        sets.append("source_file = ?")
+        params.append(source_file)
+    if export_at is not None:
+        sets.append("export_at = ?")
+        params.append(export_at)
+    if backup_path is not None:
+        sets.append("backup_path = ?")
+        params.append(backup_path)
+    if not sets:
+        return
+    params.append(int(run_id))
+    with _connect() as conn:
+        conn.execute(f"UPDATE lingxing_sync_run SET {', '.join(sets)} WHERE id = ?", params)
+        conn.commit()
+
+
 def tag_lingxing_sync_run(run_id: int, trigger: str, attempt: int) -> None:
     with _connect() as conn:
         conn.execute("UPDATE lingxing_sync_run SET trigger = ?, attempt = ? WHERE id = ?", (trigger, int(attempt), int(run_id)))

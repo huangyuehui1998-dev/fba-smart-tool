@@ -33,7 +33,33 @@ CUSTOMS_SENSITIVE_FIELDS = ("english_name", "brand")
 PRICE_FIELDS = ("listing_price", "regular_price")  # v8 E1 实时售价；S9-step2-fix A1：常规价单独变化也要能写入（D-12 判断促销）
 NAME_FIELDS = ("local_name",)  # 领星本地品名
 CATEGORY_FIELDS = ("category",)  # jewelry / watch / other；映射不到不写入
-CONFIRM_FIELDS = AMAZON_IDENTITY_FIELDS + CUSTOMS_SENSITIVE_FIELDS + PRICE_FIELDS + NAME_FIELDS + CATEGORY_FIELDS
+LISTING_EXTRA_FIELDS = (
+    "local_sku",
+    "listing_price_site",
+    "fee_fba_est",
+    "fee_referral_rate",
+    "product_cost_cny",
+    "product_cost_currency",
+)
+# 费用为 0 或空表示「领星没给估算」，不写入。0 不能走进 product_fields 的「必须大于 0」。
+FEE_FIELDS = ("fee_fba_est", "fee_referral_rate")
+CONFIRM_FIELDS = (
+    AMAZON_IDENTITY_FIELDS + CUSTOMS_SENSITIVE_FIELDS + PRICE_FIELDS + NAME_FIELDS + CATEGORY_FIELDS + LISTING_EXTRA_FIELDS
+)
+# 箱规和报关结构字段不从领星预览写入。采购成本人民币不在这张名单里。
+_NEVER_FROM_LINGXING = frozenset({
+    "carton_length",
+    "carton_width",
+    "carton_height",
+    "carton_weight",
+    "carton_gross_weight",
+    "qty_per_box",
+    "chinese_name",
+    "material",
+    "purpose",
+    "model_name",
+    "hs_code",
+})
 
 FIELD_LABELS = {
     "listing_price": "实时售价(申报价)",
@@ -48,6 +74,12 @@ FIELD_LABELS = {
     "english_name": "英文品名（报关）",
     "brand": "品牌（报关）",
     "category": "品类",
+    "local_sku": "本地 SKU",
+    "listing_price_site": "站点",
+    "fee_fba_est": "预估 FBA 费",
+    "fee_referral_rate": "平台费率",
+    "product_cost_cny": "采购成本（人民币）",
+    "product_cost_currency": "采购成本币种",
 }
 
 CONFIRMABLE_STATUSES = {"preview_pending", "partial", "auto_applied", "auto_applied_partial"}  # S5：定时同步自动写入后，剩下“待人工确认”的仍可在预览里确认
@@ -60,11 +92,29 @@ class LingxingPreviewError(Exception):
         self.message = message
 
 
+def _fee_importable(value: Any) -> Optional[float]:
+    """费用只导入正数。0、空、非数字都跳过，避免 confirm 因「必须大于 0」整批失败。"""
+    if value is None or isinstance(value, bool):
+        return None
+    text = str(value).strip().replace(",", "").replace("%", "")
+    if not text:
+        return None
+    try:
+        number = float(text)
+    except ValueError:
+        return None
+    if number != number or number <= 0 or number in (float("inf"), float("-inf")):
+        return None
+    return number
+
+
 def _has_value(field: str, value: Any) -> bool:
     if value is None:
         return False
     if field in PRICE_FIELDS:
         return _num_or_none(value) is not None  # A3：无效价格（abc、NaN、inf、≤0）不算有值，不进可写字段
+    if field in FEE_FIELDS:
+        return _fee_importable(value) is not None
     if field == "sid":
         try:
             return int(float(value)) > 0
@@ -221,6 +271,19 @@ def build_listing_preview(
         local_sources = (existing or {}).get("field_sources") or {}
         for field in CONFIRM_FIELDS:
             remote_val = rec.get(field)
+            if field in FEE_FIELDS and _fee_importable(remote_val) is None:
+                if remote_val not in (None, ""):
+                    local_val = None if is_new else (existing or {}).get(field)
+                    sku_fields.append(
+                        {
+                            "sku": sku,
+                            "field": field,
+                            "local_value": _display(local_val),
+                            "remote_value": _display(remote_val),
+                            "default_checked": False,
+                        }
+                    )
+                continue
             if not _has_value(field, remote_val):
                 continue
             local_val = None if is_new else (existing or {}).get(field)
@@ -234,7 +297,14 @@ def build_listing_preview(
                 changed=changed,
                 local_val=local_val,
             )
-            if local_sources.get(field) == "manual" and field not in PRICE_FIELDS:
+            manual_price_conflict = (
+                field in PRICE_FIELDS
+                and local_sources.get(field) == "manual"
+                and changed
+            )
+            if manual_price_conflict:
+                checked = False  # 手填售价和领星不同：默认不勾，避免 52 被写成 49.99
+            elif local_sources.get(field) == "manual" and field not in PRICE_FIELDS:
                 checked = False  # 手填锁定：默认不勾，确认时也会跳过
             if needs_review:
                 checked = False  # S8 D10：待人工确认的新品默认不勾，定时自动写入也不会写
@@ -515,6 +585,11 @@ def serialize_preview(run_id: int) -> Dict[str, Any]:
     for row in field_rows:
         msrc = (masters.get(row["sku"]) or {}).get("field_sources") or {}
         # 价格字段不受手填锁定（NEVER_LOCKED_FOR_LINGXING），这里也不显示锁定
+        manual_price_conflict = (
+            row["field"] in PRICE_FIELDS
+            and msrc.get(row["field"]) == "manual"
+            and str(row["local_value"] or "") != str(row["remote_value"] or "")
+        )
         item = {
             "field": row["field"],
             "label": FIELD_LABELS.get(row["field"], row["field"]),
@@ -523,6 +598,12 @@ def serialize_preview(run_id: int) -> Dict[str, Any]:
             "default_checked": row["default_checked"],
             "sensitive": row["field"] in CUSTOMS_SENSITIVE_FIELDS,
             "locked": msrc.get(row["field"]) == "manual" and row["field"] not in PRICE_FIELDS,
+            "manual_diff": manual_price_conflict,
+            "difference": (
+                f"手填 {row['local_value']} 与领星 {row['remote_value']} 不同，默认不覆盖"
+                if manual_price_conflict
+                else ""
+            ),
         }
         by_sku.setdefault(row["sku"], []).append(item)
 
@@ -578,7 +659,7 @@ def apply_lingxing_field_patch(sku: str, fields: Iterable[str], remote: Dict[str
     from fba_tool.product_fields import OWN_FIELDS, SOURCE_LINGXING, SOURCE_MANUAL, mark_field_sources, set_product_fields
 
     key = str(sku or "").strip()
-    allowed = [f for f in fields if f in CONFIRM_FIELDS]
+    allowed = [f for f in fields if f in CONFIRM_FIELDS and f not in _NEVER_FROM_LINGXING]
     result: Dict[str, List[str]] = {"written": [], "skipped_locked": [], "skipped_invalid": []}
     if not key or not allowed:
         return result
@@ -599,6 +680,13 @@ def apply_lingxing_field_patch(sku: str, fields: Iterable[str], remote: Dict[str
             else:
                 own_vals[field] = num
             continue
+        if field in FEE_FIELDS:
+            fee = _fee_importable(remote.get(field))
+            if fee is None:
+                result["skipped_invalid"].append(field)
+                continue
+            own_vals[field] = fee
+            continue
         if field in OWN_FIELDS:
             if remote.get(field) not in (None, ""):
                 own_vals[field] = remote.get(field)
@@ -616,10 +704,15 @@ def apply_lingxing_field_patch(sku: str, fields: Iterable[str], remote: Dict[str
             if remote.get("listing_price_currency"):
                 own_vals["listing_price_currency"] = remote["listing_price_currency"]
             own_vals["listing_price_basis"] = remote.get("listing_price_basis") or "listing_price"
+            if remote.get("listing_price_site"):
+                own_vals["listing_price_site"] = remote["listing_price_site"]
+        if "product_cost_cny" in own_vals and remote.get("product_cost_currency"):
+            own_vals["product_cost_currency"] = remote["product_cost_currency"]
         res = set_product_fields(key, own_vals, SOURCE_LINGXING)
         result["skipped_locked"].extend(f for f in res["skipped_locked"] if f not in result["skipped_locked"])
+        companions = {"listing_price_currency", "listing_price_basis", "listing_price_site", "product_cost_currency"}
         result["written"].extend(
-            f for f in own_vals if f not in res["skipped_locked"] and f not in ("listing_price_currency", "listing_price_basis")
+            f for f in own_vals if f not in res["skipped_locked"] and f not in companions
         )
     return result
 
@@ -642,34 +735,44 @@ def confirm_lingxing_preview(run_id: int, items: List[Dict[str, Any]]) -> Dict[s
     field_count = 0
     skipped = 0
     locked = 0
-    for item in items or []:
-        sku = str(item.get("sku") or "").strip()
-        fields = [str(f).strip() for f in (item.get("fields") or []) if str(f).strip() in CONFIRM_FIELDS]
-        if not sku or not fields:
-            skipped += 1
-            continue
-        row = sku_map.get(sku)
-        if not row:
-            skipped += 1
-            continue
-        try:
-            remote = json.loads(row.get("remote_json") or "{}")
-        except json.JSONDecodeError:
-            skipped += 1
-            continue
-        if not isinstance(remote, dict):
-            skipped += 1
-            continue
-        try:
-            res = apply_lingxing_field_patch(sku, fields, remote)
-        except SkuCaseConflict:  # S9-step3：只差大小写的多条，不任选一条写
-            skipped += 1
-            continue
-        patched += 1
-        field_count += len(res["written"])
-        locked += len(res["skipped_locked"])
+    from fba_tool.master_db import batch_transaction
 
-    mark_lingxing_sync_run_status(int(run_id), "confirmed")
+    # 整次确认共用一个事务：任一行校验失败则产品库和「已确认」状态一起回滚。
+    with batch_transaction():
+        for item in items or []:
+            sku = str(item.get("sku") or "").strip()
+            fields = [str(f).strip() for f in (item.get("fields") or []) if str(f).strip() in CONFIRM_FIELDS]
+            if not sku or not fields:
+                skipped += 1
+                continue
+            row = sku_map.get(sku)
+            if not row:
+                skipped += 1
+                continue
+            try:
+                remote = json.loads(row.get("remote_json") or "{}")
+            except json.JSONDecodeError:
+                skipped += 1
+                continue
+            if not isinstance(remote, dict):
+                skipped += 1
+                continue
+            from fba_tool.lingxing_rollback import record_import_changes
+
+            before = get_product_by_sku(sku)
+            try:
+                res = apply_lingxing_field_patch(sku, fields, remote)
+            except SkuCaseConflict:  # S9-step3：只差大小写的多条，不任选一条写
+                skipped += 1
+                continue
+            except ValueError as exc:
+                raise LingxingPreviewError(str(exc), 409) from exc
+            record_import_changes(int(run_id), sku, before, get_product_by_sku(sku))
+            patched += 1
+            field_count += len(res["written"])
+            locked += len(res["skipped_locked"])
+
+        mark_lingxing_sync_run_status(int(run_id), "confirmed")
     return {
         "ok": True,
         "run_id": int(run_id),

@@ -14,6 +14,7 @@ import {
   Loader2,
   Trash2,
 } from "lucide-react";
+import { CartonSpecWizard } from "@/components/carton-spec-wizard";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -104,6 +105,9 @@ export function Step1Workspace({ onNext }: { onNext?: () => void }) {
 
   return (
     <div className="space-y-6 pb-32">
+      <div className="flex justify-end">
+        <CartonSpecWizard />
+      </div>
       <MasterDataGapBanner gaps={masterGaps} />
       {(error || success) && (
         <div className="space-y-2">

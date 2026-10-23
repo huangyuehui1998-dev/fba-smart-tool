@@ -38,7 +38,7 @@ export class SpreadsheetErrorBoundary extends Component<Props, State> {
           <AlertTriangle className="h-4 w-4" />
           <AlertTitle className="text-sm">表格渲染失败</AlertTitle>
           <AlertDescription className="text-xs">
-            {this.state.error.message || "FortuneSheet 无法加载该模板，请尝试重新上传或换一份 .xlsx 文件。"}
+            {this.state.error.message || "表格无法加载该模板，请重试或换一份 .xlsx 文件。"}
           </AlertDescription>
         </Alert>
       );

@@ -345,6 +345,7 @@ export function fillInvoice(body: {
   template_base64?: string;
   forwarder_id?: string;
   po_number?: string;
+  warehouse?: string;
   workflow_json?: Record<string, unknown>;
   api_key?: string;
   model?: string;
@@ -373,6 +374,7 @@ export function exportInvoice(body: {
   warehouse_code: string;
   template_sheet: string;
   fields: Record<string, unknown>[];
+  snapshot?: unknown;
 }) {
   return downloadPostBlob("/api/export_invoice", body, `货代发票_${body.shipment_id}.xlsx`);
 }

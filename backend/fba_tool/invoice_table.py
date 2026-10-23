@@ -60,7 +60,13 @@ def header_matches_alias(header_raw: str, alias: str) -> bool:
     a = sanitize_header_text(alias)
     if not h or not a:
         return False
-    return a == h or a in h or h in a
+    if a == h:
+        return True
+    # 「PO」不能因为 purpose 里含有 po 就抢走用途列。短英文别名按单词比，不按子串。
+    if a.isascii() and len(a) <= 3:
+        tokens = re.findall(r"[a-z0-9]+", str(header_raw or "").casefold())
+        return a in tokens
+    return a in h or h in a
 
 
 def _is_sku_header(text: str) -> bool:
@@ -92,6 +98,16 @@ def _is_fba_id_header(text: str) -> bool:
     return _is_shipment_id_header(text)
 
 
+def _is_detail_companion_header(text: str) -> bool:
+    """明细区同行：箱号或品名/型号/材质。不要求这一行再写货件号。"""
+    k = sanitize_header_text(text)
+    if not k:
+        return False
+    if _is_box_seq_header(text) or k.startswith("箱号") or "boxno" in k:
+        return True
+    return any(token in k for token in ("英文品名", "中文品名", "物品英文名", "物品中文名", "型号", "材质", "用途"))
+
+
 def _row_has_table_markers(cell_texts: List[str]) -> bool:
     has_sku = any(_is_sku_header(t) for t in cell_texts if t)
     has_shipment = any(_is_shipment_id_header(t) for t in cell_texts if t)
@@ -99,7 +115,45 @@ def _row_has_table_markers(cell_texts: List[str]) -> bool:
         return True
     has_fba = any(_is_fba_id_header(t) for t in cell_texts if t)
     has_box_seq = any(_is_box_seq_header(t) for t in cell_texts if t)
-    return has_fba and has_box_seq
+    if has_fba and has_box_seq:
+        return True
+    # SEND 第 14 行是「箱号 / SKU / 品名 / 型号」，货件号在上面的合并主格，不在这一行。
+    return has_sku and any(_is_detail_companion_header(t) for t in cell_texts if t)
+
+
+def _merge_at(ws, row: int, col: int):
+    for merged in ws.merged_cells.ranges:
+        if merged.max_row > 20000 or merged.max_col > 512:
+            continue
+        if merged.min_row <= row <= merged.max_row and merged.min_col <= col <= merged.max_col:
+            return merged
+    return None
+
+
+def value_cell_right_of(ws, row: int, col: int) -> tuple[int, int]:
+    """标签右侧的值写在合并主格上。
+
+    A4:B4 是「FBA Shipment ID」，紧挨着的 B4 是从属格，值的主格是 C4（C4:H4）。
+    标签本身没有合并、右侧已有别的字时，仍往后空一格，避免盖住旁边的标签。
+    """
+    label_merge = _merge_at(ws, row, col)
+    next_col = label_merge.max_col + 1 if label_merge else col + 1
+    host = _merge_at(ws, row, next_col)
+    if host and (host.min_row, host.min_col) != (row, next_col):
+        origin = (host.min_row, host.min_col)
+        if ws.cell(*origin).value in (None, ""):
+            return origin
+        after = host.max_col + 1
+        host_after = _merge_at(ws, row, after)
+        if host_after:
+            return host_after.min_row, host_after.min_col
+        return row, after
+    if host and (host.min_row, host.min_col) == (row, next_col):
+        return host.min_row, host.min_col
+    right = ws.cell(row, next_col)
+    if label_merge is None and right.value not in (None, ""):
+        return row, next_col + 1
+    return row, next_col
 
 
 def _map_columns_from_headers(
@@ -198,6 +252,58 @@ def extract_csv_sku_meta(csv_bytes: bytes) -> Dict[str, Dict[str, str]]:
     return meta
 
 
+def overlay_csv_asin(products: Dict[str, Dict[str, Any]], csv_bytes: bytes | None) -> Dict[str, Dict[str, Any]]:
+    """产品库缺 ASIN 时，用这份 CSV 的 ASIN 填到副本上。不写回产品库。"""
+    meta = extract_csv_sku_meta(csv_bytes or b"")
+    by_fnsku: Dict[str, str] = {}
+    for entry in meta.values():
+        fnsku = str(entry.get("fnsku") or "").strip().upper()
+        asin = str(entry.get("asin") or "").strip()
+        if fnsku and asin:
+            by_fnsku[fnsku] = asin
+    filled: Dict[str, Dict[str, Any]] = {}
+    for key, product in (products or {}).items():
+        item = dict(product or {})
+        if str(item.get("asin") or "").strip():
+            filled[key] = item
+            continue
+        fnsku = str(item.get("fnsku") or key or "").strip().upper()
+        asin = by_fnsku.get(fnsku, "")
+        if not asin:
+            hit = lookup_sku(meta, item.get("sku"))
+            if isinstance(hit, dict):
+                asin = str(hit.get("asin") or "").strip()
+        if asin:
+            item["asin"] = asin
+        filled[key] = item
+    return filled
+
+
+def overlay_csv_english_name(products: Dict[str, Dict[str, Any]], csv_bytes: bytes | None) -> Dict[str, Dict[str, Any]]:
+    """产品库没有英文品名时，用这份 CSV 的商品名称填到副本上。不写回产品库。"""
+    from fba_tool.invoice_rules import invoice_english_name
+
+    meta = extract_csv_sku_meta(csv_bytes or b"")
+    by_fnsku: Dict[str, str] = {}
+    for entry in meta.values():
+        fnsku = str(entry.get("fnsku") or "").strip().upper()
+        title = str(entry.get("title") or "").strip()
+        if fnsku and title:
+            by_fnsku[fnsku] = title
+    filled: Dict[str, Dict[str, Any]] = {}
+    for key, product in (products or {}).items():
+        item = dict(product or {})
+        fnsku = str(item.get("fnsku") or key or "").strip().upper()
+        title = by_fnsku.get(fnsku, "")
+        if not title:
+            hit = lookup_sku(meta, item.get("sku"))
+            if isinstance(hit, dict):
+                title = str(hit.get("title") or "").strip()
+        item["english_name"] = invoice_english_name(item.get("english_name"), title)
+        filled[key] = item
+    return filled
+
+
 def _pcs_from_sku(sku: str) -> Optional[int]:
     m = PCS_IN_SKU_RE.search(sku)
     if m:
@@ -287,11 +393,11 @@ def build_invoice_line_items(
         ai_keys = lookup_sku(customs_ai_keys, sku_str, set())
         master_hints = invoice_hints_from_master(master)
 
-        english = (
-            csv_row.get("title")
-            or master_hints.get("英文品名")
-            or customs.get("英文品名")
-            or ""
+        from fba_tool.invoice_rules import invoice_english_name
+
+        english = invoice_english_name(
+            master_hints.get("英文品名") or customs.get("英文品名"),
+            csv_row.get("title"),
         )
         chinese = master_hints.get("中文品名") or customs.get("中文品名") or ""
         material = master_hints.get("材料") or customs.get("材料") or ""
@@ -339,7 +445,7 @@ def build_invoice_line_items(
             "asin": asin,
             "battery": "否",
             "magnet": "否",
-            "model": sku_str,
+            "model": str((master or {}).get("model_name") or "").strip(),
             "total_qty": total_qty,
             "unit": "套",
             "pcs_per_set": pcs if pcs else "",
@@ -350,18 +456,18 @@ def build_invoice_line_items(
             "sku_image": "",
             "shipping_mark": ship.warehouse_code or "",
             "box_weight": round(weight, 2) if weight else "",
-            "length": round(length, 1) if length else "",
-            "width": round(width, 1) if width else "",
-            "height": round(height, 1) if height else "",
+            "length": length if length else "",
+            "width": width if width else "",
+            "height": height if height else "",
         }
 
         sources: Dict[str, str] = {}
         field_layer: Dict[str, str] = {
             "english_name": (
-                "green"
-                if csv_row.get("title")
-                else "blue"
+                "blue"
                 if master_hints.get("英文品名")
+                else "green"
+                if english and csv_row.get("title")
                 else "yellow"
                 if english and "英文品名" in ai_keys
                 else "red"
@@ -476,12 +582,14 @@ def table_cells_from_line_items(
     source_labels: Dict[str, str],
 ) -> List[Dict[str, Any]]:
     """映射发票行到单元格。清空脏数据由 export 侧处理，此处不批量下发 clear cells（避免 FortuneSheet 崩溃）。"""
+    from fba_tool.invoice_rules import coerce_invoice_number
+
     cells: List[Dict[str, Any]] = []
-    always_include = {"reference_id", "sku_image"}
+    always_include = {"reference_id", "sku_image", "declared_price"}
     for row_offset, item in enumerate(line_items):
         row = layout.first_data_row + row_offset
         for field_key, col in layout.columns.items():
-            val = item.values.get(field_key, "")
+            val = coerce_invoice_number(field_key, item.values.get(field_key, ""))
             if val in (None, "") and field_key not in always_include:
                 continue
             src_kind = item.sources.get(field_key, "green")
@@ -491,7 +599,7 @@ def table_cells_from_line_items(
                     "value": val if val not in (None, "") else "",
                     "source": source_labels.get(src_kind, "精准提取"),
                     "field_key": field_key,
-                    "required": field_key == "reference_id",
+                    "required": field_key in {"reference_id", "declared_price"},
                 }
             )
     return cells

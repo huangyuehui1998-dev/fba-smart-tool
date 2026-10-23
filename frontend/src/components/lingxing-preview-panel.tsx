@@ -329,6 +329,9 @@ export function LingxingPreviewPanel({
                                 <span className="mt-0.5 block text-muted-foreground">
                                   本地：{f.local_value || "（空）"} → 领星：{f.remote_value || "（空）"}
                                 </span>
+                                {f.difference ? (
+                                  <span className="mt-0.5 block text-amber-700">{f.difference}</span>
+                                ) : null}
                               </span>
                             </label>
                           ))}

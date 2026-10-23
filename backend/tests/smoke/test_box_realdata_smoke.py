@@ -67,7 +67,7 @@ def _product_compare(monkeypatch, tmp_path, box: dict) -> dict:
 
     from fba_tool.carton_store import _declared_to_amazon, _stored_dims
     from fba_tool.master_db import init_master_db
-    from fba_tool.shipment_parser import parse_csv_shipment
+    from fba_tool.shipment_parser import parse_csv_shipment, snapshot_box_id
     from main import create_app
 
     init_master_db()
@@ -91,11 +91,7 @@ def _product_compare(monkeypatch, tmp_path, box: dict) -> dict:
             continue
         for _, spec in ship.box_specs.iterrows():
             box_no = spec.get("箱号")
-            try:
-                numeric = int(box_no)
-            except (TypeError, ValueError):
-                numeric = box_no
-            box_id = str(spec.get("FBA箱号") or ids.get(box_no) or ids.get(numeric) or "")
+            box_id = snapshot_box_id(spec, ids)
             declared = _declared_to_amazon(spec)
             dims = _stored_dims(spec, declared)
             boxes.append({

@@ -3,6 +3,7 @@ import { toast } from "sonner";
 
 import type { InvoiceSpreadsheetHandle } from "@/components/invoice-spreadsheet";
 import { useWorkflow } from "@/context/workflow-context";
+import { warehouseCandidatesFromError } from "@/lib/error-messages";
 import { formatApiError } from "@/lib/format-api-error";
 import { fileToBase64 } from "@/lib/box-editor";
 import { exportInvoice, fillInvoice } from "@/lib/api/workflow";
@@ -29,6 +30,7 @@ import {
 import { sha256HexFromFile } from "@/lib/file-hash";
 import { rowToApi } from "@/lib/step1-rows";
 import { isOfficialExportBlocked, STALE_DOWNLOAD_HINT } from "@/lib/workflow-invalidation";
+import { exportBlockAfterFailedFill } from "@/lib/invoice-export-guard";
 
 export type { SheetPhase };
 
@@ -108,6 +110,9 @@ export function useInvoice() {
   const [exporting, setExporting] = useState(false);
   const [copying, setCopying] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [warehouseCandidates, setWarehouseCandidates] = useState<string[]>([]);
+  const [warehouseChoice, setWarehouseChoice] = useState("");
+  const [fillFailed, setFillFailed] = useState(false);
   const [invoiceTemplateHash, setInvoiceTemplateHash] = useState<string | null>(null);
   const [revenueTon, setRevenueTon] = useState<number | null>(null);
 
@@ -150,6 +155,10 @@ export function useInvoice() {
   const missingLabels =
     sheetPhase === "filled" ? missingRequiredFromCellMeta(cellMeta, getCellValue, invoiceDraft?.cells) : [];
   const hasMissing = missingLabels.length > 0;
+  const referenceIdHint =
+    sheetPhase === "filled"
+      ? (invoiceDraft?.warnings || []).find((item) => item.includes("Reference ID")) || ""
+      : "";
 
   const buildWorkflowJson = useCallback(() => {
     return {
@@ -408,9 +417,15 @@ export function useInvoice() {
           sheetPhase: "filled",
         }),
       );
-      if (res.warnings && res.warnings.length > 0) {
+      const warnings = res.warnings || [];
+      const referenceWarnings = warnings.filter((item) => item.includes("Reference ID"));
+      const otherWarnings = warnings.filter((item) => !item.includes("Reference ID"));
+      if (referenceWarnings.length > 0) {
+        toast.warning(referenceWarnings[0]);
+      }
+      if (otherWarnings.length > 0) {
         toast.warning("部分 SKU 缺少主数据，请在导出后手动补充", {
-          description: res.warnings.slice(0, 3).join("；"),
+          description: otherWarnings.slice(0, 3).join("；"),
         });
       }
     },
@@ -427,6 +442,7 @@ export function useInvoice() {
         parsed_shipment: shipment.parsed_shipment,
         forwarder_id: selectedForwarderId,
         po_number: poNumber.trim(),
+        warehouse: warehouseChoice.trim() || undefined,
         workflow_json: buildWorkflowJson(),
         template_base64: invoiceTemplateBase64 ?? undefined,
       });
@@ -462,6 +478,7 @@ export function useInvoice() {
       selectedShipmentId,
       applyFilledResponse,
       setInvoiceSessionsByShipment,
+      warehouseChoice,
     ],
   );
 
@@ -478,8 +495,12 @@ export function useInvoice() {
     setError(null);
     try {
       await fillOneShipment(selected);
+      setFillFailed(false);
+      setWarehouseCandidates([]);
       clearStageStale("invoice");
     } catch (err) {
+      setFillFailed(true);
+      setWarehouseCandidates(warehouseCandidatesFromError(err));
       setError(formatApiError(err));
     } finally {
       setFilling(false);
@@ -503,9 +524,13 @@ export function useInvoice() {
         await fillOneShipment(shipment);
         ok += 1;
       }
+      setFillFailed(false);
+      setWarehouseCandidates([]);
       clearStageStale("invoice");
       toast.success(`已自动填写 ${ok} 个校验通过货件`);
     } catch (err) {
+      setFillFailed(true);
+      setWarehouseCandidates(warehouseCandidatesFromError(err));
       setError(formatApiError(err));
     } finally {
       setFilling(false);
@@ -517,8 +542,18 @@ export function useInvoice() {
       setError(STALE_DOWNLOAD_HINT);
       return;
     }
-    if (!invoiceDraft || (!invoiceTemplateHash && !invoiceTemplateBase64) || sheetPhase !== "filled") {
-      setError("请先完成自动填写后再导出");
+    if ((!invoiceTemplateHash && !invoiceTemplateBase64) || (sheetPhase !== "filled" && sheetPhase !== "preview")) {
+      setError("请先加载货代模板后再导出");
+      return;
+    }
+    const fillBlock = exportBlockAfterFailedFill(fillFailed);
+    if (fillBlock) {
+      setError(fillBlock);
+      return;
+    }
+    const snapshot = spreadsheetRef.current?.getSnapshot();
+    if (!snapshot) {
+      setError("表格还没准备好，请等模板显示后再导出");
       return;
     }
     setExporting(true);
@@ -529,10 +564,11 @@ export function useInvoice() {
         template_hash: invoiceTemplateHash ?? undefined,
         template_base64: invoiceTemplateHash ? undefined : (invoiceTemplateBase64 ?? undefined),
         forwarder_id: selectedForwarderId || undefined,
-        shipment_id: invoiceDraft.shipment_id,
-        warehouse_code: invoiceDraft.warehouse_code,
-        template_sheet: invoiceDraft.template_sheet || templateSheetName,
-        fields: buildExportFieldsForInvoiceExport(invoiceDraft.cells, cellMeta, getValue),
+        shipment_id: invoiceDraft?.shipment_id || selectedShipmentId || "preview",
+        warehouse_code: invoiceDraft?.warehouse_code || selected?.warehouse || "",
+        template_sheet: invoiceDraft?.template_sheet || templateSheetName,
+        fields: invoiceDraft ? buildExportFieldsForInvoiceExport(invoiceDraft.cells, cellMeta, getValue) : [],
+        snapshot,
       });
     } catch (err) {
       setError(formatApiError(err));
@@ -547,7 +583,10 @@ export function useInvoice() {
     templateSheetName,
     cellMeta,
     selectedForwarderId,
+    selectedShipmentId,
+    selected,
     staleness,
+    fillFailed,
   ]);
 
   const handleCopyToExcel = useCallback(async () => {
@@ -570,6 +609,7 @@ export function useInvoice() {
     async (forwarderId: string) => {
       if (selectedShipmentId) persistCurrentSession(selectedShipmentId);
       setSelectedForwarderId(forwarderId);
+      setFillFailed(false);
       const profile = forwarders.find((f) => f.id === forwarderId);
       await loadForwarderTemplate(forwarderId, profile);
     },
@@ -675,12 +715,17 @@ export function useInvoice() {
     copying,
     error,
     setError,
+    warehouseCandidates,
+    warehouseChoice,
+    setWarehouseChoice,
+    fillFailed,
     hasTemplate,
     canAutoFill,
     gridLoading,
     revenueTon,
     missingLabels,
     hasMissing,
+    referenceIdHint,
     forwarders,
     forwardersLoading,
     selectedForwarderId,

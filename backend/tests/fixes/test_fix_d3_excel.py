@@ -23,9 +23,9 @@ def _xlsx(rows):
 
 
 def test_valid_rows_ok():
-    df, fn, errors, warnings = load_from_excel_detailed(_xlsx([["A", "X000000001", 100, 20, 50, 40, 30, 1.2, 0.5, None]]))
+    df, fn, errors, warnings = load_from_excel_detailed(_xlsx([["A", "X00TEST001", 100, 20, 50, 40, 30, 1.2, 0.5, None]]))
     assert errors == []
-    assert int(df.iloc[0]["发货总数"]) == 100 and fn == {"A": "X000000001"}
+    assert int(df.iloc[0]["发货总数"]) == 100 and fn == {"A": "X00TEST001"}
 
 
 def test_abc_and_negative_reported_with_row_numbers():

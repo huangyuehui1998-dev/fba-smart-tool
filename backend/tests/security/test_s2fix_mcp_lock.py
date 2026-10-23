@@ -15,19 +15,19 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr("fba_tool.master_db._master_db_file", lambda: ad / "fba_master.db")
     monkeypatch.setattr("fba_tool.app_paths.app_data_dir", lambda: ad)
     init_master_db()
-    upsert_product({"sku": "S1", "fnsku": "X00OLD0001", "asin": "B000000001", "brand": "OLD"})
+    upsert_product({"sku": "S1", "fnsku": "X00TESTOLD", "asin": "B000000001", "brand": "OLD"})
     return ad
 
 
 def test_manual_fnsku_not_overwritten_and_source_kept():
-    patch_product_field("S1", "fnsku", "X00MANUAL1")
+    patch_product_field("S1", "fnsku", "X00TESTMAN")
     res = apply_lingxing_field_patch(
         "S1", ["fnsku", "asin", "listing_price"],
-        {"fnsku": "X00MCPFNSK", "asin": "B0NEWASIN1", "listing_price": 15.99, "listing_price_currency": "USD"},
+        {"fnsku": "X00TESTMCP", "asin": "B0NEWASIN1", "listing_price": 15.99, "listing_price_currency": "USD"},
     )
     rec = get_product_by_sku("S1")
     src = get_field_sources("S1")
-    assert rec["fnsku"] == "X00MANUAL1"
+    assert rec["fnsku"] == "X00TESTMAN"
     assert src["fnsku"] == "manual"
     assert "fnsku" in res["skipped_locked"]
     # 未锁定字段照常写入，来源记 lingxing
@@ -43,8 +43,8 @@ def test_non_price_fields_get_lingxing_source():
 
 
 def test_preview_marks_manual_field_locked_and_unchecked():
-    patch_product_field("S1", "fnsku", "X00MANUAL1")
-    build_listing_preview(1, [{"sku": "S1", "fnsku": "X00MCPFNSK", "asin": "B000000001"}])
+    patch_product_field("S1", "fnsku", "X00TESTMAN")
+    build_listing_preview(1, [{"sku": "S1", "fnsku": "X00TESTMCP", "asin": "B000000001"}])
     data = serialize_preview(1)
     fields = [f for g in data["groups"].values() for item in g for f in item["fields"]]
     fn = [f for f in fields if f["field"] == "fnsku"][0]

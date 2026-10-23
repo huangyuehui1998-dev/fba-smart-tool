@@ -180,8 +180,8 @@ def _mixed_csv():
     head = ['"货件编号","FBA1TESTMIX1"', '"货件名称","TEST-LAX9"', '"配送地址","FONTANA, CA"', '"箱子数量","2"', '', '"多件商品（2 箱）"']
     rows = [
         '"SKU","商品名称","ASIN","FNSKU","状况","预处理类型","商品总数","箱子 1 的商品数量","箱子 2 的商品数量"',
-        '"S-A","a","B0A","X0000000AA","新品","无","6","4","2"',
-        '"S-B","b","B0B","X0000000BB","新品","无","3","","3"',
+        '"S-A","a","B0A","X00TEST0AA","新品","无","6","4","2"',
+        '"S-B","b","B0B","X00TEST0BB","新品","无","3","","3"',
         '',
         '"","","","","","","箱号","FBA1TESTMIX1U000001","FBA1TESTMIX1U000002"',
         '"","","","","","","包装箱重量（磅）：","10","20"',
@@ -205,11 +205,11 @@ def test_mixed_box_export_send_and_jiufang():
         s = parse_csv_shipment(_mixed_csv(), file_name="mix.csv")
     except ValueError as exc:  # 解析器对手写 CSV 格式要求严格时，退回用真实 CSV 改造
         pytest.skip(f"手写混装 CSV 解析失败：{exc}")
-    prods = {"X0000000AA": _prod("X0000000AA"), "X0000000BB": _prod("X0000000BB", listing_price=20.0)}
+    prods = {"X00TEST0AA": _prod("X00TEST0AA"), "X00TEST0BB": _prod("X00TEST0BB", listing_price=20.0)}
     res = export_invoice("send", shipment=s, products=prods, reference_id="R1")
     ws = openpyxl.load_workbook(io.BytesIO(res["bytes"]))[SEND_SHEET]
     rows = [(ws[f"A{r}"].value, ws[f"E{r}"].value, ws[f"F{r}"].value, ws[f"C{r}"].value) for r in range(15, 19)]
-    assert rows[0][:3] == ("1", "X0000000AA", 4) and rows[1][:3] == ("2", "X0000000AA", 2) and rows[2][:3] == ("2", "X0000000BB", 3)
+    assert rows[0][:3] == ("1", "X00TEST0AA", 4) and rows[1][:3] == ("2", "X00TEST0AA", 2) and rows[2][:3] == ("2", "X00TEST0BB", 3)
     assert rows[2][3] is None and rows[3][0] is None
     res = export_invoice("jiufang", shipment=s, products=prods, reference_id="R1", warehouse_info=WH["LAX9"], order_no="LCLX")
     wb = openpyxl.load_workbook(io.BytesIO(res["bytes"]))

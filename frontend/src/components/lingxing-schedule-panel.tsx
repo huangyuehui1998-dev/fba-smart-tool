@@ -26,7 +26,12 @@ const STATUS_LABEL: Record<string, string> = {
   failed: "失败",
   skipped: "跳过（上一轮未结束）",
 };
-const TRIGGER_LABEL: Record<string, string> = { manual: "手动拉取", scheduled: "定时", retry: "立即重试" };
+const TRIGGER_LABEL: Record<string, string> = {
+  manual: "手动拉取",
+  scheduled: "定时",
+  retry: "立即重试",
+  xlsx_import: "网页导出",
+};
 
 function fmt(ts: string | null | undefined) {
   if (!ts) return "—";
@@ -169,6 +174,19 @@ export function LingxingSchedulePanel({ onSynced }: { onSynced?: () => void }) {
                 </td>
                 <td className="max-w-xs truncate" title={r.error || ""}>
                   {r.error || ""}
+                  {r.backup_path ? (
+                    <button
+                      type="button"
+                      className="ml-2 underline"
+                      data-testid="lingxing-rollback"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void fetch(`/api/lingxing/runs/${r.id}/rollback`, { method: "POST" }).then(() => void reload());
+                      }}
+                    >
+                      回滚
+                    </button>
+                  ) : null}
                 </td>
               </tr>
               {openRun === r.id && (

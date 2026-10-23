@@ -17,7 +17,7 @@ def _csv_bytes() -> bytes:
             "货件名称,CLT2 shipment",
             "箱子数量,1",
             "SKU,FNSKU,箱子1",
-            "TEST_A,X001234567,10",
+            "TEST_A,X00TEST567,10",
             "箱号,,FBATEST0001U000001",
         ]
     )
@@ -54,11 +54,11 @@ def test_missing_sku_uses_fnsku_or_qty_as_warning_only():
         1,
         box_data={1: {"TEST_A": 10}},
         box_fba_ids={1: "FBATEST0001U000001"},
-        sku_fnsku={"TEST_A": "X001234567"},
+        sku_fnsku={"TEST_A": "X00TEST567"},
     )
     warned = cross_validate_pair(
         csv,
-        [PdfBoxPage(0, "FBATEST0001", "FBATEST0001U000001", 1, fnsku="X001234567", qty=10)],
+        [PdfBoxPage(0, "FBATEST0001", "FBATEST0001U000001", 1, fnsku="X00TEST567", qty=10)],
         "CLT2",
         "FBATEST0001",
     )

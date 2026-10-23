@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from "react";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import { toast } from "sonner";
 
 import { AppHeader } from "@/components/app-header";
@@ -69,6 +70,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const [restarting, setRestarting] = useState(false);
   const [savingTask, setSavingTask] = useState(false);
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (state) => state.location.pathname });
 
   const stepGuard = useMemo(
     () => ({ inputRows, boxLocked, boxEditorApi, step4Ok, highestReachedStep }),
@@ -81,10 +84,30 @@ export function AppShell({ children }: { children: ReactNode }) {
         toast.error(getStepBlockReason(next, stepGuard) ?? "无法进入该步骤");
         return;
       }
-      setStep(next);
+      const go = () => setStep(next);
+      if (pathname !== "/") {
+        void navigate({ to: "/" }).then(go);
+        return;
+      }
+      go();
     },
-    [step, stepGuard, setStep],
+    [navigate, pathname, step, stepGuard, setStep],
   );
+
+  useEffect(() => {
+    const onWheel = (event: WheelEvent) => {
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+      const grid = document.querySelector("[data-testid=data-univer-grid]");
+      if (grid?.contains(target)) return;
+      const scroller = document.querySelector("[data-testid=app-scroll]");
+      if (!(scroller instanceof HTMLElement) || !scroller.contains(target)) return;
+      event.preventDefault();
+      scroller.scrollTop += event.deltaY;
+    };
+    document.addEventListener("wheel", onWheel, { passive: false, capture: true });
+    return () => document.removeEventListener("wheel", onWheel, { capture: true });
+  }, []);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -134,7 +157,7 @@ export function AppShell({ children }: { children: ReactNode }) {
 
     <div
 
-      className="flex min-h-screen flex-col bg-background"
+      className="flex h-dvh flex-col overflow-hidden bg-background"
 
       style={{ [APP_SIDEBAR_WIDTH_VAR]: sidebarWidthCss(isSidebarOpenState) } as React.CSSProperties}
 
@@ -206,11 +229,11 @@ export function AppShell({ children }: { children: ReactNode }) {
 
       <ConfigErrorBanner />
 
-      <div className="relative flex flex-1">
+      <div className="relative flex min-h-0 flex-1">
 
         <AppSidebar isOpen={isSidebarOpenState} onToggle={toggleSidebar} />
 
-        <main className="relative z-0 min-w-0 flex-1 overflow-auto p-6 pb-[calc(var(--bottom-bar-h,0px)+2rem)] transition-[width] duration-300 ease-in-out">
+        <main data-testid="app-scroll" className="relative z-0 min-h-0 min-w-0 flex-1 overflow-y-auto p-6 pb-[calc(var(--bottom-bar-h,0px)+2rem)] transition-[width] duration-300 ease-in-out">
 
           {children}
 

@@ -25,12 +25,16 @@ def detect_weight_unit(label: str) -> WeightUnit:
 
 
 def to_cm(value: float, unit: DimUnit | str) -> float:
-    """底层统一为 cm；英寸按配置系数换算后保留 1 位小数。"""
+    """底层统一为 cm。已经是厘米的保留原精度（44.96 不再收成 45.00）。
+
+    英寸按配置系数换算后保留 2 位：17.70 in × 2.54 = 44.96。
+    """
     if value <= 0:
         return 0.0
     if str(unit).lower() in {"in", "inch", "inches", "英寸"}:
         value = float(value) * float(param("inch_to_cm_factor", INCH_TO_CM))
-    return round(float(value), 1)
+        return round(float(value), 2)
+    return float(value)
 
 
 def to_kg(value: float, unit: WeightUnit | str) -> float:

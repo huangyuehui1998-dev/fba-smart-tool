@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearch } from "@tanstack/react-router";
-import { Database, FileSpreadsheet, Loader2, RefreshCw, Upload, ArrowLeft, CloudDownload } from "lucide-react";
-import { Link } from "@tanstack/react-router";
+import { Database, FileSpreadsheet, Loader2, RefreshCw, Upload, CloudDownload } from "lucide-react";
+import { BackToWorkflow } from "@/components/back-to-workflow";
+import { CartonSpecWizard } from "@/components/carton-spec-wizard";
+import { LingxingXlsxImport } from "@/components/lingxing-xlsx-import";
 import { toast } from "sonner";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -349,12 +351,9 @@ export function MasterDataWorkspace() {
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" className="gap-1.5" asChild>
-            <Link to="/">
-              <ArrowLeft className="h-4 w-4" />
-              返回工作流
-            </Link>
-          </Button>
+          <CartonSpecWizard />
+          <LingxingXlsxImport onImported={() => void loadLingxingMeta()} />
+          <BackToWorkflow />
           <Button variant="outline" size="sm" className="gap-1.5" onClick={() => void loadList()} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             刷新列表

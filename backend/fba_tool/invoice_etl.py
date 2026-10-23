@@ -18,6 +18,37 @@ LBS_TO_KG = 0.45359237
 IN_TO_CM = 2.54
 
 
+def _model_text(val: Any) -> str:
+    """型号列只接受 model_name。空值保持空白，不用 SKU 顶上。"""
+    if val is None:
+        return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except TypeError:
+        pass
+    text = str(val).strip()
+    return "" if text.lower() == "nan" else text
+
+
+def _blank_price(val: Any) -> Any:
+    """空、NaN 都当成没填申报价。有数字就保留原值。"""
+    if val in (None, ""):
+        return ""
+    try:
+        if pd.isna(val):
+            return ""
+    except TypeError:
+        pass
+    try:
+        number = float(val)
+    except (TypeError, ValueError):
+        return ""
+    if number != number:
+        return ""
+    return number
+
+
 def _to_float(val: Any) -> Optional[float]:
     if val in (None, ""):
         return None
@@ -36,6 +67,48 @@ def _pick_source(step12: Any, step4: Any, catalog: Any) -> Tuple[Any, str]:
     if catalog not in (None, ""):
         return catalog, "blue"
     return "", "red"
+
+
+def _string_dtype(dtype) -> bool:
+    name = str(getattr(dtype, "name", "") or dtype)
+    return name in {"str", "string"}
+
+
+def _numeric_cell(column: str, value: Any) -> Any:
+    """空值留空。数字保持数值：整数数量写成 int，价格和尺寸保持 float。"""
+    if isinstance(value, bool) or value in (None, ""):
+        return None
+    try:
+        if pd.isna(value):
+            return None
+    except TypeError:
+        pass
+    if isinstance(value, str):
+        from fba_tool.invoice_rules import to_number
+
+        parsed = to_number(value)
+        if isinstance(parsed, bool) or not isinstance(parsed, (int, float)):
+            return None
+        value = parsed
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    if number != number or number in (float("inf"), float("-inf")):
+        return None
+    if column in {"qty_per_box", "qty", "total_qty", "box_count", "pcs_per_set"} and number.is_integer():
+        return int(number)
+    return number
+
+
+def _put_numeric(df: pd.DataFrame, idx, column: str, value: Any) -> None:
+    """数值列用 object 承接，避免 pandas 3 先看到空字符串就把列收成 str。"""
+    value = _numeric_cell(column, value)
+    if column not in df.columns:
+        df[column] = pd.Series([None] * len(df), index=df.index, dtype=object)
+    elif _string_dtype(df[column].dtype):
+        df[column] = df[column].astype(object)
+    df.at[idx, column] = value
 
 
 def _format_box_range(boxes: List[int], separator: str = "-") -> str:
@@ -61,6 +134,27 @@ def _consecutive_runs(box_ids: List[int]) -> List[Tuple[int, int]]:
             start = prev = box_id
     runs.append((start, prev))
     return runs
+
+
+def _format_box_runs(boxes: List[int]) -> str:
+    parts: List[str] = []
+    for start, end in _consecutive_runs(boxes):
+        parts.append(str(start) if start == end else f"{start}-{end}")
+    return ",".join(parts)
+
+
+def _unassigned_shipment_id(shipment_id: str) -> bool:
+    """刷箱 / FIST 的货件编号是「待分配」，解析后仍是这个值。"""
+    return str(shipment_id or "").strip() in {"待分配", "UNASSIGNED"}
+
+
+def _positive_whole(val: Any) -> int:
+    if isinstance(val, bool):
+        return 0
+    number = _to_float(val)
+    if number is None or not float(number).is_integer():
+        return 0
+    return int(number)
 
 
 def extract_unpivot(ship: CsvShipment) -> pd.DataFrame:
@@ -109,9 +203,12 @@ def join_master_db(df: pd.DataFrame, warnings: List[str]) -> pd.DataFrame:
         "master_height_cm",
         "master_unit_kg",
         "master_asin",
+        "master_model",
     ]
     for col in master_cols:
-        df[col] = None
+        df[col] = pd.Series([None] * len(df), index=df.index, dtype=object)
+
+    from fba_tool.product_fields import resolve_declared_price
 
     missing_skus: set[str] = set()
     for idx, row in df.iterrows():
@@ -128,7 +225,8 @@ def join_master_db(df: pd.DataFrame, warnings: List[str]) -> pd.DataFrame:
         df.at[idx, "master_brand"] = master.get("brand") or ""
         df.at[idx, "master_material"] = master.get("material") or ""
         df.at[idx, "master_purpose"] = master.get("purpose") or ""
-        df.at[idx, "master_declared_price"] = _to_float(master.get("declared_value"))
+        price, _source = resolve_declared_price(master)
+        _put_numeric(df, idx, "master_declared_price", price)
         df.at[idx, "master_length_cm"] = _to_float(
             master.get("carton_length") or master.get("unit_length")
         )
@@ -142,6 +240,7 @@ def join_master_db(df: pd.DataFrame, warnings: List[str]) -> pd.DataFrame:
             master.get("carton_weight") or master.get("unit_weight")
         )
         df.at[idx, "master_asin"] = master.get("asin") or ""
+        df.at[idx, "master_model"] = master.get("model_name") or ""
 
     for sku in sorted(missing_skus):
         warnings.append(f"主数据缺少 SKU：{sku}")
@@ -171,56 +270,61 @@ def priority_fallback(
         height_step4 = _to_float(row.get("高(cm)"))
         weight_step4 = _to_float(row.get("实重(kg)"))
 
-        df.at[idx, "english_name"], _ = _pick_source(
-            "",
-            lookup_sku(sku_meta, sku, {}).get("title", ""),
-            row.get("master_english_name"),
-        )
+        from fba_tool.invoice_rules import invoice_english_name
+
+        title = lookup_sku(sku_meta, sku, {}).get("title", "")
+        df.at[idx, "english_name"] = invoice_english_name(row.get("master_english_name"), title)
         df.at[idx, "chinese_name"], _ = _pick_source("", "", row.get("master_chinese_name"))
         df.at[idx, "hs_code"], _ = _pick_source("", "", row.get("master_hs_code"))
         df.at[idx, "brand"], _ = _pick_source("", "", row.get("master_brand"))
         df.at[idx, "material"], _ = _pick_source("", "", row.get("master_material"))
         df.at[idx, "purpose"], _ = _pick_source("", "", row.get("master_purpose"))
-        df.at[idx, "declared_price"], _ = _pick_source("", "", row.get("master_declared_price"))
+        declared_price, _ = _pick_source("", "", row.get("master_declared_price"))
+        _put_numeric(df, idx, "declared_price", declared_price)
 
         qty_step4 = _to_float(row.get("qty"))
         qty_step12 = wf.per_box if wf else None
-        df.at[idx, "qty_per_box"], _ = _pick_source(qty_step12, qty_step4, "")
+        qty_per_box, _ = _pick_source(qty_step12, qty_step4, "")
+        _put_numeric(df, idx, "qty_per_box", qty_per_box)
 
         len_s12 = wf.length_cm if wf else None
         len_fwd = wf.length_cm_fwd if wf else None
-        df.at[idx, "length_cm"], _ = _pick_source(
+        length_cm, _ = _pick_source(
             len_s12 or len_fwd,
             length_step4,
             row.get("master_length_cm"),
         )
+        _put_numeric(df, idx, "length_cm", length_cm)
         wid_s12 = wf.width_cm if wf else None
         wid_fwd = wf.width_cm_fwd if wf else None
-        df.at[idx, "width_cm"], _ = _pick_source(
+        width_cm, _ = _pick_source(
             wid_s12 or wid_fwd,
             width_step4,
             row.get("master_width_cm"),
         )
+        _put_numeric(df, idx, "width_cm", width_cm)
         ht_s12 = wf.height_cm if wf else None
         ht_fwd = wf.height_cm_fwd if wf else None
-        df.at[idx, "height_cm"], _ = _pick_source(
+        height_cm, _ = _pick_source(
             ht_s12 or ht_fwd,
             height_step4,
             row.get("master_height_cm"),
         )
+        _put_numeric(df, idx, "height_cm", height_cm)
 
         unit_w_step12 = wf.unit_kg if wf else None
         unit_w_fwd = wf.unit_weight_kg if wf else None
         unit_w_step4 = None
         if weight_step4 and qty_step4:
             unit_w_step4 = round(weight_step4 / qty_step4, 3)
-        df.at[idx, "unit_weight_kg"], _ = _pick_source(
+        unit_weight_kg, _ = _pick_source(
             unit_w_step12 or unit_w_fwd,
             unit_w_step4,
             row.get("master_unit_kg"),
         )
-        df.at[idx, "model"] = sku
-        df.at[idx, "box_weight_kg"] = weight_step4
+        _put_numeric(df, idx, "unit_weight_kg", unit_weight_kg)
+        df.at[idx, "model"] = str(row.get("master_model") or "").strip()
+        _put_numeric(df, idx, "box_weight_kg", weight_step4)
 
     return df
 
@@ -295,7 +399,10 @@ def _resolve_box_num(series: pd.Series) -> pd.Series:
 
 
 def _group_by_box_range(df: pd.DataFrame) -> pd.DataFrame:
-    """按 FBAID + 型号 + 单箱量 + 尺寸分组，并在组内合并连续箱号（如 1-5）。"""
+    """按 FBAID + SKU + 型号 + 单箱量 + 尺寸分组，并在组内合并连续箱号（如 1-5）。
+
+    型号相同、单箱量和尺寸也相同的两个 SKU 仍各占一行。空型号不写进型号列。
+    """
     if df.empty:
         return df
 
@@ -306,13 +413,19 @@ def _group_by_box_range(df: pd.DataFrame) -> pd.DataFrame:
         return df.iloc[0:0].copy()
 
     work["fba_id"] = work["shipment_id"].astype(str).str.strip()
-    work["model"] = work.get("model", work["sku"]).fillna(work["sku"]).astype(str).str.strip()
+    if "sku" not in work.columns:
+        work["sku"] = ""
+    work["sku"] = work["sku"].fillna("").astype(str).str.strip()
+    if "model" not in work.columns:
+        work["model"] = ""
+    work["model"] = work["model"].fillna("").astype(str).str.strip().replace({"nan": ""})
+    work["_model_group"] = work["model"].where(work["model"] != "", work["sku"])
     work["_gk_qty"] = work["qty_per_box"].map(lambda v: round(_to_float(v) or 0, 3))
     work["_gk_len"] = work["length_cm"].map(lambda v: round(_to_float(v) or 0, 3))
     work["_gk_wid"] = work["width_cm"].map(lambda v: round(_to_float(v) or 0, 3))
     work["_gk_hei"] = work["height_cm"].map(lambda v: round(_to_float(v) or 0, 3))
 
-    group_keys = ["fba_id", "model", "_gk_qty", "_gk_len", "_gk_wid", "_gk_hei"]
+    group_keys = ["fba_id", "sku", "_model_group", "_gk_qty", "_gk_len", "_gk_wid", "_gk_hei"]
     work = work.sort_values(group_keys + ["_box_num"], kind="mergesort")
 
     prev_box = work.groupby(group_keys, sort=False)["_box_num"].shift(1)
@@ -337,10 +450,56 @@ def _group_by_box_range(df: pd.DataFrame) -> pd.DataFrame:
         rows.append(row)
 
     out = pd.DataFrame(rows)
-    drop_cols = [c for c in ("_gk_qty", "_gk_len", "_gk_wid", "_gk_hei", "_block", "_box_num") if c in out.columns]
+    drop_cols = [c for c in ("_gk_qty", "_gk_len", "_gk_wid", "_gk_hei", "_block", "_box_num", "_model_group") if c in out.columns]
     if drop_cols:
         out = out.drop(columns=drop_cols)
     return out
+
+
+def _group_unassigned_by_sku(df: pd.DataFrame) -> pd.DataFrame:
+    """待分配货件（刷箱 / FIST）箱规经常一箱一个尺寸，按箱合并会留下一串单箱数。
+
+    琪珞模板没有 SKU 列，读表的人只能看到数量格子。每个 SKU 只留一行，
+    单箱内数量和总数都写成 CSV 里该 SKU 的数量加总，与 send 的 sku_qty_tokens 一致。
+    """
+    if df.empty:
+        return df
+
+    work = df.copy()
+    if "sku" not in work.columns:
+        work["sku"] = ""
+    work["sku"] = work["sku"].fillna("").astype(str).str.strip()
+    if "box_id" in work.columns:
+        work["_box_num"] = _resolve_box_num(work["box_id"])
+    else:
+        work["_box_num"] = 0
+    if "qty" not in work.columns:
+        work["qty"] = 0
+
+    order: List[str] = []
+    seen: set[str] = set()
+    for sku in work["sku"].tolist():
+        if sku not in seen:
+            seen.add(sku)
+            order.append(sku)
+
+    rows: List[Dict[str, Any]] = []
+    for sku in order:
+        grp = work[work["sku"] == sku]
+        boxes = sorted({int(box) for box in grp["_box_num"].tolist() if int(box) > 0})
+        qty = sum(_positive_whole(value) for value in grp["qty"].tolist())
+        row = grp.iloc[0].to_dict()
+        row.pop("_box_num", None)
+        row["sku"] = sku
+        row["box_range"] = _format_box_runs(boxes)
+        row["box_count"] = len(boxes) if boxes else int(len(grp))
+        row["total_qty"] = qty
+        row["qty_per_box"] = qty
+        row["qty"] = qty
+        if boxes:
+            row["box_id"] = boxes[0]
+        rows.append(row)
+    return pd.DataFrame(rows)
 
 
 def dataframe_to_line_items(
@@ -362,7 +521,7 @@ def dataframe_to_line_items(
             elif not material:
                 material = purpose
 
-        declared = row.get("declared_price")
+        declared = _blank_price(row.get("declared_price"))
         total_qty = int(row.get("total_qty") or row.get("qty") or 0)
         total_declared = ""
         if declared not in (None, "") and total_qty > 0:
@@ -388,7 +547,7 @@ def dataframe_to_line_items(
             "asin": row.get("master_asin") or "",
             "battery": "否",
             "magnet": "否",
-            "model": row.get("model") or row.get("sku") or "",
+            "model": _model_text(row.get("model")),
             "total_qty": total_qty,
             "qty_per_box": row.get("qty_per_box") or "",
             "unit": "套",
@@ -440,13 +599,17 @@ def run_invoice_etl(
     workflow_json: dict | None,
     po_number: str = "",
     catalog: Optional[ProductCatalog] = None,
+    separate_material_purpose: bool | None = None,
 ) -> Tuple[List[InvoiceLineItem], List[str]]:
     """执行完整五段 ETL，返回发票行与 warnings。"""
     warnings: List[str] = []
     mapping = get_forwarder_mapping(forwarder_id) or {}
     group_logic = normalize_group_logic(mapping.get("group_logic"))
     unit_cfg = mapping.get("unit_conversion") or {}
-    separate_mp = bool(mapping.get("separate_material_purpose"))
+    if separate_material_purpose is None:
+        separate_mp = bool(mapping.get("separate_material_purpose"))
+    else:
+        separate_mp = bool(separate_material_purpose)
 
     df = extract_unpivot(ship)
     if df.empty:
@@ -456,11 +619,45 @@ def run_invoice_etl(
     df = join_master_db(df, warnings)
     df = priority_fallback(df, workflow_json, csv_bytes, catalog)
     df = apply_unit_conversion(df, unit_cfg)
-    grouped = group_by_logic(df, group_logic)
+    # 命名 FBA 仍按箱号段合并，单箱数乘箱数等于 SKU 合计。待分配对不上箱规，必须直接写加总。
+    if str(forwarder_id or "").strip().casefold() == "qiluo" and _unassigned_shipment_id(ship.shipment_id):
+        grouped = _group_unassigned_by_sku(df)
+    else:
+        grouped = group_by_logic(df, group_logic)
     line_items = dataframe_to_line_items(
         grouped,
         ship,
         po_number=po_number,
         separate_material_purpose=separate_mp,
     )
+    if "declared_price" in (mapping.get("columns_mapping") or {}):
+        from fba_tool.invoice_rules import InvoiceBlocked, unique_missing_price_labels
+        from fba_tool.sku_keys import sku_key
+
+        entries: List[Tuple[str, str, str]] = []
+        for item in line_items:
+            if item.values.get("declared_price") not in (None, ""):
+                continue
+            sku = str(item.values.get("sku") or "").strip()
+            if not sku:
+                continue
+            product = get_product_by_sku(sku) or {}
+            fnsku = str(product.get("fnsku") or "").strip()
+            box_fnsku = ""
+            if "FNSKU" in ship.box_items.columns:
+                for _, rec in ship.box_items.iterrows():
+                    if sku_key(rec.get("SKU")) == sku_key(sku):
+                        box_fnsku = str(rec.get("FNSKU") or "").strip()
+                        if box_fnsku:
+                            break
+            if not fnsku or sku_key(fnsku) == sku_key(sku):
+                if box_fnsku and sku_key(box_fnsku) != sku_key(sku):
+                    fnsku = box_fnsku
+                elif fnsku and sku_key(fnsku) == sku_key(sku):
+                    fnsku = ""
+            entries.append((sku, fnsku, sku))
+        missing = unique_missing_price_labels(entries)
+        if missing:
+            message = "以下 SKU 没有申报价，不能导出：" + "、".join(missing) + "。请在产品库导入领星售价或手填申报价。"
+            raise InvoiceBlocked([{"code": "price_missing", "skus": missing, "message": message}])
     return line_items, warnings

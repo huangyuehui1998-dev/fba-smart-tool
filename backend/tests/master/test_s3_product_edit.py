@@ -19,7 +19,7 @@ def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr("fba_tool.master_db._master_db_file", lambda: ad / "fba_master.db")
     monkeypatch.setattr("fba_tool.app_paths.app_data_dir", lambda: ad)
     init_master_db()
-    upsert_product({"sku": "S1", "fnsku": "X00OLD0001", "asin": "B000000001", "brand": "OLD", "english_name": "Old Mat"})
+    upsert_product({"sku": "S1", "fnsku": "X00TESTOLD", "asin": "B000000001", "brand": "OLD", "english_name": "Old Mat"})
     set_product_fields("S1", {"listing_price": 15.99, "listing_price_basis": "listing_price"}, "lingxing")
 
 
@@ -98,7 +98,7 @@ def test_import_preview_then_apply_marks_manual():
     body = p.json()
     changed = {(d["sku"], d["field"]) for d in body["changes"]}
     assert changed == {("S1", "fnsku"), ("S1", "chinese_name"), ("S1", "hs_code")}
-    assert get_product_by_sku("S1")["fnsku"] == "X00OLD0001"  # 预览不写库
+    assert get_product_by_sku("S1")["fnsku"] == "X00TESTOLD"  # 预览不写库
     a = c.post("/api/master-data/import/edits/apply", files={"file": ("p.xlsx", data)})
     assert a.status_code == 200 and a.json()["written"] == 3
     rec = get_product_by_sku("S1")

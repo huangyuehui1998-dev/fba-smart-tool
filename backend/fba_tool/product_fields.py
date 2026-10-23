@@ -47,6 +47,10 @@ NEW_COLUMNS = {
     "product_cost_currency": "TEXT",
     "retail_source": "TEXT",
     "retail_synced_at": "TEXT",
+    "local_sku": "TEXT",
+    "fee_fba_est": "REAL",
+    "fee_referral_rate": "REAL",
+    "listing_price_site": "TEXT",
 }
 ORIGIN_SELF_FIRST = "self_first"  # 首次同步、当时没有任何参照时自己记下的（可能就是促销价），不算“有历史”
 ORIGIN_CONFIRMED = "confirmed"    # 之后的同步在有参照时记下的非促销价，或用户人工确认的正常价
@@ -58,17 +62,18 @@ from fba_tool.master_schema import SCHEMA_VERSION  # noqa: E402  v3：新增配�
 _FLOAT_FIELDS = (
     "listing_price", "declared_value", "qty_per_box", "product_cost_cny",
     "carton_length", "carton_width", "carton_height", "carton_weight", "carton_gross_weight",
-    "regular_price",
+    "regular_price", "fee_fba_est", "fee_referral_rate",
 )
 _TEXT_FIELDS = (
     "listing_price_currency", "declare_unit", "fnsku", "asin", "local_name", "listing_price_basis", "category",
-    "product_cost_currency", "retail_source", "retail_synced_at",
+    "product_cost_currency", "retail_source", "retail_synced_at", "local_sku", "listing_price_site",
 )
 WRITABLE_FIELDS = _FLOAT_FIELDS + _TEXT_FIELDS
 # 这些字段由本模块直接写列（upsert_product 不认识）
 OWN_FIELDS = (
     "listing_price", "listing_price_currency", "declare_unit", "carton_gross_weight", "local_name", "listing_price_basis",
     "category", "regular_price", "product_cost_cny", "product_cost_currency", "retail_source", "retail_synced_at",
+    "local_sku", "fee_fba_est", "fee_referral_rate", "listing_price_site",
 )
 # 用户 2026-10-16 定：申报价按实时售价报，领星售价不受手填锁定
 NEVER_LOCKED_FOR_LINGXING = ("listing_price", "listing_price_currency", "listing_price_basis", "regular_price")

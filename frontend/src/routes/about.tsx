@@ -2,6 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 
 import { AppShell } from "@/components/app-shell";
+import { BackToWorkflow } from "@/components/back-to-workflow";
 import { LegacyDataDialog } from "@/components/legacy-data-dialog";
 
 export const Route = createFileRoute("/about")({
@@ -48,7 +49,10 @@ function AboutPage() {
   return (
     <AppShell>
       <div className="space-y-3 p-4 text-sm">
-        <h1 className="text-lg font-semibold">关于</h1>
+        <div className="flex items-center justify-between gap-2">
+          <h1 className="text-lg font-semibold">关于</h1>
+          <BackToWorkflow />
+        </div>
         <p>版本 {health.version ?? "—"}</p>
         <p>数据目录 {health.data_dir ?? "—"}</p>
         <p>数据库版本 {health.schema_version ?? "—"}</p>

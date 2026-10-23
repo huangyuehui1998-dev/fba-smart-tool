@@ -100,6 +100,8 @@ def price_checks(raw_rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], 
         src = str(row.get("price_source") or "")
         per_sku[sku] = {
             "sku": sku,
+            "product_sku": str(row.get("product_sku") or "").strip(),
+            "fnsku": str(row.get("fnsku") or "").strip(),
             "price": row.get("unit_price") if src != "none" else None,
             "source": src,
             "source_label": PRICE_SOURCE_LABELS.get(src, src),
@@ -112,7 +114,13 @@ def price_checks(raw_rows: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], 
     warnings: List[Dict[str, Any]] = []
     blocking: List[Dict[str, Any]] = []
     legacy = [s["sku"] for s in sources if s["source"] == "legacy"]
-    missing = [s["sku"] for s in sources if s["source"] == "none"]
+    from fba_tool.invoice_rules import unique_missing_price_labels
+
+    missing = unique_missing_price_labels(
+        (s.get("product_sku") or "", s.get("fnsku") or "", s["sku"])
+        for s in sources
+        if s["source"] == "none"
+    )
     if legacy:
         warnings.append({
             "code": "price_legacy",

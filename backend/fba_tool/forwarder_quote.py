@@ -372,11 +372,11 @@ def _build_forwarder_by_sku(
 
         weights = group["数量"].astype(float)
 
-        avg_l = round(float((group["长(cm)"] * weights).sum() / weights.sum()), 1)
+        avg_l = round(float((group["长(cm)"] * weights).sum() / weights.sum()), 2)
 
-        avg_w = round(float((group["宽(cm)"] * weights).sum() / weights.sum()), 1)
+        avg_w = round(float((group["宽(cm)"] * weights).sum() / weights.sum()), 2)
 
-        avg_h = round(float((group["高(cm)"] * weights).sum() / weights.sum()), 1)
+        avg_h = round(float((group["高(cm)"] * weights).sum() / weights.sum()), 2)
 
         single_vol = volume_weight_kg(avg_l, avg_w, avg_h, throw_ratio=ratio)
 

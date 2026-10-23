@@ -31,6 +31,7 @@ import { TableScrollArea } from "@/components/table-scroll-area";
 import { formatApiError } from "@/lib/format-api-error";
 import { autoTaskName } from "@/lib/workflow-storage";
 import { useWorkflow } from "@/context/workflow-context";
+import { rememberReturnStep } from "@/lib/return-step";
 import {
   deleteTaskHistory,
   fetchTaskHistoryList,
@@ -394,7 +395,7 @@ export function AppSidebar({
   const [lingxingHint, setLingxingHint] = useState("");
   const [lingxingSaving, setLingxingSaving] = useState(false);
   const [lingxingMsg, setLingxingMsg] = useState<string | null>(null);
-  const { taskName, setTaskName, saveCurrentTaskToHistory, loadTaskFromHistory, refreshConfigLimits } =
+  const { taskName, setTaskName, saveCurrentTaskToHistory, loadTaskFromHistory, refreshConfigLimits, step } =
     useWorkflow();
   const [taskNameDraft, setTaskNameDraft] = useState(taskName);
   const [historyTasks, setHistoryTasks] = useState<TaskHistoryIndexRow[]>([]);
@@ -603,6 +604,14 @@ export function AppSidebar({
               </Button>
               {lingxingMsg && <p className="text-[10px] leading-tight text-muted-foreground">{lingxingMsg}</p>}
               <Link
+                to="/"
+                data-testid="nav-workflow"
+                className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/60"
+                activeProps={{ className: "border-primary/30 bg-primary/10 text-primary" }}
+              >
+                工作流
+              </Link>
+              <Link
                 to="/master-data"
                 className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/60"
                 activeProps={{ className: "border-primary/30 bg-primary/10 text-primary" }}
@@ -618,8 +627,10 @@ export function AppSidebar({
               </Link>
               <Link
                 to="/carton-compare"
+                data-testid="nav-carton"
                 className="flex items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-muted/60"
                 activeProps={{ className: "border-primary/30 bg-primary/10 text-primary" }}
+                onClick={() => rememberReturnStep(step)}
               >
                 箱规对比
               </Link>

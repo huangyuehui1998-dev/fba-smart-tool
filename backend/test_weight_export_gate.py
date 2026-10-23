@@ -65,6 +65,7 @@ def client(monkeypatch, tmp_path):
             "brand": "B",
             "material": "铁",
             "purpose": "用",
+            "model_name": "无",
             "listing_price": 10,
             "declared_value": 10,
             "hs_code": "7326909000",

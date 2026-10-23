@@ -19,6 +19,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { ErrorLines } from "@/components/feedback/error-notice";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
@@ -41,6 +42,7 @@ import { useWorkflow } from "@/context/workflow-context";
 import { StaleDataBanner } from "@/components/stale-data-banner";
 import { InvoiceSpreadsheet } from "@/components/invoice-spreadsheet";
 import { CELL_SOURCE_STYLES, type CellSourceKind } from "@/lib/invoice-spreadsheet";
+import { FILL_FAILED_EXPORT_BLOCK } from "@/lib/invoice-export-guard";
 
 const LEGEND_KEYS: CellSourceKind[] = ["exact", "local", "missing"];
 
@@ -63,12 +65,17 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
     copying,
     error,
     setError,
+    warehouseCandidates,
+    warehouseChoice,
+    setWarehouseChoice,
+    fillFailed,
     hasTemplate,
     canAutoFill,
     gridLoading,
     revenueTon,
     missingLabels,
     hasMissing,
+    referenceIdHint,
     forwarders,
     forwardersLoading,
     selectedForwarderId,
@@ -128,7 +135,26 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
       {error && (
         <Alert variant="destructive">
           <AlertTriangle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription>
+          <ErrorLines text={error} />
+        </AlertDescription>
+          {warehouseCandidates.length > 0 && (
+            <div className="mt-3 max-w-xs space-y-1">
+              <Label className="text-xs">选择仓库后再点自动填写</Label>
+              <Select value={warehouseChoice || undefined} onValueChange={setWarehouseChoice}>
+                <SelectTrigger className="h-9 bg-background" data-testid="warehouse-candidate-select">
+                  <SelectValue placeholder="请选择仓库" />
+                </SelectTrigger>
+                <SelectContent>
+                  {warehouseCandidates.map((code) => (
+                    <SelectItem key={code} value={code}>
+                      {code}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </Alert>
       )}
 
@@ -150,7 +176,7 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
                 onValueChange={(id) => void handleForwarderChange(id)}
                 disabled={forwardersLoading || parsing}
               >
-                <SelectTrigger className="h-11 flex-1">
+                <SelectTrigger className="h-11 flex-1" data-testid="forwarder-select">
                   <SelectValue placeholder={forwardersLoading ? "加载货代…" : "选择货代"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -186,6 +212,16 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
                     ? "填充态"
                     : "已加载"}{" "}
                 · Excel 原样排版已就绪
+              </p>
+            )}
+            {fillFailed && (
+              <p className="text-[11px] text-destructive" data-testid="export-blocked-after-fill">
+                {FILL_FAILED_EXPORT_BLOCK}
+              </p>
+            )}
+            {hasTemplate && !parsing && (
+              <p className="text-[11px] text-muted-foreground" data-testid="export-scope-note">
+                导出按当前表格整本回填，未映射单元格的修改也会写入。公式格不能改成纯值，合并单元格的从属格不能写入。
               </p>
             )}
           </CardContent>
@@ -245,6 +281,7 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
                 type="button"
                 size="lg"
                 className="h-11 flex-1 gap-2 bg-orange-600 text-base font-semibold shadow-md hover:bg-orange-700"
+                data-testid="invoice-autofill"
                 disabled={!canAutoFill}
                 onClick={() => void runFill()}
               >
@@ -307,6 +344,16 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
         </Card>
       </div>
 
+      {(referenceIdHint || missingLabels.some((label) => label.includes("Reference ID"))) && (
+        <Alert className="sticky top-0 z-20 border-amber-300 bg-amber-50 shadow-sm" data-testid="reference-id-banner">
+          <AlertTriangle className="h-4 w-4 !text-amber-600" />
+          <AlertTitle className="text-sm font-semibold text-amber-900">Reference ID 为空</AlertTitle>
+          <AlertDescription className="text-xs text-amber-800">
+            {referenceIdHint || "请上传货件 PDF。Reference ID 在货件 PDF 里，产品库没有这一项。"}
+          </AlertDescription>
+        </Alert>
+      )}
+
       <div className="flex flex-wrap items-center gap-3">
         {revenueTon != null && sheetPhase === "filled" && (
           <Badge
@@ -344,13 +391,14 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
         onLoadError={(msg) => setError(msg)}
         onCellEdited={handleCellEdited}
       />
+      <div data-testid="sheet-scroll-spacer" className="h-[70vh]" />
 
-      {hasMissing && (
+      {missingLabels.some((label) => !label.includes("Reference ID")) && (
         <Alert className="border-amber-300 bg-amber-50">
           <AlertTriangle className="h-4 w-4 !text-amber-600" />
           <AlertTitle className="text-sm font-semibold text-amber-900">部分字段未填</AlertTitle>
           <AlertDescription className="text-xs text-amber-800">
-            以下仍为空：{missingLabels.join("、")}。
+            以下仍为空：{missingLabels.filter((label) => !label.includes("Reference ID")).join("、")}。
             <Link to="/master-data" className="ml-2 font-medium underline">
               去产品库补齐
             </Link>
@@ -406,6 +454,11 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
       </Dialog>
 
       <div data-bottom-bar className="fixed bottom-0 left-[var(--app-sidebar-width,340px)] right-0 z-10 border-t border-border bg-card/95 px-6 py-3 backdrop-blur transition-[left] duration-300 ease-in-out supports-[backdrop-filter]:bg-card/80">
+        {(referenceIdHint || missingLabels.some((label) => label.includes("Reference ID"))) && (
+          <p className="mb-2 text-xs font-medium text-amber-800" data-testid="reference-id-hint">
+            Reference ID 为空。{referenceIdHint || "请上传货件 PDF。Reference ID 在货件 PDF 里，产品库没有这一项。"}
+          </p>
+        )}
         <div className="flex items-center justify-between gap-4">
           <Button variant="outline" size="lg" onClick={onPrev} className="gap-2">
             <ArrowLeft className="h-4 w-4" />
@@ -420,8 +473,15 @@ export function Step45Workspace({ onPrev, onNext }: { onPrev?: () => void; onNex
             )}
             <Button
               size="lg"
-              disabled={sheetPhase !== "filled" || !hasTemplate || exporting || staleness.invoice}
-              title={staleness.invoice ? "结果已过期，不能作为正式文件下载" : undefined}
+              data-testid="export-invoice"
+              disabled={(sheetPhase !== "filled" && sheetPhase !== "preview") || !hasTemplate || exporting || staleness.invoice || fillFailed}
+              title={
+                fillFailed
+                  ? FILL_FAILED_EXPORT_BLOCK
+                  : staleness.invoice
+                    ? "结果已过期，不能作为正式文件下载"
+                    : "按当前表格整本回填。未映射的改动也会写入；公式格不能改成纯值。合并单元格的从属格不能写入。"
+              }
               className="gap-2 px-8 text-base font-semibold shadow-md"
               onClick={() => void handleExport()}
             >

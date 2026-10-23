@@ -128,8 +128,9 @@ def test_scheduled_sync_writes_from_mcp_keeps_manual_locked_except_price(env):
     assert p1["english_name"] == "Keep Me" and p1["brand"] == "LocalBrand"  # 报关敏感字段本地有值：不自动改
     assert p1["hs_code"] == "6307909000"          # 领星不管的字段不动
     from fba_tool.product_fields import resolve_declared_price
-    assert resolve_declared_price(p1)[0] == pytest.approx(19.99)  # 申报价按 D-01 领星价优先，不受手填锁定
-    assert p1["listing_price"] == pytest.approx(19.99) and p1["declared_value"] == pytest.approx(8.88)  # 手填申报价保留（作“手填申报价未采用”提示用）
+    assert p1["listing_price"] == pytest.approx(9.99)  # 手填售价和领星不同，定时同步默认不覆盖
+    assert resolve_declared_price(p1)[0] == pytest.approx(9.99)
+    assert p1["declared_value"] == pytest.approx(8.88)  # 手填申报价保留
     p2 = get_product_by_sku("MSKU-2")
     assert p2 and p2["asin"] == "B0NEWASIN02"
 
@@ -137,6 +138,10 @@ def test_scheduled_sync_writes_from_mcp_keeps_manual_locked_except_price(env):
     kinds = {d["kind"] for d in diffs}
     assert {"applied", "locked", "needs_review"} <= kinds
     assert any(d["kind"] == "locked" and d["sku"] == "MSKU-1" and d["message"].startswith("fnsku") for d in diffs)
+    assert any(
+        d["kind"] == "needs_review" and d["sku"] == "MSKU-1" and "9.99" in d["message"] and "19.99" in d["message"]
+        for d in diffs
+    )
     assert any(d["kind"] == "applied" and "B0OLD" in d["message"] and "B0NEWASIN01" in d["message"] for d in diffs)
 
     run = sqlite3.connect(env / "fba_master.db").execute(

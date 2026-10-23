@@ -608,9 +608,11 @@ def snapshot_from_validation(ctx: Dict[str, Any]) -> None:
         specs = getattr(ship, "box_specs", None)
         ids = dict(getattr(ship, "box_fba_ids", {}) or {})
         if specs is not None and not getattr(specs, "empty", True):
+            from fba_tool.shipment_parser import snapshot_box_id
+
             for _, spec in specs.iterrows():
                 box_no = spec.get("箱号")
-                box_id = str(spec.get("FBA箱号") or ids.get(box_no) or ids.get(int(box_no or 0)) or "")
+                box_id = snapshot_box_id(spec, ids)
                 declared = _declared_to_amazon(spec)
                 dims = _stored_dims(spec, declared)
                 boxes.append({

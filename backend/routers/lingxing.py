@@ -1,12 +1,14 @@
 """领星 MCP 配置、一键拉取（NDJSON）与主表预览确认。"""
 from __future__ import annotations
 
+import csv
+import io
 import json
 import threading
 from typing import Iterator, List, Optional
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 
 from fba_tool.lingxing_mcp_client import DEFAULT_MCP_URL
@@ -121,13 +123,78 @@ def api_lingxing_sync_preview(run_id: Optional[int] = None):
 
 @router.post("/api/lingxing/sync/confirm")
 def api_lingxing_sync_confirm(body: LingxingConfirmBody):
+    from fba_tool.lingxing_rollback import backup_before_confirm
+
     try:
+        backup_before_confirm(body.run_id)
         return confirm_lingxing_preview(
             body.run_id,
             [{"sku": item.sku, "fields": item.fields} for item in body.items],
         )
     except LingxingPreviewError as exc:
         raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.post("/api/lingxing/import-xlsx")
+async def api_lingxing_import_xlsx(
+    file: UploadFile = File(...),
+    column_map: Optional[str] = Form(None),
+):
+    """网页导出的 Listing xlsx：只生成预览，确认前不写产品库。"""
+    from fba_tool.lingxing_listing_xlsx import build_xlsx_preview
+
+    data = await file.read()
+    mapping = None
+    if column_map:
+        try:
+            mapping = json.loads(column_map)
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="column_map 不是 JSON") from exc
+        if not isinstance(mapping, dict):
+            raise HTTPException(status_code=400, detail="column_map 必须是对象")
+    return build_xlsx_preview(data, file.filename or "", mapping)
+
+
+@router.post("/api/lingxing/runs/{run_id}/rollback")
+def api_lingxing_rollback(run_id: int):
+    from fba_tool.lingxing_rollback import rollback_lingxing_run
+
+    try:
+        return rollback_lingxing_run(int(run_id))
+    except LingxingPreviewError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@router.get("/api/lingxing/runs/{run_id}/errors.csv")
+def api_lingxing_error_csv(run_id: int):
+    run = get_lingxing_sync_run(int(run_id))
+    if not run:
+        raise HTTPException(status_code=404, detail="找不到该次拉取记录")
+    from fba_tool.lingxing_preview import review_reasons
+    from fba_tool.master_db_lingxing import list_lingxing_preview_skus
+
+    diffs = list_lingxing_sync_diffs(int(run_id))
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["kind", "sku", "message"])
+    for item in diffs:
+        if item.get("kind") not in {"anomaly", "error", "needs_review"}:
+            continue
+        writer.writerow([item.get("kind") or "", item.get("sku") or "", item.get("message") or ""])
+    for row in list_lingxing_preview_skus(int(run_id)):
+        if row.get("group_kind") != "needs_review":
+            continue
+        try:
+            remote = json.loads(row.get("remote_json") or "{}")
+        except json.JSONDecodeError:
+            remote = {}
+        reasons = review_reasons(remote if isinstance(remote, dict) else {})
+        writer.writerow(["needs_review", row.get("sku") or "", "；".join(reasons) or "待人工确认"])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename=lingxing-run-{run_id}-errors.csv"},
+    )
 
 
 @router.get("/api/lingxing/alerts")

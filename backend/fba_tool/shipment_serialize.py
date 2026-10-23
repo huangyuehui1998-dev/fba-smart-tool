@@ -10,6 +10,7 @@ from fba_tool.shipment_parser import CsvShipment, parse_csv_shipment
 
 def csv_shipment_to_dict(ship: CsvShipment) -> Dict[str, Any]:
     box_fba_ids = {str(k): v for k, v in (ship.box_fba_ids or {}).items()}
+    box_names = {str(k): v for k, v in (getattr(ship, "box_names", None) or {}).items()}
     return {
         "shipment_id": ship.shipment_id,
         "warehouse_code": ship.warehouse_code,
@@ -17,6 +18,7 @@ def csv_shipment_to_dict(ship: CsvShipment) -> Dict[str, Any]:
         "box_items": ship.box_items.to_dict(orient="records") if not ship.box_items.empty else [],
         "box_specs": ship.box_specs.to_dict(orient="records") if not ship.box_specs.empty else [],
         "box_fba_ids": box_fba_ids,
+        "box_names": box_names,
         "sku_fnsku": dict(getattr(ship, "sku_fnsku", None) or {}),
         "warehouse_source": getattr(ship, "warehouse_source", "") or "",
     }
@@ -36,6 +38,29 @@ def csv_shipment_from_dict(data: Dict[str, Any] | None) -> Optional[CsvShipment]
             box_fba_ids[int(k)] = str(v)
         except (TypeError, ValueError):
             continue
+    box_names: Dict[int, str] = {}
+    for k, v in (data.get("box_names") or {}).items():
+        try:
+            text = str(v or "").strip()
+        except (TypeError, ValueError):
+            continue
+        if not text or text.lower() == "nan":
+            continue
+        try:
+            box_names[int(k)] = text
+        except (TypeError, ValueError):
+            continue
+    if not box_names:
+        for rec in specs:
+            if not isinstance(rec, dict):
+                continue
+            text = str(rec.get("箱名") or "").strip()
+            if not text or text.lower() == "nan":
+                continue
+            try:
+                box_names[int(rec.get("箱号"))] = text
+            except (TypeError, ValueError):
+                continue
     sku_fnsku = {
         str(k).strip(): str(v).strip()
         for k, v in (data.get("sku_fnsku") or {}).items()
@@ -56,6 +81,7 @@ def csv_shipment_from_dict(data: Dict[str, Any] | None) -> Optional[CsvShipment]
         box_items=pd.DataFrame(items) if items else pd.DataFrame(columns=["仓库代码", "箱号", "SKU", "数量", "FNSKU"]),
         box_specs=pd.DataFrame(specs) if specs else pd.DataFrame(),
         box_fba_ids=box_fba_ids,
+        box_names=box_names,
         sku_fnsku=sku_fnsku,
         warehouse_source=str(data.get("warehouse_source") or ""),
     )
@@ -72,5 +98,5 @@ def resolve_csv_shipment(
         if ship is not None and not ship.box_items.empty:
             return ship
     if csv_bytes:
-        return parse_csv_shipment(csv_bytes, file_name=file_name)
+        return parse_csv_shipment(csv_bytes, file_name=file_name, allow_unassigned_fba=True)
     raise ValueError("缺少货件数据：请传入 parsed_shipment 或 csv_base64")

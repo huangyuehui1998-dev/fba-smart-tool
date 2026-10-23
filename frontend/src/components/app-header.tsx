@@ -90,7 +90,7 @@ export function AppHeader({
             </h1>
           </div>
           <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
-            U盘便携版 V3.2 · 点击步骤名可跳转 · 当前任务：{taskName || "未命名"}
+            U盘便携版 V4 · 点击步骤名可跳转 · 当前任务：{taskName || "未命名"}
             {!projectFileName && (
               <span className="text-amber-700 dark:text-amber-400">
                 {" "}
@@ -138,6 +138,7 @@ export function AppHeader({
                 <li key={s.id} className="flex items-center">
                   <button
                     type="button"
+                    data-testid={`workflow-step-${s.id}`}
                     onClick={() => {
                       if (blocked) {
                         setBlockedStep(s.id);

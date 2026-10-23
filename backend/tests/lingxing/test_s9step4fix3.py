@@ -260,7 +260,8 @@ def test_invoice_lines_two_case_skus_each_correct(env, monkeypatch):
     items = build_invoice_line_items(_ship(["DEMO-K2", "demo-k2"]), csv_bytes, None, customs_by_sku=customs, customs_ai_keys=ai_keys)
     by = {it.values["sku"]: it.values for it in items}
     assert by["DEMO-K2"]["hs_code"] == "1111111111" and by["demo-k2"]["hs_code"] == "2222222222"
-    assert by["DEMO-K2"]["english_name"] == "T1" and by["demo-k2"]["english_name"] == "T2"
+    # 英文品名以各自产品库为准，不再用货件标题 T1/T2 盖掉。
+    assert by["DEMO-K2"]["english_name"] == "EN 甲品名" and by["demo-k2"]["english_name"] == "EN 乙品名"
 
 
 def test_invoice_case_conflict_warning():

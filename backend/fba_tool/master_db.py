@@ -424,6 +424,9 @@ def _ensure_lingxing_tables(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE lingxing_sync_run ADD COLUMN trigger TEXT DEFAULT 'manual'")
     if "attempt" not in run_cols:
         conn.execute("ALTER TABLE lingxing_sync_run ADD COLUMN attempt INTEGER DEFAULT 1")
+    for name, typ in (("source_file", "TEXT"), ("export_at", "TEXT"), ("backup_path", "TEXT")):
+        if name not in run_cols:
+            conn.execute(f"ALTER TABLE lingxing_sync_run ADD COLUMN {name} {typ}")
     conn.execute(
         """
         CREATE TABLE IF NOT EXISTS lingxing_sync_preview_sku (
@@ -452,6 +455,22 @@ def _ensure_lingxing_tables(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_lingxing_preview_field_run ON lingxing_sync_preview_field(run_id, sku)"
+    )
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS lingxing_import_change (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            sku TEXT NOT NULL,
+            field TEXT NOT NULL,
+            old_value TEXT,
+            new_value TEXT,
+            created_row INTEGER NOT NULL DEFAULT 0
+        )
+        """
+    )
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_lingxing_import_change_run ON lingxing_import_change(run_id, sku)"
     )
 
 
@@ -838,8 +857,8 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
 
     out = {
         "sku": row["sku"],
-        "asin": row["asin"] or "",
-        "fnsku": row["fnsku"] or "",
+        "asin": _col_text(row, "asin"),
+        "fnsku": _col_text(row, "fnsku"),
         "unit_length": unit_length,
         "unit_width": unit_width,
         "unit_height": unit_height,
@@ -848,30 +867,30 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         "carton_width": _col_float(row, "carton_width") if "carton_width" in keys else None,
         "carton_height": _col_float(row, "carton_height") if "carton_height" in keys else None,
         "carton_weight": _col_float(row, "carton_weight") if "carton_weight" in keys else None,
-        "chinese_name": _col_str(row, "chinese_name"),
-        "model_name": _col_str(row, "model_name") if "model_name" in keys else "",
-        "english_name": _col_str(row, "english_name"),
-        "hs_code": _col_str(row, "hs_code"),
-        "material": _col_str(row, "material"),
-        "purpose": _col_str(row, "purpose"),
-        "brand": _col_str(row, "brand"),
+        "chinese_name": _col_text(row, "chinese_name"),
+        "model_name": _col_text(row, "model_name") if "model_name" in keys else None,
+        "english_name": _col_text(row, "english_name"),
+        "hs_code": _col_text(row, "hs_code"),
+        "material": _col_text(row, "material"),
+        "purpose": _col_text(row, "purpose"),
+        "brand": _col_text(row, "brand"),
         "declared_value": _col_float(row, "declared_value"),
         "qty_per_box": _col_float(row, "qty_per_box") if "qty_per_box" in keys else None,
-        "extra_data": _col_str(row, "extra_data"),
+        "extra_data": _col_text(row, "extra_data"),
         "updated_at": row["updated_at"],
-        "parent_asin": _col_str(row, "parent_asin") if "parent_asin" in keys else "",
+        "parent_asin": _col_text(row, "parent_asin") if "parent_asin" in keys else None,
         "sid": _col_int(row, "sid") if "sid" in keys else None,
-        "listing_status": _col_str(row, "listing_status") if "listing_status" in keys else "",
-        "fulfillment_channel": _col_str(row, "fulfillment_channel") if "fulfillment_channel" in keys else "",
-        "lingxing_synced_at": _col_str(row, "lingxing_synced_at") if "lingxing_synced_at" in keys else "",
-        "data_source": _col_str(row, "data_source") if "data_source" in keys else "",
+        "listing_status": _col_text(row, "listing_status") if "listing_status" in keys else None,
+        "fulfillment_channel": _col_text(row, "fulfillment_channel") if "fulfillment_channel" in keys else None,
+        "lingxing_synced_at": _col_text(row, "lingxing_synced_at") if "lingxing_synced_at" in keys else None,
+        "data_source": _col_text(row, "data_source") if "data_source" in keys else None,
         "listing_price": _col_float(row, "listing_price") if "listing_price" in keys else None,
-        "listing_price_currency": _col_str(row, "listing_price_currency") if "listing_price_currency" in keys else "",
-        "listing_price_at": _col_str(row, "listing_price_at") if "listing_price_at" in keys else "",
-        "declare_unit": _col_str(row, "declare_unit") if "declare_unit" in keys else "",
-        "local_name": _col_str(row, "local_name") if "local_name" in keys else "",
-        "listing_price_basis": _col_str(row, "listing_price_basis") if "listing_price_basis" in keys else "",
-        "category": _col_str(row, "category") if "category" in keys else "",
+        "listing_price_currency": _col_text(row, "listing_price_currency") if "listing_price_currency" in keys else None,
+        "listing_price_at": _col_text(row, "listing_price_at") if "listing_price_at" in keys else None,
+        "declare_unit": _col_text(row, "declare_unit") if "declare_unit" in keys else None,
+        "local_name": _col_text(row, "local_name") if "local_name" in keys else None,
+        "listing_price_basis": _col_text(row, "listing_price_basis") if "listing_price_basis" in keys else None,
+        "category": _col_text(row, "category") if "category" in keys else None,
         "carton_gross_weight": _col_float(row, "carton_gross_weight") if "carton_gross_weight" in keys else None,
         "field_sources": _json_dict(row["field_source_json"]) if "field_source_json" in keys else {},
         "invoice_unit": "",
@@ -884,9 +903,9 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
         "fob_unit_value": None,
         # S8-fix1 N1：D-12 正常价相关列（以前漏读，导致促销按正常价申报在真实链路上不生效）
         "regular_price": _col_float(row, "regular_price") if "regular_price" in keys else None,
-        "regular_price_at": _col_str(row, "regular_price_at") if "regular_price_at" in keys else "",
+        "regular_price_at": _col_text(row, "regular_price_at") if "regular_price_at" in keys else None,
         "last_nonpromo_price": _col_float(row, "last_nonpromo_price") if "last_nonpromo_price" in keys else None,
-        "last_nonpromo_at": _col_str(row, "last_nonpromo_at") if "last_nonpromo_at" in keys else "",
+        "last_nonpromo_at": _col_text(row, "last_nonpromo_at") if "last_nonpromo_at" in keys else None,
     }
     # S8-fix1：以后新增的列（product_fields.ensure 加的 ALTER TABLE 列）不再被悄悄丢掉——原样带出
     for k in keys:
@@ -894,13 +913,13 @@ def _row_to_dict(row: sqlite3.Row) -> Dict[str, Any]:
             out[k] = row[k]
     inv = _json_dict(out.get("extra_data")).get("invoice") or {}
     if isinstance(inv, dict):
-        out["invoice_unit"] = inv.get("unit") or ""
+        out["invoice_unit"] = _opt_str(inv.get("unit"))
         out["pcs_per_set"] = inv.get("pcs_per_set")
         out["purchase_price"] = inv.get("purchase_price")
-        out["purchase_price_currency"] = inv.get("purchase_price_currency") or ""
-        out["material_en"] = inv.get("material_en") or ""
-        out["purpose_en"] = inv.get("purpose_en") or ""
-        out["dest_hs_code"] = inv.get("dest_hs_code") or ""
+        out["purchase_price_currency"] = _opt_str(inv.get("purchase_price_currency"))
+        out["material_en"] = _opt_str(inv.get("material_en"))
+        out["purpose_en"] = _opt_str(inv.get("purpose_en"))
+        out["dest_hs_code"] = _opt_str(inv.get("dest_hs_code"))
         out["fob_unit_value"] = inv.get("fob_unit_value")
     return out
 
@@ -919,6 +938,14 @@ def _col_str(row: sqlite3.Row, name: str) -> str:
     if name not in row.keys():
         return ""
     return str(row[name] or "").strip()
+
+
+def _col_text(row: sqlite3.Row, name: str) -> Optional[str]:
+    """空库值保持 None。回滚写回 NULL 后读出来仍是 None，不会变成空字符串。"""
+    if name not in row.keys() or row[name] is None:
+        return None
+    text = str(row[name]).strip()
+    return text or None
 
 
 def _col_float(row: sqlite3.Row, name: str) -> Optional[float]:
@@ -1050,6 +1077,7 @@ from fba_tool.master_db_lingxing import (  # noqa: E402
     replace_lingxing_preview,
     replace_lingxing_replenish,
     replace_lingxing_shops,
+    set_lingxing_run_file_meta,
     tag_lingxing_sync_run,
 )
 

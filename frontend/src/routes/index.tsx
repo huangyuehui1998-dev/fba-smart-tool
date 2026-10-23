@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { AppShell } from "@/components/app-shell";
 import { FboxDropOverlay } from "@/components/fbox-drop-overlay";
@@ -41,29 +42,33 @@ function WorkflowApp() {
   const { step, setStep, step4Ok, shipments } = useWorkflow();
   const showInvoiceSteps = step4Ok || shipments.length > 0;
 
+  useEffect(() => {
+    void import("@/lib/univer-engine").then((mod) => mod.preloadUniverEngine());
+  }, []);
+
   return (
     <AppShell>
-      <div className={step === 1 ? "h-full" : "hidden"} aria-hidden={step !== 1}>
+      <div className={step === 1 ? "min-h-full" : "hidden"} aria-hidden={step !== 1}>
         <Step1Workspace onNext={() => setStep(2)} />
       </div>
-      <div className={step === 2 ? "h-full" : "hidden"} aria-hidden={step !== 2}>
+      <div className={step === 2 ? "min-h-full" : "hidden"} aria-hidden={step !== 2}>
         <Step2Workspace onPrev={() => setStep(1)} onNext={() => setStep(3)} />
       </div>
-      <div className={step === 3 ? "h-full" : "hidden"} aria-hidden={step !== 3}>
+      <div className={step === 3 ? "min-h-full" : "hidden"} aria-hidden={step !== 3}>
         <Step3Workspace onPrev={() => setStep(2)} onNext={() => setStep(4)} />
       </div>
-      <div className={step === 3.5 ? "h-full" : "hidden"} aria-hidden={step !== 3.5}>
+      <div className={step === 3.5 ? "min-h-full" : "hidden"} aria-hidden={step !== 3.5}>
         <Step35RoutingWorkspace />
       </div>
-      <div className={step === 4 ? "h-full" : "hidden"} aria-hidden={step !== 4}>
+      <div className={step === 4 ? "min-h-full" : "hidden"} aria-hidden={step !== 4}>
         <Step4Workspace onPrev={() => setStep(3)} onNext={() => setStep(4.5)} />
       </div>
       {showInvoiceSteps && (
         <>
-          <div className={step === 4.5 ? "h-full" : "hidden"} aria-hidden={step !== 4.5}>
+          <div className={step === 4.5 ? "min-h-full" : "hidden"} aria-hidden={step !== 4.5}>
             <Step45Workspace onPrev={() => setStep(4)} onNext={() => setStep(5)} />
           </div>
-          <div className={step === 5 ? "h-full" : "hidden"} aria-hidden={step !== 5}>
+          <div className={step === 5 ? "min-h-full" : "hidden"} aria-hidden={step !== 5}>
             <Step5Workspace onPrev={() => setStep(4.5)} />
           </div>
         </>

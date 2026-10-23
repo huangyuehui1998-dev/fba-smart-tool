@@ -1,0 +1,57 @@
+# FBA Smart Tool
+
+> 本地运行的亚马逊 FBA 装箱、货件核对、货代发票和报关工具。FastAPI + React。默认只监听 127.0.0.1:8002。仓库不含 API 密钥，不含真实客户货件。许可证 MIT，版权 huangyuehui1998-dev。
+
+协助改这个仓库时先读本节，再打开对应文档。不要把真实领星导出、密钥、`app_data/` 或 `realdata/` 写回仓库。不要 force-push。仓库是否公开由所有者决定。
+
+## 产品
+
+- 代际：`APP_VERSION = "V4"`，文件 `backend/fba_tool/app_version.py`。界面和便携包文件名跟它走。
+- FastAPI 的 `version` 字符串是 API 文档号，不是产品版本。
+- 界面名字和 step id：`1 录入`=1，`2 排箱`=2，`3 导出`=3，`7 刷仓`=3.5，`4 货件校验`=4，`5 发票`=4.5（Univer 离线预览），`6 报关`=5。见 `frontend/src/lib/workflow-steps.ts`。
+- 货代模板 id：`send`、`jiufang`（九方）、`qiluo`（琪珞）、`qiluo_t5`、`qiluo_t6`、`deshu`（德速）。
+- 领星在售表：预览、确认后写入、可回滚。MCP 定时同步默认关闭，只读。领星钥匙在本机 `app_data/config/lingxing.json`（DPAPI）。DeepSeek Key 只在 Windows 写入 `app_data/secrets/deepseek_key.bin`。两份都不在仓库。
+- 产品入口 `run_app.py` 绑定 `127.0.0.1`，首选端口 8002。`FBA_HOST` 改成非本机地址时必须有 `FBA_ACCESS_TOKEN`。`python backend/main.py` 未设 `FBA_PORT` 时用 8000，那不是日常入口。
+
+## 数据边界
+
+- 禁止入库：`lingxing_listing_prices.xlsx`，以及文件名带 `listing` 的 `.xlsx`。扫描函数 `forbidden_real_hits`（`packaging/release_manifest.py`）。`.gitignore` 有同样两条，写在模板放行之后。没有白名单例外。
+- 源码默认 vs 便携包：三份映射 JSON 两边都是 `{}`。`customs/报关资料模板.xlsx` 两边都是脱敏版（`DEMO-ORDER` / `FBA-DEMO`）。德速填写示例货件号是 `FBATEST0DEMO`。`forwarders.default.json` 的 `source` 说明在便携包里会把货件号换成 `<已脱敏>`。对照表在 `docs/OPEN_SOURCE.md`。
+- 发货录入样表的示例行是 `DEMO-SKU-*` / `X0DEMO*`（`input_template.EXAMPLE_ROWS`）。不要写回 `J-PETWOODSTAIRS` 或 `X0054`。
+- 合成夹具：`backend/tests/fixtures/synthetic/`（例如 `lingxing_us_columns_82.xlsx`，文件名不含 `listing`）。
+- 本机私有领星表：环境变量 `FBA_LINGXING_OWNER_XLSX`。未设置或文件不存在则 pytest skip。
+- 本机货件批次：`FBA_REALDATA_DIR`。路径不存在则 skip（「需要 box realdata」）。未设置时部分用例仍看 `/workspace/fba_tool/realdata`。
+- GitHub Actions 目前只有 Portable Windows package，不跑 pytest。
+- 已忽略：`lingxing.json`、`.env`、`app_data/`、`*.db`、`fba_tool/realdata/`、`backend/tests/golden/*.json`。
+- `frontend/.env.example` 只有占位。不要写入真实 URL 以外的钥匙。
+- 2026-10-20 留下的三份样表（发货录入样表、工厂表、货代表）在 `backend/templates/`，不进便携包白名单。不要在无关改动里删除它们。
+- `packaging/Step5报关资料_架构与工作流.txt` 的示例是 `DEMO-ORDER` / `DEMO` / `FBA-DEMO`。`backend/tests` 与 `docs/方案`、`docs/用户决策记录.md` 里可能仍有历史货件号 / SKU，不要当成可外发的业务数据。
+- 已核对的历史便携包内层文件名是 `FBA_Smart_Tool_V3.3_便携版.zip`（历史包名、非当前 V4）。当前 artifact 是 `FBA_Smart_Tool_V4_便携版.zip`。
+
+## 构建与发布
+
+- 便携包只由 GitHub Actions 工作流 Portable Windows package 在 `windows-latest` 上构建。Python 3.12，Node 22。
+- tag 过滤器：`v4*`。工作流不创建 GitHub Release。
+- 产物：`dist/FBA_Smart_Tool_V4_便携版.zip`。发布前用 Actions 摘要核对 SHA256。
+- 细节：`docs/delivery/PORTABLE_WINDOWS_CI.md`，发布顺序：`docs/RELEASING.md`。
+
+## 测试
+
+```bash
+cd backend && pytest
+cd frontend && npm test
+```
+
+开发：后端 `uvicorn main:app --reload --host 127.0.0.1 --port 8002`；前端 `npm run dev`（端口 5173）。
+
+## 文档
+
+- [README](README.md)：项目是什么、快速开始、截图位、许可证
+- [贡献](CONTRIBUTING.md)：环境、测试命令、PR 清单
+- [开源范围](docs/OPEN_SOURCE.md)：业务数据隔离；git 历史未改写
+- [维护](docs/MAINTAINING.md)：审 PR、分支、版本号、响应期望
+- [发布](docs/RELEASING.md)：tag、Release、SHA256、检查清单
+- [安全](SECURITY.md)：私下报告漏洞
+- [行为准则](CODE_OF_CONDUCT.md)
+- [变更记录](CHANGELOG.md)：Keep a Changelog
+- [许可证](LICENSE)：MIT，Copyright (c) 2026 huangyuehui1998-dev

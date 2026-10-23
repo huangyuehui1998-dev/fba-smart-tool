@@ -161,7 +161,7 @@ export function Step35RoutingWorkspace() {
     : [];
 
   return (
-    <div className="flex h-full w-full bg-white dark:bg-zinc-950 overflow-hidden relative">
+    <div className="relative flex min-h-full w-full bg-white dark:bg-zinc-950">
       {/* 隐藏/展开开关 (悬浮于左上角) */}
       <Button
         variant="ghost"

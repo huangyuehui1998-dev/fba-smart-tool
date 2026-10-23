@@ -9,7 +9,6 @@ from typing import Any, Dict, List, Literal, Tuple
 
 import pdfplumber
 from openpyxl.utils import get_column_letter
-from openpyxl.utils.cell import coordinate_to_tuple
 
 from fba_tool.invoice_deepseek import (
     infer_customs_fields,
@@ -23,6 +22,7 @@ from fba_tool.invoice_table import (
     build_invoice_line_items,
     detect_invoice_table_layout,
     preview_table_cells,
+    value_cell_right_of,
     sanitize_header_text,
     table_cells_from_line_items,
 )
@@ -31,9 +31,8 @@ from fba_tool.product_catalog import extract_csv_skus
 from fba_tool.sku_keys import case_conflict_message, case_conflicts, lookup_sku, sku_key as _norm_key, sku_text
 from fba_tool.shipment_parser import CsvShipment, parse_csv_shipment
 from fba_tool.shipment_serialize import resolve_csv_shipment
-from fba_tool.template_layout import safe_write
 from fba_tool.app_paths import invoice_history_path, resolve_config_read
-from fba_tool.xlsx_io import compact_invoice_workbook, load_workbook_fast, save_workbook_compact
+from fba_tool.xlsx_io import load_workbook_fast
 from fba_tool.shipment_parser import decode_csv_bytes
 
 FieldSource = Literal["green", "yellow", "red", "blue", "preview"]
@@ -279,14 +278,7 @@ def detect_template_cells(wb, cfg: dict, max_row: int | None = None) -> Dict[str
                 if field_key in found:
                     continue
                 if any(_label_matches(text, v) for v in variants):
-                    target_col = cell.column + 1
-                    target_row = cell.row
-                    if cell.column < ws.max_column:
-                        right = ws.cell(cell.row, cell.column + 1)
-                        if right.value in (None, ""):
-                            target_col = cell.column + 1
-                        else:
-                            target_col = cell.column + 2
+                    target_row, target_col = value_cell_right_of(ws, cell.row, cell.column)
                     found[field_key] = f"{get_column_letter(target_col)}{target_row}"
     return found
 
@@ -582,8 +574,15 @@ def build_invoice_draft(
     use_workflow_fill: bool = False,
     forwarder_id: str | None = None,
     parsed_shipment: dict | None = None,
+    warehouse: str = "",
 ) -> Tuple[InvoiceDraft, DeepseekUsageAccumulator | None]:
     usage_acc = DeepseekUsageAccumulator() if api_key else None
+    if forwarder_id:
+        from fba_tool.invoice_step45 import try_adapter_draft
+
+        adapted = try_adapter_draft(forwarder_id, csv_bytes, template_bytes, parsed_shipment, warehouse=warehouse)
+        if adapted is not None:
+            return adapted, usage_acc
     cfg = load_invoice_config()
     ship = resolve_csv_shipment(parsed_shipment=parsed_shipment, csv_bytes=csv_bytes or None)
     ratio = float(config_throw_ratio())
@@ -600,6 +599,8 @@ def build_invoice_draft(
 
     if table_layout:
         separate_mp = "material" in table_layout.columns and "purpose" in table_layout.columns
+        if not separate_mp and fwd_mapping and fwd_mapping.get("separate_material_purpose") is not None:
+            separate_mp = bool(fwd_mapping.get("separate_material_purpose"))
         if fwd_mapping:
             line_items, etl_warnings = run_invoice_etl(
                 forwarder_id=forwarder_id or "",
@@ -608,9 +609,8 @@ def build_invoice_draft(
                 workflow_json=workflow_json,
                 po_number=po_number,
                 catalog=None,
+                separate_material_purpose=separate_mp,
             )
-            if fwd_mapping.get("separate_material_purpose") is not None:
-                separate_mp = bool(fwd_mapping.get("separate_material_purpose"))
         elif use_workflow_fill or workflow_json is not None:
             line_items = build_invoice_line_items_workflow(
                 ship,
@@ -886,7 +886,7 @@ def export_invoice_xlsx(
         for f in draft.fields:
             if not f.cell or f.value in (None, ""):
                 continue
-            cell_writes.append({"cell": f.cell, "value": f.value})
+            cell_writes.append({"cell": f.cell, "value": f.value, "field_key": f.key})
 
     if draft.is_table_mode or draft.table_cells:
         from fba_tool.invoice_table import clear_invoice_table_data_zone, detect_invoice_table_layout
@@ -896,22 +896,17 @@ def export_invoice_xlsx(
         if layout:
             clear_invoice_table_data_zone(ws, layout)
 
-    cell_refs: List[str] = []
-    for item in cell_writes:
-        cell = item.get("cell")
-        value = item.get("value")
-        if not cell or value in (None, ""):
-            continue
-        cell_ref = str(cell).strip()
-        cell_refs.append(cell_ref)
-        try:
-            row, col = coordinate_to_tuple(cell_ref)
-            safe_write(ws, row, col, value)
-        except ValueError:
-            continue
+    # 表头下的脏数据先清掉，再整本写回。不删其它工作表、图片、数据验证或隐藏表。
+    sheet_name = ws.title
+    if draft.is_table_mode or draft.table_cells:
+        bio = io.BytesIO()
+        wb.save(bio)
+        template_bytes = bio.getvalue()
+    wb.close()
 
-    compact_invoice_workbook(wb, draft.template_sheet, cell_refs)
-    return save_workbook_compact(wb)
+    from fba_tool.univer_apply import apply_cell_writes
+
+    return apply_cell_writes(template_bytes, cell_writes, sheet_name)
 
 
 def styled_grid(df):

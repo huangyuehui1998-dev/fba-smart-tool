@@ -1,5 +1,25 @@
-import { api, type Cell, type Sheet } from "@fortune-sheet/core";
 import { sourceLabelToKind } from "@/lib/box-editor";
+
+export interface SheetCell {
+  v?: string | number | boolean | null;
+  m?: string;
+  bg?: string;
+}
+
+export interface Sheet {
+  name?: string;
+  id?: string;
+  status?: number;
+  order?: number;
+  row?: number;
+  column?: number;
+  celldata?: { r: number; c: number; v: SheetCell }[];
+  data?: (SheetCell | null)[][];
+  config?: Record<string, unknown>;
+  calcChain?: unknown[];
+}
+
+type Cell = SheetCell;
 
 export type CellSourceKind = "exact" | "local" | "ai" | "missing" | "preview";
 
@@ -17,6 +37,32 @@ export interface CellMeta {
   source: CellSourceKind;
   fieldKey?: string;
   required?: boolean;
+}
+
+const INTEGER_NUMBER_FIELDS = new Set(["qty_per_box", "total_qty", "box_count", "pcs_per_set"]);
+const NUMBER_FIELDS = new Set([
+  ...INTEGER_NUMBER_FIELDS,
+  "declared_price",
+  "purchase_price",
+  "total_declared_value_usd",
+  "unit_weight_kg",
+  "box_weight",
+  "length",
+  "width",
+  "height",
+]);
+
+/** 数量、价格、重量、尺寸按数值写入。整数数量写成整数，不把 4 写成文本 "4.0"。 */
+export function numericFillValue(fill: { field_key?: string; value?: string | number | null }): string | number {
+  const raw = fill.value == null ? "" : fill.value;
+  if (raw === "") return "";
+  if (!NUMBER_FIELDS.has(fill.field_key || "")) return String(raw);
+  const parsed = typeof raw === "number" ? raw : Number(String(raw).replace(/,/g, "").trim());
+  if (!Number.isFinite(parsed)) return String(raw);
+  if (INTEGER_NUMBER_FIELDS.has(fill.field_key || "") && Math.abs(parsed - Math.round(parsed)) < 1e-9) {
+    return Math.round(parsed);
+  }
+  return parsed;
 }
 
 /** FortuneSheet `bg` 属性使用的十六进制色值 */
@@ -174,23 +220,25 @@ export function missingRequiredFromCellMeta(
   const FIELD_LABELS: Record<string, string> = {
     reference_id: "Reference ID / ID号",
     sku_image: "SKU图片",
+    declared_price: "申报单价 (USD)",
   };
-  const requiredKeys = new Map<string, { ok: boolean; row: number }>();
+  const requiredKeys = new Map<string, { ok: boolean; row: number; labelKey: string }>();
   for (const [cell, meta] of Object.entries(cellMeta)) {
     if (!meta.required) continue;
-    const key = meta.fieldKey ?? cell;
+    const labelKey = meta.fieldKey ?? cell;
+    const key = labelKey === "declared_price" ? cell : labelKey;
     const val = getValue(cell).trim();
     const row = excelRowOf(cell);
     if (val) {
-      requiredKeys.set(key, { ok: true, row });
+      requiredKeys.set(key, { ok: true, row, labelKey });
     } else if (!requiredKeys.has(key)) {
-      requiredKeys.set(key, { ok: false, row });
+      requiredKeys.set(key, { ok: false, row, labelKey });
     }
   }
   return [...requiredKeys.entries()]
     .filter(([, item]) => !item.ok)
-    .map(([key, item]) => {
-      const label = FIELD_LABELS[key] ?? key;
+    .map(([, item]) => {
+      const label = FIELD_LABELS[item.labelKey] ?? item.labelKey;
       const id = identityOnRow(cells, item.row);
       return `SKU ${id.sku || "未填"} · FNSKU ${id.fnsku || "未填"}：${label}`;
     });
@@ -200,6 +248,33 @@ export function cloneSheets<T>(sheets: T[]): T[] {
   return JSON.parse(JSON.stringify(sheets)) as T[];
 }
 
+function celldataToData(
+  celldata: NonNullable<Sheet["celldata"]>,
+  rowCount: number,
+  colCount: number,
+): (Cell | null)[][] {
+  const data: (Cell | null)[][] = Array.from({ length: rowCount }, () => Array(colCount).fill(null));
+  for (const item of celldata) {
+    while (data.length <= item.r) data.push([]);
+    const row = data[item.r]!;
+    while (row.length <= item.c) row.push(null);
+    row[item.c] = item.v ?? null;
+  }
+  return data;
+}
+
+function dataToCelldata(data: (Cell | null)[][]): NonNullable<Sheet["celldata"]> {
+  const out: NonNullable<Sheet["celldata"]> = [];
+  data.forEach((row, r) => {
+    row?.forEach((cell, c) => {
+      if (!cell) return;
+      if ((cell.v == null || cell.v === "") && !cell.m && !cell.bg) return;
+      out.push({ r, c, v: cell });
+    });
+  });
+  return out;
+}
+
 function sheetToDataMatrix(sheet: Sheet): (Cell | null)[][] {
   const rowCount = Math.max(Number(sheet.row) || 0, 36);
   const colCount = Math.max(Number(sheet.column) || 0, 18);
@@ -207,7 +282,7 @@ function sheetToDataMatrix(sheet: Sheet): (Cell | null)[][] {
     return sheet.data as (Cell | null)[][];
   }
   if (sheet.celldata?.length) {
-    return api.celldataToData(sheet.celldata, rowCount, colCount) ?? [];
+    return celldataToData(sheet.celldata, rowCount, colCount);
   }
   return Array.from({ length: rowCount }, () => Array(colCount).fill(null));
 }
@@ -246,12 +321,13 @@ export function applyFillsToSheets(sheets: Sheet[], fills: InvoiceCellFill[]): S
       try {
         const { row, col } = parseCellRef(fill.cell);
         const source = meta[fill.cell.toUpperCase()]?.source ?? "preview";
-        if (fill.value === "" || fill.value == null) {
+        const written = numericFillValue(fill);
+        if (written === "") {
           writeCell(data, row, col, { v: "", m: "" });
         } else {
           const patch: Partial<Cell> = {
-            v: fill.value,
-            m: String(fill.value),
+            v: written,
+            m: String(written),
           };
           if (!fill.clear) {
             patch.bg = SOURCE_BG_HEX[source];
@@ -280,7 +356,7 @@ export function applyFillsToSheets(sheets: Sheet[], fills: InvoiceCellFill[]): S
       row: rowCount,
       column: colCount,
       data,
-      celldata: api.dataToCelldata(data),
+      celldata: dataToCelldata(data),
       calcChain: [],
     };
   });

@@ -1,6 +1,8 @@
 """Step 4.5 — 货代发票预览、生成、编辑、导出。"""
 from __future__ import annotations
 
+import base64
+
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 
@@ -58,10 +60,25 @@ def api_invoice_apply_edits(body: InvoiceExportRequest):
     return draft_to_dict(draft)
 
 
+def _preview_workbook_bytes(body: InvoiceExportRequest) -> bytes | None:
+    """有货代时 template_base64 不是模板壳，而是预览手改。没选货代时它就是壳，不在这里再叠一次。"""
+    if not body.forwarder_id or not body.template_base64:
+        return None
+    try:
+        return base64.b64decode(body.template_base64)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"模板 base64 解码失败：{exc}") from exc
+
+
 @router.post("/api/export_invoice")
 def api_export_invoice(body: InvoiceExportRequest):
-    """导出最终发票 (.xlsx)；空单元格跳过写入，允许导出后手工补全。"""
-    if not body.template_hash and not body.template_base64:
+    """导出最终发票 (.xlsx)。
+
+    forwarder_id 决定官方模板壳（合并、公式、图片、隐藏表）。用户在预览里改过的格子
+    来自三处，后者覆盖前者：请求 fields、template_base64 相对空白模板的差异、Univer 快照。
+    空的 fields 不把已填格子擦成空白。
+    """
+    if not body.template_hash and not body.template_base64 and not body.forwarder_id:
         raise HTTPException(status_code=400, detail="请提供 template_hash 或 template_base64")
 
     template_bytes = resolve_invoice_template_bytes(
@@ -69,11 +86,33 @@ def api_export_invoice(body: InvoiceExportRequest):
         body.template_hash,
         forwarder_id=body.forwarder_id,
     )
+    preview_bytes = _preview_workbook_bytes(body)
 
     draft = draft_from_payload(body)
 
+    from fba_tool.invoice_step45 import overlay_preview_edits, recall_render
+    from fba_tool.invoice_step45 import _apply_user_edits, export_field_keys
+    from fba_tool.univer_apply import ApplyRejected, apply_cell_writes
+
     try:
-        out = export_invoice_xlsx(template_bytes, draft, forwarder_id=body.forwarder_id)
+        rendered = recall_render(body.forwarder_id, draft.shipment_id)
+        if rendered is not None:
+            out = rendered
+            if draft.table_cells:
+                out = apply_cell_writes(out, draft.table_cells, draft.template_sheet)
+        elif body.snapshot and not draft.table_cells:
+            out = template_bytes
+        else:
+            out = export_invoice_xlsx(template_bytes, draft, forwarder_id=body.forwarder_id)
+        if preview_bytes is not None:
+            out = overlay_preview_edits(out, template_bytes, preview_bytes)
+        if body.snapshot:
+            out = _apply_user_edits(out, template_bytes, body.snapshot, export_field_keys(draft))
+    except ApplyRejected as exc:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": exc.code, "cells": exc.cells, "message": exc.message},
+        ) from exc
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except Exception as exc:

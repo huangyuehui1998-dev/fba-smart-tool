@@ -8,6 +8,7 @@ import pandas as pd
 
 from fba_tool.invoice_table import (
     InvoiceLineItem,
+    _catalog_record,
     _pcs_from_sku,
     extract_csv_sku_meta,
 )
@@ -202,6 +203,7 @@ def build_invoice_line_items_workflow(
     grouped = ship.box_items.groupby("SKU", sort=True)
     for sku, grp in grouped:
         sku_str = str(sku)
+        rec = _catalog_record(catalog, sku_str)
         wf = lookup_sku(bundle.by_sku, sku_str)
         boxes = sorted(int(b) for b in grp["箱号"].tolist())
 
@@ -234,13 +236,11 @@ def build_invoice_line_items_workflow(
 
         box_range_val, box_range_src = _pick_source(step12_box_range, step4_box_range, "")
 
-        english_step4 = csv_row.get("title", "")
-        english_val, english_src = _pick_source(
-            "",
-            english_step4,
-            "",
-            _master_text(master, "english_name"),
-        )
+        from fba_tool.invoice_rules import invoice_english_name
+
+        catalog_english = _master_text(master, "english_name")
+        english_val = invoice_english_name(catalog_english, csv_row.get("title", ""))
+        english_src = "blue" if catalog_english else ("green" if english_val else "red")
 
         chinese_val, chinese_src = _pick_source(
             "",
@@ -258,8 +258,10 @@ def build_invoice_line_items_workflow(
         qty_master = _master_float(master, "qty_per_box")
         qty_val, qty_src = _pick_source(qty_step12, qty_step4, "", qty_master)
 
-        declared_master = _master_float(master, "declared_value")
-        declared_val, declared_src = _pick_source("", "", "", declared_master)
+        from fba_tool.product_fields import resolve_declared_price
+
+        resolved_price, _price_src = resolve_declared_price(master) if master else (None, "")
+        declared_val, declared_src = (resolved_price, "blue") if resolved_price not in (None, "") else ("", "red")
 
         material_val, material_src = _pick_source("", "", "", _master_text(master, "material"))
         purpose_val, purpose_src = _pick_source("", "", "", _master_text(master, "purpose"))
@@ -267,8 +269,7 @@ def build_invoice_line_items_workflow(
         brand_val, brand_src = _pick_source("", "", "", _master_text(master, "brand"))
         hs_val, hs_src = _pick_source("", "", "", _master_text(master, "hs_code"))
 
-        model_step12 = sku_str
-        model_val, model_src = _pick_source(model_step12, "", sku_str)
+        model_val, model_src = _pick_source("", "", "", _master_text(master, "model_name"))
 
         unit_w_step12 = wf.unit_kg if wf and wf.unit_kg else None
         unit_w_step4 = None
@@ -285,7 +286,7 @@ def build_invoice_line_items_workflow(
         )
 
         len_step12 = wf.length_cm if wf else None
-        len_step4 = round(length, 1) if length else None
+        len_step4 = length if length else None
         len_fwd = wf.length_cm_fwd if wf else None
         length_val, length_src = _pick_source(
             len_step12 or len_fwd,
@@ -295,7 +296,7 @@ def build_invoice_line_items_workflow(
         )
 
         wid_step12 = wf.width_cm if wf else None
-        wid_step4 = round(width, 1) if width else None
+        wid_step4 = width if width else None
         wid_fwd = wf.width_cm_fwd if wf else None
         width_val, width_src = _pick_source(
             wid_step12 or wid_fwd,
@@ -305,7 +306,7 @@ def build_invoice_line_items_workflow(
         )
 
         ht_step12 = wf.height_cm if wf else None
-        ht_step4 = round(height, 1) if height else None
+        ht_step4 = height if height else None
         ht_fwd = wf.height_cm_fwd if wf else None
         height_val, height_src = _pick_source(
             ht_step12 or ht_fwd,

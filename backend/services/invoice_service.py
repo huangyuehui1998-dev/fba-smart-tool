@@ -26,7 +26,7 @@ def draft_from_payload(data: InvoiceExportRequest) -> InvoiceDraft:
     fields = []
     for item in data.fields:
         cell = str(item.get("cell", item.get("单元格", ""))).strip()
-        field_key = str(item.get("key", item.get("字段", "")))
+        field_key = str(item.get("field_key") or item.get("key") or item.get("字段") or "")
         value = item.get("value", item.get("值", ""))
         required = bool(item.get("required", item.get("必填") == "是"))
         if cell:
@@ -90,6 +90,11 @@ def resolve_invoice_template_bytes(
     template_hash: str | None = None,
     forwarder_id: str | None = None,
 ) -> bytes:
+    """选定货代时返回官方模板壳，不用请求里的 template_base64 换掉整本工作簿。
+
+    预览里改过的格子不在这里处理。导出接口会把 template_base64、fields 和 Univer
+    快照里相对这份空白模板的差异写回去。
+    """
     if forwarder_id:
         data = forwarder_template_bytes(forwarder_id)
         store_template(data)
@@ -142,6 +147,9 @@ def invoice_generate_payload(body: InvoiceGenerateRequest) -> Dict[str, Any]:
     )
 
     use_workflow = body.workflow_json is not None or bool(body.forwarder_id)
+    from fba_tool.invoice_rules import InvoiceBlocked
+    from routers.invoice_export import WarehouseUndecided
+
     try:
         draft, usage_acc = build_invoice_draft(
             csv_bytes,
@@ -155,7 +163,22 @@ def invoice_generate_payload(body: InvoiceGenerateRequest) -> Dict[str, Any]:
             use_workflow_fill=use_workflow,
             forwarder_id=body.forwarder_id,
             parsed_shipment=body.parsed_shipment,
+            warehouse=body.warehouse or "",
         )
+    except InvoiceBlocked as exc:
+        raise HTTPException(status_code=409, detail={"detail": str(exc), "blocking": exc.blocking}) from exc
+    except WarehouseUndecided as exc:
+        message = str(exc)
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "warehouse_undecided",
+                "message": message,
+                "detail": message,
+                "address": getattr(exc, "address", ""),
+                "warehouse_candidates": exc.candidates,
+            },
+        ) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"发票生成失败：{exc}") from exc
 

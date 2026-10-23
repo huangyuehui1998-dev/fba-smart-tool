@@ -13,6 +13,8 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+from openpyxl.cell.cell import MergedCell
+
 from fba_tool.invoice_rules import (
     DECLARED_CURRENCY,
     InvoiceBlocked,
@@ -87,6 +89,17 @@ def _apply_style(ws, row: int, styles: List[Any]) -> None:
         ws.cell(row=row, column=i)._style = copy(st)
 
 
+def _drop_shifted_total_merges(ws, min_row: int = 25) -> None:
+    """合计行下移后，正文区残留的 M:N 合并会盖住海关编码。只拆第 min_row 行起的 M:N。"""
+    stale = [
+        str(merged)
+        for merged in list(ws.merged_cells.ranges)
+        if merged.min_col == 13 and merged.max_col == 14 and merged.min_row >= min_row
+    ]
+    for ref in stale:
+        ws.unmerge_cells(ref)
+
+
 def _fmt_dim(v: Any) -> str:
     """尺寸文本固定两位小数，避免 10 和 10.00 在发票里看起来像不同精度。"""
     if v is None:
@@ -112,17 +125,40 @@ def _sheet(wb, name: str):
 
 
 # ---------------------------------------------------------------- SEND
+def _label_cell(ws, needle: str):
+    from fba_tool.invoice_table import sanitize_header_text
+
+    want = sanitize_header_text(needle)
+    for row in ws.iter_rows(min_row=1, max_row=min(ws.max_row or 1, 20), max_col=min(ws.max_column or 1, 12)):
+        for cell in row:
+            if isinstance(cell, MergedCell):
+                continue
+            if want and want in sanitize_header_text(cell.value):
+                return cell.row, cell.column
+    return None
+
+
 def write_send(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, Any]) -> None:
+    from fba_tool.invoice_automation import load_invoice_config
+    from fba_tool.invoice_table import detect_invoice_table_layout, value_cell_right_of
+
     cfg = fw.get("invoice_export") or {}
     ws = _sheet(wb, SEND_SHEET)
     ws.title = SEND_SHEET  # 保持原表名（含 \xa0）
-    ws["C4"] = model.shipment_id
+    label = _label_cell(ws, "FBA Shipment ID")
+    if label:
+        value_row, value_col = value_cell_right_of(ws, *label)
+        ws.cell(value_row, value_col).value = model.shipment_id
+    else:
+        ws["C4"] = model.shipment_id
     ws["C5"] = cfg.get("duty_included", "是 Yes")
     ws["C6"] = cfg.get("use_forwarder_ior", "否 No")
-    styles = _style_row(ws, 15)
+    layout = detect_invoice_table_layout(wb, cfg=load_invoice_config(), forwarder_id="send")
+    first_row = layout.first_data_row if layout is not None else 15
+    styles = _style_row(ws, first_row)
     lines = {l["fnsku"]: l for l in model.lines}
     for i, r in enumerate(model.ranges):
-        row = 15 + i
+        row = first_row + i
         _apply_style(ws, row, styles)
         l = lines[r.fnsku]
         pcs = to_number(l["pcs_per_set"]) or 1
@@ -168,12 +204,18 @@ def write_jiufang(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, An
     inv["B17"] = wh.get("state", "")
     inv["B19"] = code
     inv["B22"] = code
-    data_st, total_st = _style_row(inv, 25), _style_row(inv, 26)
-    for c in inv[26]:
-        c.value = None
+    n = len(model.lines)
+    _drop_shifted_total_merges(inv, 25)
+    if n > 1:
+        inv.insert_rows(26, n - 1)
+    data_st = _style_row(inv, 25)
+    trow = 25 + n
+    for cell in inv[trow]:
+        cell.value = None
     for i, l in enumerate(model.lines):
         row = 25 + i
-        _apply_style(inv, row, data_st)
+        if i:
+            _apply_style(inv, row, data_st)
         vals = {"A": model.shipment_id, "B": model.reference_id, "C": l["fnsku"], "D": l["english_name"], "E": l["chinese_name"],
                 "F": l["brand"], "G": l["model"], "H": l["material_en"], "I": l["has_battery"], "J": "", "K": "", "L": "",
                 "M": l["purpose_en"], "N": str(l["hs_code"]), "O": l["qty"], "P": l["invoice_unit"],
@@ -181,10 +223,7 @@ def write_jiufang(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, An
                 "T": cfg.get("image_placeholder", "") if i == 0 else "", "U": l["asin"], "V": ""}
         for col, v in vals.items():
             inv[f"{col}{row}"] = v
-    trow = 25 + len(model.lines)
-    _apply_style(inv, trow, total_st)
     inv[f"M{trow}"] = "*Total（汇总）:"
-    inv.merge_cells(f"M{trow}:N{trow}")
     inv[f"O{trow}"] = model.total_qty
     inv[f"Q{trow}"] = "Currency"
     inv[f"R{trow}"] = DECLARED_CURRENCY
@@ -212,8 +251,6 @@ def write_jiufang(wb, model: InvoiceModel, fw: Dict[str, Any], ctx: Dict[str, An
             for col, v in vals.items():
                 pk[f"{col}{row}"] = v
             if first:
-                _numeric_format(pk, row, "IJK", "0.00")
-                _numeric_format(pk, row, "H", "0")
                 total_cbm += box_cbm or 0
                 total_w += b.weight or 0
             row += 1
@@ -425,6 +462,9 @@ def export_invoice(forwarder_id: str, *, shipment, products: Dict[str, Dict[str,
     model = build_model(forwarder=forwarder_id, shipment=shipment, products=products, reference_id=reference_id,
                         warehouse=warehouse or shipment.warehouse_code, measured=measured, required=required,
                         hs_templates=hs_templates)
+    from fba_tool.export_compliance import attach_compliance
+
+    attach_compliance(model, products, invoice_date or date.today().isoformat())
     if fw["export_adapter"] in ADDRESS_REQUIRED and not warehouse_info:
         raise InvoiceBlocked([{"code": "warehouse_address_missing",
                                "message": f"仓库 {model.warehouse} 在 FBA 仓库地址库里没有地址，{fw.get('name') or forwarder_id}发票的派送地址填不了"}])

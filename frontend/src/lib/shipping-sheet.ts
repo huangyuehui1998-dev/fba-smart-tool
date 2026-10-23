@@ -64,12 +64,20 @@ export function isShippingSheetNumericColumn(col: string): boolean {
 
 export type ShippingSheetLegendRow = Record<string, unknown>;
 
+/** 箱规保留到百分位。44.96 显示 44.96，不再先收成 1 位变成 45.00。 */
+export function formatCartonCm(raw: unknown): string {
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return String(raw ?? "");
+  const text = (Math.round(n * 100) / 100).toFixed(2);
+  return text.replace(/0+$/, "").replace(/\.$/, "");
+}
+
 export function formatShippingSheetLegendCell(col: string, row: ShippingSheetLegendRow): string {
   const raw = row[col];
   if (raw === null || raw === undefined || raw === "") return "";
   if (col === "发货总数" || col === "单箱装量") return String(Math.round(Number(raw)));
   if (col === "箱长(cm)" || col === "箱宽(cm)" || col === "箱高(cm)") {
-    return Number(raw).toFixed(1);
+    return formatCartonCm(raw);
   }
   return String(raw);
 }
@@ -81,7 +89,7 @@ export function formatShippingSheetCell(col: string, row: ShippingSheetRow): str
   if (col === "总毛重(KG)") return Number(raw).toFixed(2);
   if (col === "单箱体积(CBM)") return Number(raw).toFixed(3);
   if (col === "外箱长(CM)" || col === "外箱宽(CM)" || col === "外箱高(CM)") {
-    return Number(raw).toFixed(1);
+    return formatCartonCm(raw);
   }
   return String(raw);
 }

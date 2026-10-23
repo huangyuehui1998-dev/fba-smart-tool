@@ -40,7 +40,7 @@
       "template_file": "qiluo.xlsx",
       "group_logic": "GROUP_BY_BOX_RANGE",
       "unit_conversion": { "weight": "kg", "dimension": "cm" },
-      "separate_material_purpose": false,
+      "separate_material_purpose": true,
       "columns_mapping": {
         "fba_id": { "source": "shipment", "field": "shipment_id" },
         "po_number": { "source": "workflow", "field": "po_number" },
