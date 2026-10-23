@@ -15,7 +15,7 @@
 
 ## 数据边界
 
-- 禁止入库：`lingxing_listing_prices.xlsx`，以及文件名带 `listing` 的 `.xlsx`。扫描函数 `forbidden_real_hits`（`packaging/release_manifest.py`）。没有白名单例外。
+- 禁止入库：`lingxing_listing_prices.xlsx`，以及文件名带 `listing` 的 `.xlsx`。扫描函数 `forbidden_real_hits`（`packaging/release_manifest.py`）。`.gitignore` 有同样两条，写在模板放行之后。没有白名单例外。
 - 源码默认 vs 便携包：三份映射 JSON 两边都是 `{}`。`customs/报关资料模板.xlsx` 两边都是脱敏版（`DEMO-ORDER` / `FBA-DEMO`）。德速填写示例货件号是 `FBATEST0DEMO`。`forwarders.default.json` 的 `source` 说明在便携包里会把货件号换成 `<已脱敏>`。对照表在 `docs/OPEN_SOURCE.md`。
 - 发货录入样表的示例行是 `DEMO-SKU-*` / `X0DEMO*`（`input_template.EXAMPLE_ROWS`）。不要写回 `J-PETWOODSTAIRS` 或 `X0054`。
 - 合成夹具：`backend/tests/fixtures/synthetic/`（例如 `lingxing_us_columns_82.xlsx`，文件名不含 `listing`）。

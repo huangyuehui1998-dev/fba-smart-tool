@@ -72,7 +72,7 @@ sha256sum FBA_Smart_Tool_V4_便携版.zip
 4. 把内层 zip 拖进 Attach binaries。不要附 `realdata`、`app_data`、`lingxing.json` 或发票历史。
 5. 先存 Draft。
 6. 在一台 Windows 上解压，双击 `启动FBA工具.bat` 或 `FBA_Smart_Tool.exe`，确认页面能打开、`_internal/config/policy.default.json` 一类出厂文件在包里。
-7. 模拟通过后再 Publish。
+7. 模拟通过后再 Publish。Publish 仅维护者操作。
 
 ## 发布前的仓库扫描
 
@@ -114,7 +114,7 @@ pytest tests/release/test_s9step5_release.py tests/release/test_portable_package
 - [ ] Release 正文写了哈希和运行链接
 - [ ] Release 附件只有这只 zip
 - [ ] Windows 上实际打开过
-- [ ] 仍然是 Draft，直到上面各项都勾完再 Publish
+- [ ] 仍然是 Draft，直到上面各项都勾完再 Publish。Publish 仅维护者操作
 
 ## 发布之后
 

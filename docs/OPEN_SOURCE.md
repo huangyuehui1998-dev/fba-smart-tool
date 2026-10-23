@@ -34,6 +34,8 @@ CI 不需要任何客户表就能跑合成测试。便携包白名单在 `packag
 - 文件名是 `lingxing_listing_prices.xlsx`
 - 文件名里带 `listing` 且以 `.xlsx` 结尾
 
+`.gitignore` 写了同样的两条，并且放在 `!backend/templates/**/*.xlsx` 之后。`git check-ignore` 会拦住仓库根、`review/` 和 `backend/templates/` 里的这些 xlsx。合成夹具文件名不含 `listing`，不会被这两条拦住。
+
 这次从树上删除了 `review/lingxing_listing_export_2026-10-21.xlsx`，并删除了只放行这一份文件的 `ALLOWED_LISTING_FIXTURES`。合成测试继续用内存里的工作簿，或 `backend/tests/fixtures/synthetic/` 里的脱敏表。
 
 同样不要提交：

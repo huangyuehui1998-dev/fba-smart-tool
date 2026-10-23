@@ -47,3 +47,8 @@ backend/templates/已填写好的*
 !backend/templates/README.txt
 backend/templates/*发票*.xlsx
 backend/templates/亚马逊FBA表*.csv
+
+# 领星在售导出。与 packaging/release_manifest.py 的 FORBIDDEN_REAL_NAMES / FORBIDDEN_REAL_GLOBS 对齐。
+# 放在模板放行之后，避免 !backend/templates/**/*.xlsx 把 listing 工作簿又放回来。
+lingxing_listing_prices.xlsx
+*listing*.xlsx

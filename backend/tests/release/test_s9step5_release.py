@@ -16,6 +16,7 @@ import json
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 import zipfile
 from pathlib import Path
@@ -276,6 +277,60 @@ def test_oss_defaults_drop_real_catalog_and_shipment_ids():
     for left, right in zip(src.worksheets, rel.worksheets):
         assert [[c.value for c in row] for row in left.iter_rows()] == [[c.value for c in row] for row in right.iter_rows()]
     assert "FBATEST0DEMO" in "\n".join(_file_texts(BACKEND / "templates" / "forwarders" / "deshu_t3.xlsx"))
+
+
+def _gitignore_rules() -> List[str]:
+    rules = []
+    for raw in (ROOT / ".gitignore").read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if line and not line.startswith("#"):
+            rules.append(line)
+    return rules
+
+
+def _check_ignore_pattern(rel: str) -> str:
+    """最后一条命中的 gitignore 规则。空字符串表示没有任何规则命中。以 ! 开头的是放行。"""
+    proc = subprocess.run(
+        ["git", "check-ignore", "-v", "--no-index", "--", rel],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if proc.returncode == 1:
+        return ""
+    assert proc.returncode == 0, (rel, proc.stderr)
+    left = proc.stdout.strip().splitlines()[-1].split("\t", 1)[0]
+    match = re.match(r"^.*?:\d+:(.*)$", left)
+    assert match, proc.stdout
+    return match.group(1)
+
+
+def test_gitignore_matches_forbidden_real_rules():
+    """运营 r1：.gitignore 与 FORBIDDEN_REAL_* 对拍。模板放行不能把 listing xlsx 放回来。"""
+    rules = _gitignore_rules()
+    for name in M.FORBIDDEN_REAL_NAMES:
+        assert name in rules, name
+    for pattern in M.FORBIDDEN_REAL_GLOBS:
+        assert pattern in rules, pattern
+    ignored = (
+        "lingxing_listing_prices.xlsx",
+        "review/lingxing_listing_export_2026-10-21.xlsx",
+        "backend/templates/lingxing_listing_prices.xlsx",
+        "backend/templates/foo-listing-bar.xlsx",
+        "nested/xlistingx.xlsx",
+    )
+    for rel in ignored:
+        pattern = _check_ignore_pattern(rel)
+        assert pattern in set(M.FORBIDDEN_REAL_NAMES) | set(M.FORBIDDEN_REAL_GLOBS), (rel, pattern)
+        assert not pattern.startswith("!")
+    kept = (
+        "backend/tests/fixtures/synthetic/lingxing_us_columns_82.xlsx",
+        "backend/templates/forwarders/send.xlsx",
+    )
+    for rel in kept:
+        pattern = _check_ignore_pattern(rel)
+        assert pattern == "" or pattern.startswith("!"), (rel, pattern)
 
 
 def test_spec_uses_manifest_only():
