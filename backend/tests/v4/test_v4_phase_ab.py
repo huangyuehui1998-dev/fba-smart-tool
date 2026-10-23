@@ -535,11 +535,16 @@ def test_v4_d1_listing_preview_confirm_rollback():
 
 
 def _owner_listing_path() -> Path:
-    """真实美国站导出。默认用仓库里的回归表，也可用 FBA_LINGXING_OWNER_XLSX 指向另一份。"""
+    """本机私有的美国站导出。仓库不带这份文件。
+
+    设置 FBA_LINGXING_OWNER_XLSX 指向本地路径才跑；未设置或文件不存在就跳过。
+    """
     override = os.environ.get("FBA_LINGXING_OWNER_XLSX", "").strip()
-    path = Path(override) if override else ROOT / "review" / "lingxing_listing_export_2026-10-21.xlsx"
+    if not override:
+        pytest.skip("未设置 FBA_LINGXING_OWNER_XLSX，跳过本机领星导出回归")
+    path = Path(override)
     if not path.is_file():
-        pytest.fail(f"领星回归表不存在：{path}")
+        pytest.skip(f"FBA_LINGXING_OWNER_XLSX 指向的文件不存在：{path}")
     return path
 
 
@@ -554,7 +559,10 @@ def _default_confirm_items(preview: dict) -> list[dict]:
 
 
 def test_v4_d1_owner_listing_default_confirm():
-    """真实表按预览默认勾选确认：0 费用不导致 500，手填六要素/箱规/0 价保护还在，失败时不留半写入。"""
+    """本机私有表按预览默认勾选确认。未提供 FBA_LINGXING_OWNER_XLSX 时跳过。
+
+    文件在时：0 费用不导致 500，手填六要素/箱规/0 价保护还在，失败时不留半写入。
+    """
     from fastapi.testclient import TestClient
 
     from fba_tool.lingxing_listing_xlsx import parse_listing_xlsx
@@ -980,7 +988,7 @@ def test_v4_d1_currency_anomaly_keeps_other_rows_and_exports_errors():
     ws.append(["US-2", "美国", "USD", 8, 10, "USD", "成本美元"])
     buf = io.BytesIO()
     wb.save(buf)
-    parsed = parse_listing_xlsx(buf.getvalue(), "lingxing_listing_export_2026-10-21.xlsx")
+    parsed = parse_listing_xlsx(buf.getvalue(), "synthetic-listing-anomaly.xlsx")
     skus = {item["sku"]: item for item in parsed["products"]}
     assert skus["US-1"]["listing_price"] == 12.5
     assert skus["US-1"]["listing_price_currency"] == "USD"
@@ -992,7 +1000,7 @@ def test_v4_d1_currency_anomaly_keeps_other_rows_and_exports_errors():
     client = TestClient(app)
     response = client.post(
         "/api/lingxing/import-xlsx",
-        files={"file": ("lingxing_listing_export_2026-10-21.xlsx", buf.getvalue(), "application/octet-stream")},
+        files={"file": ("synthetic-listing-anomaly.xlsx", buf.getvalue(), "application/octet-stream")},
     )
     run_id = response.json()["run_id"]
     try:

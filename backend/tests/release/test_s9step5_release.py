@@ -237,6 +237,8 @@ def test_manifest_excludes_real_data_files():
     assert "invoice_history.default.json" not in cfg and "lingxing.json" not in cfg
     assert not any("sessions" in c for c in cfg)
     assert M.forbidden_real_hits(ROOT) == []
+    assert not hasattr(M, "ALLOWED_LISTING_FIXTURES")
+    assert not (ROOT / "review" / "lingxing_listing_export_2026-10-21.xlsx").exists()
     assert "lingxing_listing_prices.xlsx" in M.FORBIDDEN_REAL_NAMES
 
 
