@@ -18,10 +18,11 @@
 - 删除 `ALLOWED_LISTING_FIXTURES`。文件名带 `listing` 的 xlsx 再次一律视为禁止入库。
 - 本机领星回归改为读取 `FBA_LINGXING_OWNER_XLSX`；未设置或文件不存在时跳过，不再依赖仓库内的那份导出。
 
+### 变更
+
+- 三方评审后订正文档：界面名字和 step id 分开写；DeepSeek Key 仅 Windows DPAPI；便携包 CI 不跑 pytest；冒烟脚本在仓库根目录执行。记录见 `docs/评审报告/开源前置_三方评审.md`。
+
 ### 说明
 
 - git 历史没有改写。旧提交里仍可能检出该工作簿。见 `docs/OPEN_SOURCE.md`。
-
-## [4.x] - 未发布
-
-V4 的功能仍在整理，尚未打 `v4*` 正式 tag。打 tag 之前，把上面 `Unreleased` 的条目移到具体版本标题下，并写上发布日期。
+- V4 尚未打 `v4*` 正式 tag。发布那天把 `Unreleased` 挪到具体版本标题下，并写上日期。见 `docs/RELEASING.md`。

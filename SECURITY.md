@@ -46,6 +46,7 @@
 
 ## 给使用者
 
-- 领星钥匙只填在本机设置里。不要把 `app_data/config/lingxing.json` 发给别人。
+- 领星钥匙只填在本机。不要把 `app_data/config/lingxing.json` 发给别人。
+- DeepSeek Key 只在 Windows 上落到 `app_data/secrets/deepseek_key.bin`。不要把这个文件提交或转发。其它系统上程序不会保存它。
 - 不要把真实 `.env`、数据库或货件目录提交到 fork 的公开分支。
 - 便携包从 GitHub Release 下载后，用 Release 正文里的 SHA256 核对文件。步骤见 [docs/RELEASING.md](docs/RELEASING.md)。

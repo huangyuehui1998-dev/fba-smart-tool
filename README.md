@@ -22,15 +22,17 @@ FBA Smart Tool 把这条流水线收成一台本机程序：FastAPI 做业务，
 
 ## 能做什么
 
-工作流大致是七步（界面上的「发票」是 Step 4.5）：
+界面上有七项。名字里的数字和代码里的 step id 不是同一套，改界面时对名字，改代码时对 id（`frontend/src/lib/workflow-steps.ts`）。
 
-1. **发货录入** — 文本、表格，或可选的 DeepSeek 解析
-2. **智能排箱** — 整箱、混装和 FBA 合规校验
-3. **导出预览** — 内部留档和 Send to Amazon 模板
-4. **分仓刷仓**（可选）— 分仓结果给货代预览
-5. **回传校验** — 亚马逊 CSV / 箱唛 PDF 和工厂表、货代表交叉核对
-6. **发票** — 货代模板填充，Univer 离线预览后再导出
-7. **报关资料** — 报关单、发票、箱单、合同等预览和导出
+| 界面 | step id | 做什么 |
+|---|---|---|
+| 1 录入 | 1 | 文本、表格，或可选的 DeepSeek 解析 |
+| 2 排箱 | 2 | 整箱、混装和 FBA 合规校验 |
+| 3 导出 | 3 | 内部留档和 Send to Amazon 模板 |
+| 7 刷仓 | 3.5 | 可选。分仓结果给货代预览 |
+| 4 货件校验 | 4 | 亚马逊 CSV / 箱唛 PDF，对照工厂表、货代表 |
+| 5 发票 | 4.5 | 货代模板填充，Univer 离线预览后再导出 |
+| 6 报关 | 5 | 报关单、发票、箱单、合同等预览和导出 |
 
 产品库可以手填、用 Excel 进出，也可以导入领星在售表：先预览，确认后才写入，写错可以回滚。领星 MCP 定时同步默认关闭，并且只做读取。
 
@@ -39,8 +41,9 @@ FBA Smart Tool 把这条流水线收成一台本机程序：FastAPI 做业务，
 ## 功能边界
 
 - 单机工具。业务数据在本机 `app_data/`（SQLite、你改过的配置、导出历史）。
-- 领星 MCP Key、DeepSeek Key 由使用者自己填写，加密或保存在本机设置里。仓库不提供钥匙。
+- 领星 MCP Key 写在本机 `app_data/config/lingxing.json`（DPAPI 密文）。DeepSeek Key 只在 Windows 上写入 `app_data/secrets/deepseek_key.bin`（同样是 DPAPI）；其它系统保存会得到 422。仓库不提供这两把钥匙。
 - 便携版面向 Windows。源码也可以在其他系统上跑开发和测试；正式 zip 只在 GitHub Actions 的 Windows 构建机上打。
+- 产品入口 `run_app.py` 监听 `127.0.0.1`，首选端口 **8002**（占用时按 `PREFERRED_PORTS` 顺延，跳过 8010）。开发时请显式启动在 8002。直接执行 `python backend/main.py` 时端口来自 `FBA_PORT`，没设则是 8000，那不是日常入口。监听地址默认 `FBA_HOST=127.0.0.1`；改成非本机地址时必须同时设置 `FBA_ACCESS_TOKEN`，否则拒绝启动。
 - 出厂规则在 `backend/config/*.default.json`。你的改动写到 `app_data/config/`，不要改出厂文件来“保存设置”。
 - 产品代际是 `V4`，写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`。FastAPI 自带的 `version` 字符串是 API 文档号，和产品版本无关。
 
@@ -54,6 +57,8 @@ FBA Smart Tool 把这条流水线收成一台本机程序：FastAPI 做业务，
 - `lingxing.json`、`app_data/`、数据库、会话
 - 真实领星在售导出（文件名带 `listing` 的 xlsx 会被发布扫描拒绝）
 - 真实货件批次（`realdata/`）
+
+2026-10-20 留下的三份样表还在 `backend/templates/`（发货录入样表、工厂表、货代表），不进便携包。它们不是领星在售导出。边界写在 [`docs/OPEN_SOURCE.md`](docs/OPEN_SOURCE.md)。
 
 `.env` 只保留占位示例（`frontend/.env.example`）。请不要把真实地址、货件号或密钥写进 issue 和 PR。
 
@@ -83,7 +88,7 @@ npm ci
 npm run dev
 ```
 
-浏览器打开 <http://127.0.0.1:5173>。开发代理把 `/api` 转到后端。需要固定端口时设置 `FBA_BACKEND_PORT=8002`（不要指到 8000，除非后端真的在 8000）。
+浏览器打开 <http://127.0.0.1:5173>。开发代理把 `/api` 转到后端。端口先看仓库根目录 `.dev/ports.json` 的 `backend`，没有再看 `FBA_BACKEND_PORT`，再否则 8002。
 
 Windows 上也可以在仓库根目录运行 `python run_app.py`，或使用打包版里的 `启动FBA工具.bat`。打包版由 FastAPI 同时提供页面，地址一般是 <http://127.0.0.1:8002>。
 
@@ -119,7 +124,7 @@ cd frontend
 npm test
 ```
 
-依赖本机私有文件的测试，在环境变量没设或文件不存在时会 **skip**，例如 `FBA_LINGXING_OWNER_XLSX`、`FBA_REALDATA_DIR`。没有这些文件，CI 仍然应该是绿的。细节见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+`FBA_LINGXING_OWNER_XLSX` 没设或文件不在，对应用例会 skip。货件批次路径不存在时，相关用例 skip，原因里带「需要 box realdata」。GitHub Actions 里目前只有便携包工作流，它不跑 pytest。细节见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## 文档
 
@@ -134,6 +139,7 @@ npm test
 | [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | 社区行为准则 |
 | [`CHANGELOG.md`](CHANGELOG.md) | 版本记录 |
 | [`llms.txt`](llms.txt) | 给协助改代码的模型看的短摘要 |
+| [`docs/评审报告/开源前置_三方评审.md`](docs/评审报告/开源前置_三方评审.md) | 代码、测试、运营对这套开源文档的评审 |
 
 ## 参与
 

@@ -8,9 +8,9 @@
 
 - 产品库、你改过的配置、导出历史放在 `app_data/`。这个目录被 git 忽略。
 - 领星 MCP Key 写在本机 `app_data/config/lingxing.json`，以 DPAPI 密文（`mcp_key_enc`，前缀 `dpapi:v1:`）保存。仓库里没有这份文件。换一台电脑要重新填写。
-- DeepSeek 之类的可选钥匙在使用者自己的本机设置里，不进提交。
+- DeepSeek Key 只在 Windows 上写入 `app_data/secrets/deepseek_key.bin`（DPAPI）。非 Windows 调用保存接口会得到 422。这个文件在 `app_data/` 里，不进提交。
 - 服务默认绑定 `127.0.0.1`。它不是给公网部署的多用户系统。
-- 真实货件批次放在本机目录，用 `FBA_REALDATA_DIR` 指给测试。目录不存在就 skip。
+- 真实货件批次放在本机目录，用 `FBA_REALDATA_DIR` 指给测试。路径不存在就 skip，原因里带「需要 box realdata」。变量没设时，部分用例会去看默认路径 `/workspace/fba_tool/realdata`，那里没有同样 skip。
 - 本机若要对照一份私有领星导出，设置 `FBA_LINGXING_OWNER_XLSX` 为那个文件的路径。未设置或文件不存在就 skip。不要把路径改回仓库里的某个 xlsx。
 
 CI 不需要任何客户表就能跑合成测试。便携包白名单在 `packaging/release_manifest.py`，不收集 `lingxing.json`、`app_data`、`realdata`、发票历史。

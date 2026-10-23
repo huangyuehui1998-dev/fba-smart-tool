@@ -43,15 +43,18 @@ npm run dev
 
 浏览器：<http://127.0.0.1:5173>。API 文档：<http://127.0.0.1:8002/docs>。
 
+开发代理先读仓库根目录 `.dev/ports.json` 的 `backend` 端口，没有再读 `FBA_BACKEND_PORT`，再否则 8002。产品入口是根目录 `run_app.py`（首选 8002）。`python backend/main.py` 在没设 `FBA_PORT` 时用 8000，那不是这条开发命令。
+
 可选环境变量：
 
 | 变量 | 作用 |
 |---|---|
-| `FBA_BACKEND_PORT` | 前端代理要连的后端端口，默认开发流程用 `8002` |
+| `FBA_BACKEND_PORT` | 前端代理端口。`.dev/ports.json` 里已有 `backend` 时，以那个文件为准 |
 | `FBA_APP_DATA_DIR` | 换一套本机数据目录。测试和冒烟应指向临时目录 |
 | `FBA_NO_BROWSER` | 设为 `1` 时启动器不打开浏览器 |
+| `FBA_HOST` | 监听地址，默认 `127.0.0.1`。非本机地址必须同时设置 `FBA_ACCESS_TOKEN` |
 | `FBA_LINGXING_OWNER_XLSX` | 本机私有领星导出的路径。未设置或文件不存在时，对应用例 skip |
-| `FBA_REALDATA_DIR` | 本机货件批次目录。没有就 skip，不要把目录提交进仓库 |
+| `FBA_REALDATA_DIR` | 本机货件批次目录。路径不存在就 skip。没设这个变量时，部分用例仍会去看默认路径 `/workspace/fba_tool/realdata`，那个目录不在也同样 skip |
 
 `frontend/.env.example` 里只有注释和占位。复制成 `.env` 后也请只写本机地址，`.env` 已被 git 忽略。
 
@@ -80,13 +83,13 @@ npm test
 
 改了页面或路由时再跑 `npm run build`。`npm run e2e` 是 Playwright，需要本机浏览器和已经启动的服务，不是每个 PR 的必跑项；你跑了就在 PR 里写结果。
 
-端到端冒烟（会真的拉起后端，数据目录用临时的）：
+端到端冒烟在**仓库根目录**跑。它会自己拉起后端，数据目录用临时的，不写你的真实 `app_data/`：
 
 ```bash
 python scripts/smoke_e2e.py
 ```
 
-在 Windows 上从 `backend` 虚拟环境调用时，路径按你的外壳写。冒烟不应读写你的真实 `app_data/`。
+Windows 上可以用 `backend\.venv\Scripts\python.exe scripts\smoke_e2e.py`。
 
 ## 提交说明
 
