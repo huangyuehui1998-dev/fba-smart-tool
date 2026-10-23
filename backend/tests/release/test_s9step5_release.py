@@ -267,6 +267,7 @@ def test_oss_defaults_drop_real_catalog_and_shipment_ids():
         BACKEND / "templates" / "forwarders" / "deshu_t3.xlsx",
         PACKAGING / "release_templates" / "templates" / "forwarders" / "deshu_t3.xlsx",
         PACKAGING / "release_templates" / "templates" / "customs" / "报关资料模板.xlsx",
+        PACKAGING / "Step5报关资料_架构与工作流.txt",
     ]
     for path in paths:
         blob = "\n".join(_file_texts(path))

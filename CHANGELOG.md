@@ -23,6 +23,7 @@
 - 三方评审后订正文档：界面名字和 step id 分开写；DeepSeek Key 仅 Windows DPAPI；便携包 CI 不跑 pytest；冒烟脚本在仓库根目录执行。记录见 `docs/评审报告/开源前置_三方评审.md`。
 - 开源文档测试 r1：三份 SKU 映射出厂文件改为 `{}`，与便携包一致。报关资料模板改为脱敏版。发货录入样表的 SKU / FNSKU 改为 `DEMO-SKU-*` / `X0DEMO*`。德速填写示例的货件号改为 `FBATEST0DEMO`。
 - `.gitignore` 与 `FORBIDDEN_REAL_NAMES` / `FORBIDDEN_REAL_GLOBS` 对齐。`lingxing_listing_prices.xlsx` 和 `*listing*.xlsx` 会被 `git check-ignore` 拦住。
+- 开源文档测试 r2：`packaging/Step5报关资料_架构与工作流.txt` 的订单号、品牌、货件号示例改为 `DEMO-ORDER` / `DEMO` / `FBA-DEMO`。便携包历史核对段标明 `FBA_Smart_Tool_V3.3_便携版.zip` 是历史包名、非当前 V4。
 
 ### 说明补充
 

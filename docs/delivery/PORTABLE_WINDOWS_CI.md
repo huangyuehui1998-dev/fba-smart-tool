@@ -24,7 +24,7 @@
 
 防再发：`backend/tests/release/test_portable_package.py` 的 `test_factory_policy_defaults_are_in_whitelist_and_datas`。上面五个文件不在白名单里，或不在 PyInstaller 收集的 datas 里，测试失败。`scripts/finish_portable_dist.py` 打 zip 之前还会按白名单核对 zip 条目，缺了这次打包就失败，不会上传。
 
-不要用 run 39569887016 的 artifact 做人工模拟，也不要把它挂到 GitHub Release。那一版没有 `policy.default.json`。已核对、含上述五个出厂文件的是 [run 39575543299](https://github.com/huangyuehui1998-dev/fba-smart-tool/actions/runs/39575543299)：内层 `FBA_Smart_Tool_V3.3_便携版.zip`，138,430,173 字节，SHA256 `30df4d3a02fbad43f3afb37bb96ba596e8f9f4aefec0180c08c6c5d4547f31a2`。
+不要用 run 39569887016 的 artifact 做人工模拟，也不要把它挂到 GitHub Release。那一版没有 `policy.default.json`。已核对、含上述五个出厂文件的是 [run 39575543299](https://github.com/huangyuehui1998-dev/fba-smart-tool/actions/runs/39575543299)：内层 `FBA_Smart_Tool_V3.3_便携版.zip`（历史包名、非当前 V4），138,430,173 字节，SHA256 `30df4d3a02fbad43f3afb37bb96ba596e8f9f4aefec0180c08c6c5d4547f31a2`。
 
 这个文件名里的 **V3.3** 是当时的产品代际，只属于那一次历史构建。现在的工作流上传的 artifact 叫 `FBA_Smart_Tool_V4_便携版.zip`（跟 `APP_VERSION` 走）。核对今天的包时，用这次运行摘要里的文件名、字节数和 SHA256。不要把 V3.3 那只 zip 的哈希套到 V4 的包上，也不要把它当成当前发布物。
 

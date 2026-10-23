@@ -25,6 +25,8 @@
 - 已忽略：`lingxing.json`、`.env`、`app_data/`、`*.db`、`fba_tool/realdata/`、`backend/tests/golden/*.json`。
 - `frontend/.env.example` 只有占位。不要写入真实 URL 以外的钥匙。
 - 2026-10-20 留下的三份样表（发货录入样表、工厂表、货代表）在 `backend/templates/`，不进便携包白名单。不要在无关改动里删除它们。
+- `packaging/Step5报关资料_架构与工作流.txt` 的示例是 `DEMO-ORDER` / `DEMO` / `FBA-DEMO`。`backend/tests` 与 `docs/方案`、`docs/用户决策记录.md` 里可能仍有历史货件号 / SKU，不要当成可外发的业务数据。
+- 已核对的历史便携包内层文件名是 `FBA_Smart_Tool_V3.3_便携版.zip`（历史包名、非当前 V4）。当前 artifact 是 `FBA_Smart_Tool_V4_便携版.zip`。
 
 ## 构建与发布
 
