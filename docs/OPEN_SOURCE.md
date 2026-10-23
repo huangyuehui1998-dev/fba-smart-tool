@@ -43,15 +43,27 @@ CI 不需要任何客户表就能跑合成测试。便携包白名单在 `packag
 - `app_data/`、`*.db`、`fba_tool/realdata/`
 - `backend/tests/golden/*.json`（已忽略）
 
+## 源码默认和便携包
+
+从源码跑和从 Windows 便携包跑，读的不是同一套出厂文件。便携包只收 `packaging/release_manifest.py` 白名单里的条目。标成 `release` 的，取 `packaging/release_templates/` 里的版本，不取 `backend/` 里的原件。生成脚本是 `packaging/build_release_templates.py`。
+
+| 文件 | 源码 `backend/` | 便携包 |
+|---|---|---|
+| `amazon_sku_metadata.default.json`、`fnsku_mapping.default.json`、`sku_mapping.default.json` | `{}` | `{}`。两边一样。新用户不会被种进 SKU / FNSKU / ASIN |
+| `customs/报关资料模板.xlsx` | 与便携包那份单元格相同：订单号 `DEMO-ORDER`，货件号 `FBA-DEMO`，品牌 `DEMO` | 同一份脱敏工作簿 |
+| `forwarders/deshu_t3.xlsx`、`forwarders/qiluo_t6.xlsx` | 测试用原件。德速「填写示例」货件号是 `FBATEST0DEMO` | 去掉发票主表上的产品图，并清掉公司名 / 信用代码那一格。德速示例货件号同样是 `FBATEST0DEMO` |
+| `forwarders.default.json`、`invoice_template_map.json` | `source` / `decision` 说明里仍有历史样例文件名 | 只改这些说明文字里的货件号，换成 `<已脱敏>`。其余字段照旧 |
+| `发货录入样表.xlsx`、`工厂表.xlsx`、`货代表.xlsx` | 留在仓库，不进白名单 | 包里没有这三份 |
+
+以前有一句「抽查没有看到 FBA 货件号」。那句话不成立。`backend/templates/customs/报关资料模板.xlsx` 里曾经有订单号 `JUS7HB115` 和货件号 `FBA19GV*`。源码里的那份现在已经换成上面的脱敏版，和便携包对齐。
+
+`发货录入样表.xlsx` 里曾经有 `J-PETWOODSTAIRS-*` 和 `X0054*`。SKU / FNSKU 现已改成 `DEMO-SKU-*` / `X0DEMO*`，和 `backend/fba_tool/input_template.py` 的 `EXAMPLE_ROWS` 相同。下载接口按 `EXAMPLE_ROWS` 现场生成，不读这张表里的旧格子。`工厂表.xlsx` 和 `货代表.xlsx` 这次按 FBA 货件号、`X00` FNSKU、`B0` ASIN 扫过，没有这些形态；它们仍不进便携包。
+
+`invoice_history.default.json` 不进便携包。品牌已写成 `DEMO`。从源码第一次启动时，它会补进本机 `app_data/invoice_history.json`。
+
 ## 仍留在仓库里、需要知道的文件
 
-2026-10-20 的决定留下三份样表，它们在 `backend/templates/`，**不在**便携包白名单里：
-
-- `发货录入样表.xlsx`
-- `工厂表.xlsx`
-- `货代表.xlsx`
-
-这次开源清理没有删除它们。它们体积不大，抽查没有看到 FBA 货件号。若公开前还想再过一遍单元格，应单独做决定，而不是在别的 PR 里顺手改掉测试所依赖的文件名。
+2026-10-20 的决定留下上面三份样表。文件名还在，发货录入样表的货号已经换成示例。不要在别的 PR 里顺手删掉测试和白名单还点名的文件名。
 
 `docs/评审报告/` 是内部评审记录，不是客户导出。阅读时不要把里面的例子当成可以对外粘贴的业务数据。
 

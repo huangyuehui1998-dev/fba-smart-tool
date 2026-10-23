@@ -32,18 +32,18 @@ def test_export_writes_key_cells():
         return
     profile = {
         "id": "test",
-        "name": "武汉花笨橙电子商务有限公司",
-        "credit_code": "91420113MACWNNKU99",
+        "name": "示例公司（请在出口商档案里填写）",
+        "credit_code": "DEMO-CREDIT-0001",
         "signed_at": "武汉",
         "domestic_source": "武汉",
     }
-    data = build_customs_data([_sample_pair()], [], profile, source="shipment", order_no="JUS7HB115")
+    data = build_customs_data([_sample_pair()], [], profile, source="shipment", order_no="DEMO-ORDER-1")
     data.dates["export_date"] = "2026-06-27"
     data.dates["invoice_date"] = "2026-06-27"
     out = export_customs_package(data, TEMPLATE.read_bytes())
     wb = openpyxl.load_workbook(io.BytesIO(out))
     ws = wb.worksheets[0]
-    assert ws["A10"].value == "JUS7HB115"
+    assert ws["A10"].value == "DEMO-ORDER-1"
     assert ws["A4"].value == profile["name"]
     assert ws["C3"].value == profile["credit_code"]
     assert isinstance(ws["H3"].value, (date, datetime))

@@ -114,11 +114,15 @@ def build_real_refs() -> Dict[str, Set[str]]:
                 elif FNSKU_RE.fullmatch(c):
                     refs["fnsku"].add(c)
     # 原件报关模板 / 货代模板里学出来的公司名、品牌、品名、订单号等（生成器同一套规则）
+    placeholders = {GEN.DEMO_BRAND, GEN.DEMO_COMPANY, GEN.DEMO_PRODUCT, GEN.DEMO_CITY, "DEMO-ORDER", "FBA-DEMO", "DEMO", "FBATEST0DEMO"}
     orig_customs = BACKEND / "templates" / "customs" / "报关资料模板.xlsx"
     if orig_customs.is_file():
         wb = openpyxl.load_workbook(orig_customs)
-        # 只取公司名和品牌（品名、城市是普通词，不算真实标识）
-        refs["text"] |= {k for k, v in GEN._learn_customs(wb).items() if v in (GEN.DEMO_BRAND, GEN.DEMO_COMPANY) and len(k) >= 2}
+        # 只取公司名和品牌（品名、城市是普通词，不算真实标识）。已经是 DEMO 的不再当真实参照。
+        refs["text"] |= {
+            k for k, v in GEN._learn_customs(wb).items()
+            if v in (GEN.DEMO_BRAND, GEN.DEMO_COMPANY) and len(k) >= 2 and k not in placeholders
+        }
         public = "\n".join(str(c.value) for ws in wb.worksheets if ws.title == "填制规范" for row in ws.iter_rows() for c in row if c.value)
         for ws in wb.worksheets:
             if ws.title == "填制规范":
@@ -127,8 +131,10 @@ def build_real_refs() -> Dict[str, Set[str]]:
                 for c in row:
                     if isinstance(c.value, str):
                         for rx in (GEN.ORDER_RE, GEN.SHIPMENT_RE, GEN.CREDIT_RE):
-                            # 填制规范里也有的是海关公开的填报样式（如 AEO 编码示例），不算真实值
-                            refs["text"] |= {t for t in rx.findall(c.value) if t not in public}
+                            # 填制规范里也有的是海关公开的填报样式（如 AEO 编码示例），不算真实值。
+                            # 已经换成 DEMO / FBA-DEMO 的格子也不再当真实参照。
+                            refs["text"] |= {t for t in rx.findall(c.value) if t not in public and t not in placeholders}
+    refs["text"] -= placeholders
     for rel in ("forwarders/qiluo_t6.xlsx", "forwarders/deshu_t3.xlsx"):
         p = BACKEND / "templates" / rel
         if p.is_file():
@@ -137,7 +143,12 @@ def build_real_refs() -> Dict[str, Set[str]]:
                     for c in row:
                         if isinstance(c.value, str):
                             refs["text"] |= set(GEN.COMPANY_RE.findall(c.value)) | set(GEN.CREDIT_RE.findall(c.value))
-    assert len(refs["sku"]) >= 6 and len(refs["asin"]) >= 6 and len(refs["fnsku"]) >= 6, {k: len(v) for k, v in refs.items()}
+    # D-OSS-01：三份出厂映射已与便携包一样是 {}。没有真实产品表时，参照集可以是空的。
+    # 包内容仍按形状规则扫（ASIN / FNSKU / FBA1* 货件号 / 公司名 / 信用代码）。
+    for name in ("amazon_sku_metadata.default.json", "fnsku_mapping.default.json", "sku_mapping.default.json"):
+        assert json.loads((cfg / name).read_text(encoding="utf-8")) == {}
+    if REAL_CATALOG.is_file():
+        assert len(refs["sku"]) >= 6 and len(refs["asin"]) >= 6 and len(refs["fnsku"]) >= 6, {k: len(v) for k, v in refs.items()}
     return refs
 
 
@@ -240,6 +251,31 @@ def test_manifest_excludes_real_data_files():
     assert not hasattr(M, "ALLOWED_LISTING_FIXTURES")
     assert not (ROOT / "review" / "lingxing_listing_export_2026-10-21.xlsx").exists()
     assert "lingxing_listing_prices.xlsx" in M.FORBIDDEN_REAL_NAMES
+
+
+def test_oss_defaults_drop_real_catalog_and_shipment_ids():
+    """D-OSS-01 / D-OSS-02：出厂映射是 {}；报关模板与便携包脱敏版单元格一致；样表和德速示例不再带原货号。"""
+    banned = ("JoyBlooms", "J-PETWOODSTAIRS", "X0054", "B0H2Y", "JUS7HB115", "FBA19GV", "FBA22232AF13")
+    paths = [
+        BACKEND / "config" / "amazon_sku_metadata.default.json",
+        BACKEND / "config" / "fnsku_mapping.default.json",
+        BACKEND / "config" / "sku_mapping.default.json",
+        BACKEND / "config" / "invoice_history.default.json",
+        BACKEND / "templates" / "customs" / "报关资料模板.xlsx",
+        BACKEND / "templates" / "发货录入样表.xlsx",
+        BACKEND / "templates" / "forwarders" / "deshu_t3.xlsx",
+        PACKAGING / "release_templates" / "templates" / "forwarders" / "deshu_t3.xlsx",
+        PACKAGING / "release_templates" / "templates" / "customs" / "报关资料模板.xlsx",
+    ]
+    for path in paths:
+        blob = "\n".join(_file_texts(path))
+        found = [token for token in banned if token in blob]
+        assert found == [], (path.relative_to(ROOT).as_posix(), found)
+    src = openpyxl.load_workbook(BACKEND / "templates" / "customs" / "报关资料模板.xlsx")
+    rel = openpyxl.load_workbook(M.source_path("templates", "customs/报关资料模板.xlsx", ROOT))
+    for left, right in zip(src.worksheets, rel.worksheets):
+        assert [[c.value for c in row] for row in left.iter_rows()] == [[c.value for c in row] for row in right.iter_rows()]
+    assert "FBATEST0DEMO" in "\n".join(_file_texts(BACKEND / "templates" / "forwarders" / "deshu_t3.xlsx"))
 
 
 def test_spec_uses_manifest_only():

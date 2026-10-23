@@ -58,7 +58,9 @@ FBA Smart Tool 把这条流水线收成一台本机程序：FastAPI 做业务，
 - 真实领星在售导出（文件名带 `listing` 的 xlsx 会被发布扫描拒绝）
 - 真实货件批次（`realdata/`）
 
-2026-10-20 留下的三份样表还在 `backend/templates/`（发货录入样表、工厂表、货代表），不进便携包。它们不是领星在售导出。边界写在 [`docs/OPEN_SOURCE.md`](docs/OPEN_SOURCE.md)。
+从源码第一次启动，和从 Windows 便携包第一次启动，用的出厂文件不完全相同。三份 SKU / FNSKU / ASIN 映射（`amazon_sku_metadata.default.json`、`fnsku_mapping.default.json`、`sku_mapping.default.json`）两边都是 `{}`。报关资料模板两边都是脱敏版（`DEMO-ORDER`、`FBA-DEMO`）。货代说明文字、产品图，以及不进安装包的样表，仍以 [`docs/OPEN_SOURCE.md`](docs/OPEN_SOURCE.md) 的对照表为准。
+
+2026-10-20 留下的三份样表还在 `backend/templates/`（发货录入样表、工厂表、货代表），不进便携包。发货录入样表的 SKU / FNSKU 已是 `DEMO-SKU-*` / `X0DEMO*`。它们不是领星在售导出。
 
 `.env` 只保留占位示例（`frontend/.env.example`）。请不要把真实地址、货件号或密钥写进 issue 和 PR。
 

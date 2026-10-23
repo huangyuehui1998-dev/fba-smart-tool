@@ -74,12 +74,41 @@ sha256sum FBA_Smart_Tool_V4_便携版.zip
 6. 在一台 Windows 上解压，双击 `启动FBA工具.bat` 或 `FBA_Smart_Tool.exe`，确认页面能打开、`_internal/config/policy.default.json` 一类出厂文件在包里。
 7. 模拟通过后再 Publish。
 
+## 发布前的仓库扫描
+
+在仓库根目录跑。`forbidden_real_hits` 拒绝 `lingxing_listing_prices.xlsx`，以及文件名里带 `listing` 的 xlsx。有命中就先拿掉文件，不要带进这次 tag。
+
+```bash
+python - <<'PY'
+import importlib.util
+from pathlib import Path
+
+path = Path("packaging/release_manifest.py")
+spec = importlib.util.spec_from_file_location("release_manifest", path)
+mod = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(mod)
+hits = mod.forbidden_real_hits(Path("."))
+if hits:
+    print("\n".join(hits))
+    raise SystemExit(1)
+print("forbidden_real_hits: none")
+PY
+```
+
+便携包白名单、脱敏模板和空映射由这组 pytest 守着。在 `backend/` 下：
+
+```bash
+pytest tests/release/test_s9step5_release.py tests/release/test_portable_package.py
+```
+
 ## 发布检查清单
 
 - [ ] `CHANGELOG.md` 已从 `Unreleased` 挪到版本号，日期正确
 - [ ] `APP_VERSION` 与 tag 的代际一致（现在是 V4 / `v4*`）
 - [ ] 该提交上 `pytest` 的相关结果已知；这次发布碰过的前端也跑过测试或构建
-- [ ] 仓库扫描没有 `listing` xlsx、`lingxing.json`、`app_data/`、`realdata/`
+- [ ] 上面的 `forbidden_real_hits` 打印 `none`
+- [ ] `pytest tests/release/test_s9step5_release.py tests/release/test_portable_package.py` 通过
+- [ ] 仓库里没有准备发布的 `lingxing.json`、`app_data/`、`realdata/`
 - [ ] tag 已推送，Portable Windows package 成功
 - [ ] 内层 zip 的 SHA256、字节数与该次 Actions 摘要一致
 - [ ] Release 正文写了哈希和运行链接
