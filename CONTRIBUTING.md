@@ -91,6 +91,21 @@ python scripts/smoke_e2e.py
 
 Windows 上可以用 `backend\.venv\Scripts\python.exe scripts\smoke_e2e.py`。
 
+## DEMO 盲跑（≤45 分钟）
+
+完整点击顺序在 [docs/使用说明.md](docs/使用说明.md) 的「DEMO 盲跑（≤45 分钟）」。下面这几步可以直接照抄。DEMO-ORDER / DEMO-SKU 不可报关实单，标成「不可实单」。不要提交真实批次，不要 Publish。
+
+1. 样表：源码打开 `backend/templates/发货录入样表.xlsx`。便携包里没有这份文件；改用包内 `templates/产品信息表_示例.csv`，或在「1 录入」点「下载录入样表(.xlsx)」（应用内 EXAMPLE）。下载下来若是空白行，改贴下面这一行。
+2. 录入 / 导入。贴进「1 录入」的智能文本，点「本地规则解析」；或上传填了同一行的样表。
+
+```text
+DEMO-SKU-001,X0DEMO0001,120,20,45,32,28,0.35,0.5
+```
+
+3. 最小排箱可做：打开「2 排箱」，点「确认锁定方案并下一步」。做不到就记下卡点。
+4. 一家发票预览。打开「5 发票」。只选 SEND 或只选九方，再点「预览」。没有合成货件 CSV 时按钮不可点，不要改用真实批次。
+5. Step 5 报关预览。打开「6 报关」，订单号填 `DEMO-ORDER`，点「生成预览」。缺出口商红字可演示。出厂未填出口商时，红字为「尚未配置出口商档案」。
+
 ## 提交说明
 
 用完整的句子写出这次做了什么。近期提交是英文祈使句，例如 `Compare qiluo rows by box segment and skip rebox CSVs.` 中文也可以，只要别人半年后还读得懂。一个提交一件事。
