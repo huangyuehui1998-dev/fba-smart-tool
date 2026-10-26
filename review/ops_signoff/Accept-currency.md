@@ -29,7 +29,7 @@
 | ops 口径源 | **OPS5-O3-B**（链 **OPS3-O3** / **OPS4-O5**） |
 | 状态 | **壳就绪 · 待测** |
 | 落盘时间 | **2026-10-26 14:31:45 EDT**（America/New_York, UTC-4） |
-| 实现锚点 | branch `u5-m2-p2-currency-accept`（PR URL 待开出后回填；≠币种已关 ≠Publish） |
+| 实现锚点 | branch `u5-m2-p2-currency-accept` · 实现 `062681b87d393e49b860c951890508b7dd6ff011` · PR https://github.com/huangyuehui1998-dev/fba-smart-tool/pull/31 · 夹具 `backend/tests/fixtures/synthetic/currency/rows.json`（≠币种已关 ≠Publish） |
 | 失败回打 | **code**（实现）/ **test**（夹具+断言）/ **ops**（对照与文档三行） |
 | ≠ Publish | **确认** |
 | 挡宣称 | **「币种已关」** — 本壳未全绿前禁称 |
@@ -115,7 +115,7 @@
 | 美国站缺汇率 409 | `_待填_` | **test** |
 | 币种为空 skipped | `_待填_` | **test** |
 | 文档三行 checklist 路径 | `docs/使用说明.md`「零售价币种（美国站申报）」；`docs/OPEN_SOURCE.md`「申报币种（美国站）」 | **code** / **ops** |
-| 实现 tip / PR | branch `u5-m2-p2-currency-accept`（PR URL 待回填） | **code** |
+| 实现 tip / PR | `062681b87d393e49b860c951890508b7dd6ff011` · https://github.com/huangyuehui1998-dev/fba-smart-tool/pull/31 | **code** |
 | 挡宣称句出现位置 | 本页标题 / §6 签字区 / 未来短报告 | ops |
 
 ---
