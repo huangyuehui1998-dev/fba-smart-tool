@@ -31,7 +31,7 @@
 | ops 口径源 | **OPS5-O3-C**（链 **OPS3-O4** / **OPS4-O5** / **OPS2-O4**） |
 | 状态 | **壳就绪 · 待测** |
 | 落盘时间 | **2026-10-26 15:19:30 EDT**（America/New_York, UTC-4） |
-| 实现锚点 | _待 code 回填 tip / PR_ |
+| 实现锚点 | branch `u5-m2-p3-box-weight-accept` · 实现 `fc9baf5308c71eae4ad50d7174e7211cfa708edd` · PR https://github.com/huangyuehui1998-dev/fba-smart-tool/pull/32 · 夹具 `backend/tests/fixtures/synthetic/box_weight/cases.json`（≠箱规超重已关 ≠Publish） |
 | 失败回打 | **code**（实现）/ **test**（边界夹具+断言）/ **ops**（对照与文档一句） |
 | ≠ Publish | **确认** |
 | 挡宣称 | **「箱规超重已关」/「箱规向导口径已对齐」** — 本壳未全绿前禁称 |
@@ -113,7 +113,7 @@
 | >70 → 阻断 | `_待填：422/400 日志_` | **test** |
 | UI↔API 同口径一行 | `_待填_` | **test** / **ops** |
 | 文档一句路径 | `docs/使用说明.md`「手填 / 批量编辑」；`packaging/使用说明.txt`「日常发货怎么走」同句 | **code** / **ops** |
-| 实现 tip / PR | `_待 code 回填_` | **code** |
+| 实现 tip / PR | `fc9baf5308c71eae4ad50d7174e7211cfa708edd` · https://github.com/huangyuehui1998-dev/fba-smart-tool/pull/32 | **code** |
 | 挡宣称句出现位置 | 本页标题 / §6 签字区 | ops |
 
 ---
