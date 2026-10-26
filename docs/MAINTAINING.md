@@ -34,6 +34,7 @@
 - `main` 是别人克隆后默认看到的线，也是最终发布的线。
 - 功能用单独分支，经 PR 进入 `main`。
 - 不要 force-push `main`。功能分支在已经有人审过之后，也不要改写已推送的提交，除非作者和审阅者都同意，并在 PR 里说明。
+- `main` 已开启分支保护：必须通过的检查是 Backend pytest 和 Frontend build；禁止 force-push；合并后删除来源分支（`delete_branch_on_merge`）。`backend/requirements.lock.txt` 和 `backend/requirements-dev.lock.txt` 按 Python 3.12 生成，与 CI、便携包一致。分支保护是先前的仓库设置，这次只记在这里，不改设置。
 - 长生命周期的整理分支可以存在。PR 说明里写清基线，避免把无关的本地脚本一起提交。
 - 带注释的 Git tag（`v4*`）表示「这一个提交要出包」。打 tag 的步骤在 [RELEASING.md](RELEASING.md)。不要在未准备发布时推 tag。
 
