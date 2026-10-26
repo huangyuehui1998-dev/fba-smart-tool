@@ -458,6 +458,7 @@ def _simulate_price(remote: Dict[str, Any], existing: Optional[Dict[str, Any]], 
         _track_nonpromo,
         normal_price,
         price_history_hint,
+        listing_price_eligible_for_us_declared,
         promo_info,
         regular_price_in_window,
         resolve_declared_price,
@@ -479,13 +480,18 @@ def _simulate_price(remote: Dict[str, Any], existing: Optional[Dict[str, Any]], 
                           ("regular_price", remote.get("regular_price"), r_rp)):
         if raw not in (None, "") and num is None and key not in issue_fields:
             warnings.append(("领星售价" if key == "listing_price" else "领星常规价") + f"“{str(raw)[:20]}”无效，未写入，保留原值")
+    price_ok = listing_price_eligible_for_us_declared(remote)
     sets: Dict[str, Any] = {}
-    if "listing_price" in write and r_lp is not None:
+    if "listing_price" in write and r_lp is not None and not price_ok:
+        warnings.append("非美国站或非美元售价不能作为美国站申报价")
+    if "listing_price" in write and r_lp is not None and price_ok:
         sets["listing_price"] = r_lp
         if remote.get("listing_price_currency"):
             sets["listing_price_currency"] = remote["listing_price_currency"]
+        if remote.get("listing_price_site"):
+            sets["listing_price_site"] = remote["listing_price_site"]
         sets["listing_price_basis"] = remote.get("listing_price_basis") or "listing_price"
-    if "regular_price" in write and r_rp is not None:
+    if "regular_price" in write and r_rp is not None and price_ok:
         sets["regular_price"] = r_rp
         sets["regular_price_at"] = _now()  # 与 set_product_fields 一致：本次写入的常规价，采集时间就是现在（D-16）
     if "listing_price" in sets:
@@ -656,13 +662,22 @@ def apply_lingxing_field_patch(sku: str, fields: Iterable[str], remote: Dict[str
     价格字段（售价、常规价）各自按勾选写入（S9-step2-fix A1：常规价单独变化也写）；无效价格不写，记 skipped_invalid。
     返回 {written, skipped_locked, skipped_invalid}。
     """
-    from fba_tool.product_fields import OWN_FIELDS, SOURCE_LINGXING, SOURCE_MANUAL, mark_field_sources, set_product_fields
+    from fba_tool.product_fields import (
+        OWN_FIELDS,
+        SOURCE_LINGXING,
+        SOURCE_MANUAL,
+        listing_price_eligible_for_us_declared,
+        mark_field_sources,
+        set_product_fields,
+    )
 
     key = str(sku or "").strip()
     allowed = [f for f in fields if f in CONFIRM_FIELDS and f not in _NEVER_FROM_LINGXING]
     result: Dict[str, List[str]] = {"written": [], "skipped_locked": [], "skipped_invalid": []}
     if not key or not allowed:
         return result
+    # 加拿大站 / 非美元售价可以留在预览里，但不能写进美国站申报所用的售价。
+    block_foreign_price = not listing_price_eligible_for_us_declared(remote)
     existing = get_product_by_sku(key)
     sources = (existing or {}).get("field_sources") or {}
     rec: Dict[str, Any] = dict(existing) if existing else {"sku": key}
@@ -672,6 +687,9 @@ def apply_lingxing_field_patch(sku: str, fields: Iterable[str], remote: Dict[str
     for field in allowed:
         if sources.get(field) == SOURCE_MANUAL and field not in PRICE_FIELDS:
             result["skipped_locked"].append(field)
+            continue
+        if block_foreign_price and field in (*PRICE_FIELDS, "listing_price_site"):
+            result["skipped_invalid"].append(field)
             continue
         if field in PRICE_FIELDS:
             num = _num_or_none(remote.get(field))

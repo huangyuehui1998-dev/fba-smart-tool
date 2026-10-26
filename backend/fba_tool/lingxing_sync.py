@@ -174,7 +174,13 @@ def listing_to_product(row: Dict[str, Any], synced_at: str) -> Optional[Dict[str
         return None
     from fba_tool.lingxing_adapter import map_listing_row
 
-    mapped = map_listing_row(row)
+    mapped = map_listing_row(row) or {}
+    # 空币种不标成 USD，售价也不进申报链路（与 import_retail_rows 的「币种为空」跳过一致）。
+    price = mapped.get("listing_price")
+    currency = str(mapped.get("listing_price_currency") or "").strip()
+    if price is not None and not currency:
+        price = None
+    market = _as_str(pick_field(row, "marketplace", "country", "site_name_cn"))
     extra = {
         k: row.get(k)
         for k in (
@@ -208,11 +214,13 @@ def listing_to_product(row: Dict[str, Any], synced_at: str) -> Optional[Dict[str
         "extra_data": {"lingxing": extra} if extra else None,
         "lingxing_synced_at": synced_at,
         "data_source": "lingxing",
-        "listing_price": (mapped or {}).get("listing_price"),
-        "listing_price_currency": (mapped or {}).get("listing_price_currency"),
-        "listing_price_basis": (mapped or {}).get("listing_price_basis"),
+        "listing_price": price,
+        "listing_price_currency": currency or None,
+        "listing_price_basis": mapped.get("listing_price_basis"),
         "regular_price": _price_or_none(row.get("regular_price")),  # D-12：常规价，用来识别促销
     }
+    if market:
+        rec["listing_price_site"] = market
     from fba_tool.policy import map_category_name
 
     mapped_category = map_category_name(

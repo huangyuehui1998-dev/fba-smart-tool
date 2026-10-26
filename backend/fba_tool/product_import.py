@@ -60,6 +60,11 @@ def _pick(row: Dict[str, Any], aliases: List[str]) -> Any:
     return None
 
 
+def _header_present(row: Dict[str, Any], aliases: List[str]) -> bool:
+    wanted = {_norm_header(a) for a in aliases}
+    return any(_norm_header(k) in wanted for k in row)
+
+
 def _issue(row: int, field: str, value: Any, message: str) -> Dict[str, Any]:
     return {"row": row, "field": field, "value": "" if value is None else str(value), "message": message}
 
@@ -128,14 +133,25 @@ def parse_listing_rows(data: bytes, file_name: str) -> Tuple[List[Dict[str, Any]
                 errors.append(_issue(row_no, "listing_price", raw_price,
                                      f"第{row_no}行价格“{raw_price}”无效：{reason or '不是大于 0 的数字'}，这一行已跳过"))
                 continue
-            values["listing_price"] = price
-            values["listing_price_basis"] = "listing_price"
-            cur = _pick(row, _listing_aliases("listing_price_currency"))
+            currency_aliases = _listing_aliases("listing_price_currency")
+            cur = _pick(row, currency_aliases)
             try:
-                values["listing_price_currency"] = normalize_currency(cur) or "USD"
+                code = normalize_currency(cur)
             except ValueError as exc:
                 errors.append(_issue(row_no, "listing_price_currency", cur, f"第{row_no}行{exc}"))
                 continue
+            # 币种列在但单元格为空：与 import_retail_rows 一样跳过，不默认 USD。
+            # 整张表没有币种列的旧 Listing 导入（只有 MSKU/价格）仍记 USD，那不是零售站点表。
+            if _header_present(row, currency_aliases) and not code:
+                errors.append(_issue(row_no, "listing_price_currency", cur, f"第{row_no}行币种为空，未写入"))
+                continue
+            # 这张表没有国家列，不能判断是不是美国站，也不能在这里换汇。非 USD 不写入售价。
+            if code and code != "USD":
+                errors.append(_issue(row_no, "listing_price_currency", code, f"第{row_no}行价格币种是 {code}，不是 USD，未写入"))
+                continue
+            values["listing_price"] = price
+            values["listing_price_basis"] = "listing_price"
+            values["listing_price_currency"] = code or "USD"
         for f in ("fnsku", "asin", "local_name"):
             v = _pick(row, _listing_aliases(f))
             if v not in (None, ""):

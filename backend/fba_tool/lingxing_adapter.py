@@ -142,10 +142,11 @@ def normalize_currency(value: Any) -> Optional[str]:
 
 
 def _safe_currency(cur: Any) -> str:
+    """空币种返回空串，不默认 USD。认不出的符号原样保留，不冒充美元。"""
     try:
-        return normalize_currency(cur) or "USD"
+        return normalize_currency(cur) or ""
     except ValueError:
-        return str(cur).strip().upper()  # 未知币种原样保留，不冒充 USD
+        return str(cur).strip().upper()
 
 
 def map_listing_row(row: Dict[str, Any]) -> Optional[Dict[str, Any]]:

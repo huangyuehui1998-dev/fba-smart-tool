@@ -431,6 +431,33 @@ def _valid_price(v: Any) -> Optional[float]:
     return parse_price(v)
 
 
+def listing_price_eligible_for_us_declared(master: Optional[Dict[str, Any]]) -> bool:
+    """美国站申报能否采用这条售价。
+
+    站点和币种都空：历史行仍按 D-01 采用 listing_price（导入当时没写这两列）。
+    站点明确不是美国，或币种明确不是 USD：不能当成美国站申报价。
+    空币种不在这里当成 USD；零售导入和同步在写入前就跳过。
+    """
+    if not master:
+        return False
+    site = str(master.get("listing_price_site") or "").strip()
+    if site:
+        from fba_tool.declared_value import is_target_site
+
+        if not is_target_site(site, site):
+            return False
+    raw = master.get("listing_price_currency")
+    if raw in (None, ""):
+        return True
+    from fba_tool.lingxing_adapter import normalize_currency
+
+    try:
+        code = normalize_currency(raw)
+    except ValueError:
+        return False
+    return code == "USD"
+
+
 def resolve_declared_price(master: Optional[Dict[str, Any]]) -> Tuple[Optional[float], str]:
     """申报价（用户 2026-10-16 定，按实时售价报；D-12 修订：促销期按正常价）：
     1. 领星 listing_price（来源 lingxing）；若比正常价低 5% 以上（促销），改报正常价
@@ -438,12 +465,17 @@ def resolve_declared_price(master: Optional[Dict[str, Any]]) -> Tuple[Optional[f
     2. 手填 declared_value（来源 manual）——只在领星没有 listing_price 时用
     3. 领星 price / landed_price 兜底（来源 lingxing_price / lingxing_landed_price）
     4. 旧 declared_value（来源 legacy，需警告）
+
+    目标申报站是美国。listing_price_site 不是美国，或 listing_price_currency 不是 USD 时，
+    这条售价不进入上面的 1/3（含促销正常价），接着看手填 / 旧申报价。
     """
     if not master:
         return None, ""
     sources = master.get("field_sources") or {}
     lp = _valid_price(master.get("listing_price"))  # S9-step2-fix A3：0、负数、NaN、inf、非数字都当没有售价，不申报 0/NaN
-    master = dict(master, listing_price=lp)  # 无效 → None；字符串 → 解析后的数
+    if not listing_price_eligible_for_us_declared(master):
+        lp = None
+    master = dict(master, listing_price=lp)  # 无效或非美国站售价 → None；字符串 → 解析后的数
     basis = str(master.get("listing_price_basis") or "").strip() or PRICE_BASIS_PRIMARY
     if lp not in (None, "") and basis == PRICE_BASIS_PRIMARY:
         promo = promo_info(master)  # D-12（修订 D-01）：促销期按正常价申报，并提示

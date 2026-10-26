@@ -77,6 +77,8 @@ def parse_listing_xlsx(data: bytes, filename: str = "", column_map: Optional[Dic
             continue
         site, expect = _site_currency(record.get("country"), record.get("shop"))
         currency = str(record.get("currency") or "").strip().upper()
+        # Accept C4 的 xlsx 路径：已知站点币种对不上就报异常并跳过，不换汇、不写入。
+        # 美国站非 USD 的 ÷fx / 缺汇率 409 只在 declared_value.import_retail_rows。
         if expect and currency and currency != expect:
             anomalies.append({
                 "row": offset,
