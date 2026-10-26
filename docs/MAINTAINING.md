@@ -24,7 +24,7 @@
 2. **扫文件清单。** 出现 `.env`（示例文件除外）、`lingxing.json`、`*.db`、`app_data/`、`realdata/`、文件名带 `listing` 的 xlsx、密钥样值，直接请作者拿掉。不要用白名单把真实导出留在仓库里。
 3. **看行为。** 发票数量、箱号、申报价、仓库地址、报关栏位，要有合成夹具。测试失败时 skip 只适用于「本机私有文件没提供」，不适用于逻辑错误。改工作流入口时，界面名字（「5 发票」）和 step id（4.5）要一起核对，两套数字不是一回事。
 4. **跑相关测试。** 至少跑作者点名的 pytest。动到发布清单时跑 `backend/tests/release/test_s9step5_release.py`。动到前端时看 vitest。
-5. **看便携包工作流。** PR 上的 Portable Windows package 只证明这台构建机能打出 zip。它不会创建 GitHub Release，也不代替人工打开 exe。
+5. **看便携包工作流。** 审 PR 先看 Linux 上的 `ci`（pytest 和前端 build）。发布包看 Portable Windows package：它只证明这台构建机能打出 zip。它不会创建 GitHub Release，也不代替人工打开 exe。
 6. **决定。** 能合就合。要改就指出哪一段行为和期望不符。不要在别人的 PR 里夹带无关重构。
 
 提交说明保持可读。一串 WIP 可以请作者整理成几条完整句子后再合。合进 `main` 之后不要为了改字而 force-push。

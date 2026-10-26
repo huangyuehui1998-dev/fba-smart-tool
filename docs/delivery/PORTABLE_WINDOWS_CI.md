@@ -61,9 +61,12 @@ zip 内（正斜杠，中文名带 UTF-8 标志）：
 
 ## 什么时候会跑
 
-1. **Pull request**（包括 draft）。打开或更新 PR 就会打一版，产物挂在那次运行上。
-2. **Actions → Run workflow**（`workflow_dispatch`）。这个按钮只在工作流文件已经在默认分支 `main` 上之后才会出现。出现之后：选要打的分支，再点 **Run workflow**。
-3. **推送 tag**，名字匹配 `v4*`（例如 `v4`、`v4.0.0`）。
+1. **Pull request**（包括 draft），且改动碰到打包相关路径：`backend/**`、`frontend/**`、`packaging/**`、`run_app.py`、便携包脚本（`scripts/build_standalone.ps1` 等），或 `.github/workflows/portable-windows.yml` 本身。产物挂在那次运行上。
+   同一条 `paths` 里的反向规则（`!`，GitHub 不允许在同一事件上同时写 `paths` 和 `paths-ignore`）盖住 `docs/**`、`*.md`（含 `**/*.md`）和 `review/**`。只改这些路径时不跑，避免空烧大约 90 分钟的 Windows 构建。
+2. **Actions → Run workflow**（`workflow_dispatch`）。手动触发不受路径过滤。这个按钮只在工作流文件已经在默认分支 `main` 上之后才会出现。出现之后：选要打的分支，再点 **Run workflow**。
+3. **推送 tag**，名字匹配 `v4*`（例如 `v4`、`v4.0.0`）。tag 推送不受路径过滤，总会构建。
+
+PR 上的 Portable Windows package 不是 GitHub Release。挂到 Release 的 zip 来自你核对 SHA256 的那一次运行（通常是 tag 触发的那次）。审 PR 的 Linux 检查看 `ci` 工作流（pytest 和前端 build）。
 
 在工作流还没进 `main` 之前，用第 1 条：打开 PR 的 Checks，或 Actions 列表里那次 **Portable Windows package** 运行。不要为了按按钮先合并。
 
@@ -84,7 +87,7 @@ CI **不会**执行这一步。人工模拟测试通过后再做。
 1. 用上面下载的内层 zip，核对 SHA256 与那次 Actions 摘要一致。
 2. 打开仓库 **Releases** → **Draft a new release**。
 3. 选择已有 tag，或新建 tag（`v4.0.0` 这类 `v4*`）。新建 tag 会再触发一次打包；测试用的是哪一次运行的 zip，Release 上就挂哪一个，不要换成在 Linux 上重打的包。
-4. 把 `FBA_Smart_Tool_V4_便携版.zip` 拖进 **Attach binaries**。不要解压后再压缩。
+4. 把内层 zip **只改文件名**为 ASCII `FBA_Smart_Tool_V4_Portable.zip`，再拖进 **Attach binaries**。不要解压后再压缩。改名不改变字节，SHA256 与 Actions 内层 `FBA_Smart_Tool_V4_便携版.zip` 相同。Actions artifact 的下载名仍是中文 `FBA_Smart_Tool_V4_便携版.zip`。
 5. 先存 **Draft**。模拟测试没问题再 **Publish**。
 6. 不要把 `realdata`、`app_data`、领星密钥或发票历史另附到 Release 上。
 
