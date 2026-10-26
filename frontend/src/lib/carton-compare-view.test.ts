@@ -9,6 +9,7 @@ import {
   PAGE_PADDING_CLASS,
   TABLE_HEAD_CLASS,
   TABLE_SCROLL_CLASS,
+  billWarningLines,
   compareColumns,
   dupExcludedNote,
   legacyImportMessage,
@@ -48,7 +49,10 @@ describe("carton compare view", () => {
   });
 
   it("uses a confirm dialog and a sticky scrolling table", () => {
-    const source = readFileSync(new URL("../components/carton-compare-workspace.tsx", import.meta.url), "utf8");
+    const source = readFileSync(
+      new URL("../components/carton-compare-workspace.tsx", import.meta.url),
+      "utf8",
+    );
     expect(CONFIRM_NEW_SPEC_TITLE).toBe("生成新箱规版本");
     expect(TABLE_SCROLL_CLASS).toContain("overflow-x-auto");
     expect(TABLE_HEAD_CLASS).toContain("sticky");
@@ -60,6 +64,17 @@ describe("carton compare view", () => {
     expect(source).toContain("TABLE_SCROLL_CLASS");
     expect(source).toContain("TABLE_HEAD_CLASS");
     expect(source).toContain("PAGE_PADDING_CLASS");
+    expect(source).toContain("billWarningLines");
+    expect(source).toContain('data-testid="bill-warnings"');
+    expect(source).toContain("text-amber-700");
+    expect(source).toContain("border-amber-300");
+  });
+
+  it("passes bill_warnings through for the amber banner (G2+G3)", () => {
+    const warning = "与货代账单不一致，待确认";
+    expect(billWarningLines({ bill_warnings: [warning] })).toEqual([warning]);
+    expect(billWarningLines({ bill_warnings: ["  "] })).toEqual([]);
+    expect(billWarningLines({})).toEqual([]);
   });
 });
 

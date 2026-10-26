@@ -17,6 +17,7 @@ import {
   PAGE_PADDING_CLASS,
   TABLE_HEAD_CLASS,
   TABLE_SCROLL_CLASS,
+  billWarningLines,
   compareColumns,
   statusClass,
   type CompareReport,
@@ -36,14 +37,29 @@ export function CartonCompareWorkspace({
   const reference = report.summary?.reference ?? "";
   const dupNote = report.summary?.dup_note ?? "";
   const dupDetail = report.summary?.dup_detail ?? dupNote;
+  const billWarnings = billWarningLines(report);
 
   return (
     <div className={cn("space-y-4", PAGE_PADDING_CLASS)}>
       {report.message ? <p className="text-sm text-muted-foreground">{report.message}</p> : null}
+      {billWarnings.length > 0 ? (
+        <ul
+          className="list-disc space-y-0.5 rounded-md border border-amber-300 bg-amber-50 py-2 pl-8 pr-3 text-sm text-amber-700"
+          data-testid="bill-warnings"
+        >
+          {billWarnings.map((warning, index) => (
+            <li key={`${warning}-${index}`}>{warning}</li>
+          ))}
+        </ul>
+      ) : null}
       {headline ? <p className="text-sm font-medium">{headline}</p> : null}
       {reference ? <p className="text-sm">{reference}</p> : null}
       {dupNote ? (
-        <a href="#carton-quality" data-testid="dup-excluded-note" className="text-sm text-amber-700 underline">
+        <a
+          href="#carton-quality"
+          data-testid="dup-excluded-note"
+          className="text-sm text-amber-700 underline"
+        >
           {dupDetail || dupNote}
         </a>
       ) : null}
@@ -73,7 +89,13 @@ export function CartonCompareWorkspace({
                   const value = row[column as keyof typeof row];
                   const abnormal = column === "状态" && row.状态 === "异常";
                   return (
-                    <td key={column} className={cn("border-b px-2 py-1", abnormal && (row.status_class || ABNORMAL_CLASS || statusClass(row.状态)))}>
+                    <td
+                      key={column}
+                      className={cn(
+                        "border-b px-2 py-1",
+                        abnormal && (row.status_class || ABNORMAL_CLASS || statusClass(row.状态)),
+                      )}
+                    >
                       {value == null ? "" : String(value)}
                     </td>
                   );
@@ -97,7 +119,9 @@ export function CartonCompareWorkspace({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{CONFIRM_NEW_SPEC_TITLE}</AlertDialogTitle>
-            <AlertDialogDescription>新版本来源是实测均值，不会自动设为默认箱规。</AlertDialogDescription>
+            <AlertDialogDescription>
+              新版本来源是实测均值，不会自动设为默认箱规。
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>

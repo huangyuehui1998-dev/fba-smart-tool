@@ -967,6 +967,12 @@ def _measurements(conn, fba_id: str, source: str) -> List[Dict[str, Any]]:
     return _rows(conn, sql, args)
 
 
+def _ticket_only_bill_warnings(bills: Sequence[Dict[str, Any]], divisor) -> List[str]:
+    """整票响应也带回 bill_warnings。没有逐箱过机行时为空，不把申报重改成账单。"""
+    tickets = [{"bill_kg": row.get("bill_chargeable_kg") or 0, "rows": []} for row in bills]
+    return bill_warnings(tickets, divisor)
+
+
 def compare_carton(fba_id: str = "", batch: str = "", source: str = "", threshold: Any = None) -> Dict[str, Any]:
     from fba_tool.carton_policy import dim_divisor, source_label
 
@@ -992,6 +998,7 @@ def compare_carton(fba_id: str = "", batch: str = "", source: str = "", threshol
             "summary": {},
             "dim_divisor": float(divisor),
             "dim_source_label": source_label(measured_by),
+            "bill_warnings": _ticket_only_bill_warnings(bills, divisor),
         }
     if not measured_rows:
         declared_sum = sum((q(row.get("gross_kg") or 0, 3) for row in declared_rows), Decimal("0"))
@@ -1013,6 +1020,7 @@ def compare_carton(fba_id: str = "", batch: str = "", source: str = "", threshol
             "summary": summary,
             "dim_divisor": float(divisor),
             "dim_source_label": source_label(measured_by),
+            "bill_warnings": _ticket_only_bill_warnings(bills, divisor),
         }
     declared_by_id = {str(row["fba_box_id"]).upper(): row for row in declared_rows}
     measured_ids = [str(row.get("manual_box_id") or row.get("fba_box_id") or "") for row in measured_rows]
