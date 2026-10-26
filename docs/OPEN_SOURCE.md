@@ -87,6 +87,34 @@ CI 不需要任何客户表就能跑合成测试。便携包白名单在 `packag
 
 在把仓库可见性改成公开之前，维护者需要单独决定：是否接受历史里仍能检出该工作簿，或者另做一次经过同意的历史清理。可见性不在本次改动里切换。
 
+## 常见六问
+
+### Q1. Portable.zip 与便携版
+
+`FBA_Smart_Tool_V4_Portable.zip` 的 SHA256 是 `616e939e6beeeb647851b9ecaf91406c89b592566da5ea564e4489b80565bc63`。Actions 内层文件名可能是 `FBA_Smart_Tool_V4_便携版.zip`。
+
+脚注（双名）：二者在同一次构建里便携版同字节；只改文件名，不要解压后再压缩。核对步骤见 [RELEASING.md](RELEASING.md)。
+
+### Q2. 谁可以 Publish
+
+仅维护者 Publish；ops/测试不 Publish。便携包工作流只上传 Actions artifact，不创建 GitHub Release。运营和测试核对到这里就停，不要把 Draft 点出去。
+
+### Q3. 真实批次放哪
+
+真实批次不入库；用 DEMO 样表/示例。货件批次、领星在售导出留在本机。讨论和盲跑用 DEMO-SKU、DEMO-ORDER，以及产品信息表示例。
+
+### Q4. 命名 FBA 与刷箱
+
+命名 FBA 已交付 ≠ 刷箱同等验收。按命名货件号交付，不表示刷箱、待分配或 FIST 已按同一标准验收。这里不给刷箱打勾。
+
+### Q5. git 历史与扫描
+
+git 历史不改写；发布前跑 forbidden 扫描。不 force-push，也不重写已经公开的提交。`forbidden_real_hits` 把 `lingxing_listing_prices.xlsx`，以及文件名里带 `listing` 的 xlsx，当成失败。
+
+### Q6. STA 与 SP-API
+
+STA 不代传 / 不接 SP-API 写。软件可以导出和预检；上传到卖家中心仍由人做。不代替上传，也不调用 SP-API 去写货件。
+
 ## 社区期望
 
 - 用合成数据讨论问题。货件号、地址、售价、密钥留在本地。

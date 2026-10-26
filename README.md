@@ -14,6 +14,8 @@ Actions artifact 和构建输出里，内层 zip 仍可能显示中文名 `FBA_S
 
 解压后双击包里的 `启动FBA工具.bat`。使用步骤见 [`docs/使用说明.md`](docs/使用说明.md)。维护者打 tag、核对 SHA256 再发布的顺序见 [`docs/RELEASING.md`](docs/RELEASING.md)。
 
+六问不在本页展开，见 [`docs/OPEN_SOURCE.md`](docs/OPEN_SOURCE.md) 的「常见六问」。
+
 ## 这是什么
 
 运营同学每天要过几关：把货装进合规的箱子，对上亚马逊货件，按货代模板开发票，再整理报关资料。这些规则散落在表格、经验和各家货代的版式里，错一格往往要返工。
