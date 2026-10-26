@@ -6,11 +6,11 @@ Local-first tool for Amazon FBA packing, shipment checks, forwarder invoices, an
 
 ## 怎么拿到 Windows 便携版
 
-**在 v4.0.0 成为 Latest Release 之前，不要用页面上的 Latest。** 那时 Latest 仍是 [v3.3.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v3.3.0)（产品代际 **V3.3**），附件名是 `FBA_Smart_Tool_V3.3_Portable.zip`。不要把这一只当作 V4。
+日常使用打开 [GitHub Releases](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases)，下载 Latest [v4.0.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v4.0.0) 的 **`FBA_Smart_Tool_V4_Portable.zip`**。
 
-**状态 A（尚无 v4.0.0 Latest）**：日常用户暂时没有 GitHub Release 上的 V4 包可下。维护者从 Actions 里成功的 **Portable Windows package** 下载 artifact，取内层 **`FBA_Smart_Tool_V4_便携版.zip`**。GitHub 下载 artifact 时会再套一层 zip，里面那个同名文件才是便携包。这个工作流不会创建 Release。
+「Latest 仍是 v3.3.0、Release 上还没有 V4」这句已经过时。当前 Latest 就是 v4.0.0。更早的 [v3.3.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v3.3.0) 仍在列表里，附件是 `FBA_Smart_Tool_V3.3_Portable.zip`（产品代际 V3.3）。
 
-**状态 B（v4.0.0 已成为 Latest 之后）**：日常用户再到 [GitHub Releases](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases) 下载 `FBA_Smart_Tool_V4_便携版.zip`。
+Actions artifact 和构建输出里，内层 zip 仍可能显示中文名 `FBA_Smart_Tool_V4_便携版.zip`。Release 页面上的文件名是 `FBA_Smart_Tool_V4_Portable.zip`。来自同一个 tag 那次构建时，两份是同一批字节，用 SHA256 核对。
 
 解压后双击包里的 `启动FBA工具.bat`。使用步骤见 [`docs/使用说明.md`](docs/使用说明.md)。维护者打 tag、核对 SHA256 再发布的顺序见 [`docs/RELEASING.md`](docs/RELEASING.md)。
 
