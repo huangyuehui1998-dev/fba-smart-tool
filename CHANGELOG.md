@@ -8,6 +8,10 @@
 
 ## [Unreleased]
 
+### 变更
+
+- GitHub Release 附件是 `FBA_Smart_Tool_V4_Portable.zip`（与 `FBA_Smart_Tool_V4_便携版.zip` 同一份字节）。README、`llms.txt`、`docs/RELEASING.md` 已按这两个名字对齐。
+
 ## [4.0.0] - 2026-10-26
 
 ### 新增

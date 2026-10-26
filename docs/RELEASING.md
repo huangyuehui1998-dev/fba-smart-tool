@@ -1,6 +1,6 @@
 # 发布
 
-发布物是 Windows 便携包 `FBA_Smart_Tool_V4_便携版.zip`。构建只在 GitHub Actions 的 `windows-latest` 上做。工作流名称是 **Portable Windows package**（`.github/workflows/portable-windows.yml`）。
+发布物是 Windows 便携包。Actions 与本机构建写出的内层文件名是 `FBA_Smart_Tool_V4_便携版.zip`。挂到 GitHub Release 时，附件名用 ASCII：`FBA_Smart_Tool_V4_Portable.zip`。两个名字可以不同，以 SHA256 认定是同一份字节。构建只在 GitHub Actions 的 `windows-latest` 上做。工作流名称是 **Portable Windows package**（`.github/workflows/portable-windows.yml`）。
 
 工作流只上传 Actions artifact，**不会**创建 GitHub Release。人工核对 SHA256、并在 Windows 上打开过之后，再把 zip 挂到 Release 上。
 
@@ -31,7 +31,7 @@ git push origin v4.0.0
 2. 在 Artifacts 下载 `FBA_Smart_Tool_V4_便携版.zip`。GitHub 有时会再套一层 zip。
 3. 解开外层之后：
    - 若里面是同名的 `FBA_Smart_Tool_V4_便携版.zip`，这一只内层文件才是便携包。
-   - 若直接看到目录 `FBA_Smart_Tool` 和 `FBA_Smart_Tool.exe`，说明客户端已经解开了内层。回到 Artifacts 重新下载，上传时用内层那个 zip 本身。
+   - 若直接看到目录 `FBA_Smart_Tool` 和 `FBA_Smart_Tool.exe`，说明客户端已经解开了内层。回到 Artifacts 重新下载，上传时用内层那个 zip 本身。挂到 Release 前把文件名改成 `FBA_Smart_Tool_V4_Portable.zip`（见下文）。
 4. 运行摘要（Summary）里有 SHA256 和字节数。用这一次运行的摘要，不要用上一只包的哈希。
 
 不要使用缺少 `policy.default.json` 的旧包。那次失败的原因和后来核对过的构建，写在 [PORTABLE_WINDOWS_CI.md](delivery/PORTABLE_WINDOWS_CI.md)。
@@ -50,7 +50,7 @@ macOS / Linux：
 sha256sum FBA_Smart_Tool_V4_便携版.zip
 ```
 
-比对的是 **内层** zip 和 **同一次** Actions 摘要。大小写不敏感，空格和文件名不要算进哈希。
+比对的是 **内层** zip 和 **同一次** Actions 摘要。大小写不敏感，空格和文件名不要算进哈希。把文件改名为 `FBA_Smart_Tool_V4_Portable.zip` 再上传时，SHA256 不变。
 
 对不上就不要上传。在 Linux 上解压再压缩会破坏中文文件名，这种包也不能当发布物。
 
@@ -60,18 +60,22 @@ sha256sum FBA_Smart_Tool_V4_便携版.zip
 
 运营机器人从不点 Publish；只有维护者本人发布。
 
+上传的附件必须是 ASCII 文件名 **`FBA_Smart_Tool_V4_Portable.zip`**。Actions 内层仍可能叫 `FBA_Smart_Tool_V4_便携版.zip`。名字不同时，用 SHA256 确认是同一次运行的同一份字节。GitHub Release API 会去掉附件名里的中文；已发布的附件保持 Portable.zip，不要改回中文名。
+
+当前 Latest [v4.0.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v4.0.0) 的附件已是 `FBA_Smart_Tool_V4_Portable.zip`：SHA256 `616e939e6beeeb647851b9ecaf91406c89b592566da5ea564e4489b80565bc63`，139510166 字节，与 Actions 内层 `FBA_Smart_Tool_V4_便携版.zip` 相同。
+
 1. 打开仓库的 Releases → Draft a new release。
 2. 选刚刚推送的 tag（`v4.0.0` 这类）。不要在这里又新建一个不同的 tag，除非你有意再触发一次构建，并且随后只用新运行的 zip。
 3. 标题与 tag 一致。正文贴上 `CHANGELOG.md` 里该版本的条目，并写上：
 
    ```text
-   FBA_Smart_Tool_V4_便携版.zip
+   FBA_Smart_Tool_V4_Portable.zip
    SHA256: <与 Actions 摘要一致的哈希>
    字节数: <与摘要一致>
    Actions run: <那次运行的链接>
    ```
 
-4. 把内层 zip 拖进 Attach binaries。不要附 `realdata`、`app_data`、`lingxing.json` 或发票历史。
+4. 把核对过的内层 zip 以 **`FBA_Smart_Tool_V4_Portable.zip`** 放进 Attach binaries。本机文件若仍叫 `FBA_Smart_Tool_V4_便携版.zip`，只改文件名再上传，不要解压后重新压缩。不要附 `realdata`、`app_data`、`lingxing.json` 或发票历史。
 5. 先存 Draft。
 6. 在一台 Windows 上解压，双击 `启动FBA工具.bat` 或 `FBA_Smart_Tool.exe`，确认页面能打开、`_internal/config/policy.default.json` 一类出厂文件在包里。
 7. 模拟通过后再 Publish。Publish 仅维护者操作。
@@ -114,7 +118,7 @@ pytest tests/release/test_s9step5_release.py tests/release/test_portable_package
 - [ ] tag 已推送，Portable Windows package 成功
 - [ ] 内层 zip 的 SHA256、字节数与该次 Actions 摘要一致
 - [ ] Release 正文写了哈希和运行链接
-- [ ] Release 附件只有这只 zip
+- [ ] Release 附件只有 `FBA_Smart_Tool_V4_Portable.zip`（ASCII；SHA256 与内层 zip 一致）
 - [ ] Windows 上实际打开过
 - [ ] 仍然是 Draft，直到上面各项都勾完再 Publish。Publish 仅维护者操作
 
