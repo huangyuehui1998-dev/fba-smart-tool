@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 import sys
 import zipfile
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -220,3 +222,190 @@ def test_portable_pr_paths_do_not_filter_tags_or_dispatch():
     assert "paths" not in push
     assert "paths-ignore" not in push
     assert "branches" not in push
+
+
+_WHEN = datetime(2026, 10, 26, 17, 30, tzinfo=timezone.utc)
+_PINNED_USE = re.compile(
+    r"^\s*uses:\s+[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+@[0-9a-f]{40}\s+#\s+v\d+\.\d+\.\d+\s*$"
+)
+
+
+def _quiet_runner(args):
+    assert args[:2] == ["git", "describe"], args
+    return ""
+
+
+def test_buildinfo_records_tag_push_toolchain_and_run_id(tmp_path):
+    def runner(args):
+        raise AssertionError(args)
+
+    env = {
+        "GITHUB_SHA": "a" * 40,
+        "GITHUB_REF_TYPE": "tag",
+        "GITHUB_REF_NAME": "v4.0.1",
+        "GITHUB_RUN_ID": "4242",
+        "GITHUB_ACTIONS": "true",
+        "BUILDINFO_PYTHON_VERSION": "Python 3.12.8",
+        "BUILDINFO_NODE_VERSION": "v22.14.0",
+    }
+    info = FIN.resolve_buildinfo(env, now=_WHEN, runner=runner)
+    assert info["git_sha"] == "a" * 40
+    assert info["git_tag"] == "v4.0.1"
+    assert info["github_run_id"] == "4242"
+    assert info["built_at_utc"] == "2026-10-26T17:30:00Z"
+    assert info["python_version"] == "3.12.8"
+    assert info["node_version"] == "v22.14.0"
+    assert info["app_version"] == "V4"
+    text = FIN.format_buildinfo(info)
+    assert text.startswith("# ")
+    for key in FIN.BUILDINFO_FIELDS:
+        assert f"{key}=" in text
+    path = FIN.write_buildinfo(tmp_path, env=env, now=_WHEN)
+    assert path.name == "BUILDINFO.txt"
+    assert path.read_bytes().endswith(b"\n")
+    assert b"\r" not in path.read_bytes()
+    assert path.read_text(encoding="utf-8") == text
+
+
+def test_buildinfo_leaves_tag_empty_on_pull_request():
+    def runner(args):
+        assert args[:2] == ["git", "describe"]
+        return ""
+
+    info = FIN.resolve_buildinfo(
+        {
+            "GITHUB_ACTIONS": "true",
+            "GITHUB_SHA": "b" * 40,
+            "GITHUB_REF_TYPE": "branch",
+            "GITHUB_REF_NAME": "cursor/pin-actions-buildinfo",
+            "GITHUB_RUN_ID": "99",
+            "BUILDINFO_PYTHON_VERSION": "3.12.8",
+            "BUILDINFO_NODE_VERSION": "v22.14.0",
+        },
+        now=_WHEN,
+        runner=runner,
+    )
+    assert info["git_sha"] == "b" * 40
+    assert info["git_tag"] == ""
+    assert info["github_run_id"] == "99"
+
+
+def test_buildinfo_uses_exact_local_tag_and_unknown_node():
+    def runner(args):
+        if args[:3] == ["git", "describe", "--tags"]:
+            return "v4.0.1"
+        if args[:2] == ["git", "rev-parse"]:
+            return "c" * 40
+        raise AssertionError(args)
+
+    info = FIN.resolve_buildinfo(
+        {"BUILDINFO_PYTHON_VERSION": "3.12.8"},
+        now=_WHEN,
+        runner=runner,
+        which=lambda _name: None,
+    )
+    assert info["git_sha"] == "c" * 40
+    assert info["git_tag"] == "v4.0.1"
+    assert info["github_run_id"] == ""
+    assert info["node_version"] == "unknown"
+
+
+def test_buildinfo_rejects_multiline_fields():
+    with pytest.raises(SystemExit, match="换行"):
+        FIN.resolve_buildinfo(
+            {
+                "GITHUB_SHA": "ab\ncd",
+                "GITHUB_REF_TYPE": "tag",
+                "GITHUB_REF_NAME": "v4.0.1",
+                "BUILDINFO_PYTHON_VERSION": "3.12.8",
+                "BUILDINFO_NODE_VERSION": "v22.0.0",
+            },
+            now=_WHEN,
+            runner=_quiet_runner,
+        )
+
+
+def test_portable_zip_requires_buildinfo_fields(tmp_path):
+    assert f"{FIN.ZIP_PREFIX}/{FIN.BUILDINFO_NAME}" in FIN._required_zip_members()
+    out = tmp_path / "FBA_Smart_Tool"
+    out.mkdir()
+    (out / "FBA_Smart_Tool.exe").write_bytes(b"MZ")
+    env = {
+        "GITHUB_SHA": "d" * 40,
+        "GITHUB_REF_TYPE": "tag",
+        "GITHUB_REF_NAME": "v4.0.1",
+        "GITHUB_RUN_ID": "7",
+        "BUILDINFO_PYTHON_VERSION": "3.12.8",
+        "BUILDINFO_NODE_VERSION": "v22.14.0",
+    }
+    FIN.write_buildinfo(out, env=env, now=_WHEN)
+    zip_path = tmp_path / "with-buildinfo.zip"
+    FIN.write_utf8_zip(out, zip_path)
+    required = [f"FBA_Smart_Tool/{FIN.BUILDINFO_NAME}"]
+    FIN.verify_portable_zip(zip_path, required)
+    with zipfile.ZipFile(zip_path) as zf:
+        body = zf.read(required[0]).decode("utf-8")
+    assert "git_sha=" + "d" * 40 in body
+    assert "git_tag=v4.0.1" in body
+    assert "github_run_id=7" in body
+
+    broken = out / FIN.BUILDINFO_NAME
+    broken.write_text("git_sha=only\n", encoding="utf-8")
+    bad_zip = tmp_path / "bad-buildinfo.zip"
+    FIN.write_utf8_zip(out, bad_zip)
+    with pytest.raises(SystemExit, match="git_tag"):
+        FIN.verify_portable_zip(bad_zip, required)
+
+
+def test_workflow_actions_are_pinned_to_commit_shas():
+    names = sorted(path.name for path in (ROOT / ".github" / "workflows").glob("*.yml"))
+    assert names == ["ci.yml", "portable-windows.yml"]
+    for name in names:
+        text = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
+        uses = [line for line in text.splitlines() if "uses:" in line]
+        assert uses, name
+        for line in uses:
+            assert _PINNED_USE.match(line), line
+            assert "@v" not in line.split("#", 1)[0]
+    portable = (ROOT / ".github" / "workflows" / "portable-windows.yml").read_text(encoding="utf-8")
+    assert "BUILDINFO_NODE_VERSION" in portable
+    assert "BUILDINFO_PYTHON_VERSION" in portable
+    assert "BUILDINFO.txt" in portable
+    assert "fetch-tags: true" in portable
+    ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+    assert "TODO" in ci
+    assert "--deselect tests/release/test_techdebt.py::test_root_docs_are_not_duplicated" in ci
+    assert (
+        "--deselect tests/scan/test_no_real_data_in_repo.py::test_whitelist_templates_exist_and_text_scan_matches_baseline"
+        in ci
+    )
+    ps1 = (ROOT / "scripts" / "build_standalone.ps1").read_text(encoding="utf-8-sig")
+    assert "BUILDINFO.txt" in ps1
+    doc = (ROOT / "docs" / "delivery" / "PORTABLE_WINDOWS_CI.md").read_text(encoding="utf-8")
+    assert "BUILDINFO.txt" in doc
+    assert "616e939e" in doc
+    releasing = (ROOT / "docs" / "RELEASING.md").read_text(encoding="utf-8")
+    assert "BUILDINFO.txt" in releasing
+    maintaining = (ROOT / "docs" / "MAINTAINING.md").read_text(encoding="utf-8")
+    assert "commit SHA" in maintaining or "40 位" in maintaining
+    assert "secret scanning" in maintaining
+
+
+def test_dependabot_tracks_github_actions_only():
+    import yaml
+
+    path = ROOT / ".github" / "dependabot.yml"
+    text = path.read_text(encoding="utf-8")
+    data = yaml.safe_load(text)
+    updates = data["updates"]
+    assert [item["package-ecosystem"] for item in updates] == ["github-actions"]
+    assert updates[0]["directory"] == "/"
+    assert updates[0]["schedule"]["interval"] == "weekly"
+    for item in updates:
+        assert "auto-merge" not in item
+        assert "automerge" not in item
+    lowered = text.lower()
+    assert "npm" not in lowered
+    assert "pip" not in lowered
+    assert "auto-merge" not in lowered
+    assert "automerge" not in lowered

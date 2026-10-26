@@ -1,0 +1,8 @@
+# Weekly pull requests for GitHub Actions SHA bumps.
+# Other package ecosystems are out of scope. Merges stay manual.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly

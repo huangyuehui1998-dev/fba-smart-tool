@@ -64,6 +64,8 @@ sha256sum FBA_Smart_Tool_V4_便携版.zip
 
 当前 Latest [v4.0.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v4.0.0) 的附件已是 `FBA_Smart_Tool_V4_Portable.zip`：SHA256 `616e939e6beeeb647851b9ecaf91406c89b592566da5ea564e4489b80565bc63`，139510166 字节，与 Actions 内层 `FBA_Smart_Tool_V4_便携版.zip` 相同。
 
+从下一只发布（`v4.0.1` 起）开始，内层 zip 含 `FBA_Smart_Tool/BUILDINFO.txt`（git sha、tag、Actions run id、UTC 时间、Python 与 Node 版本）；v4.0.0 没有这个文件，不要为它重打或移动 tag。字段说明见 [PORTABLE_WINDOWS_CI.md](delivery/PORTABLE_WINDOWS_CI.md)。
+
 1. 打开仓库的 Releases → Draft a new release。
 2. 选刚刚推送的 tag（`v4.0.0` 这类）。不要在这里又新建一个不同的 tag，除非你有意再触发一次构建，并且随后只用新运行的 zip。
 3. 标题与 tag 一致。正文贴上 `CHANGELOG.md` 里该版本的条目，并写上：
@@ -117,6 +119,7 @@ pytest tests/release/test_s9step5_release.py tests/release/test_portable_package
 - [ ] 仓库里没有准备发布的 `lingxing.json`、`app_data/`、`realdata/`
 - [ ] tag 已推送，Portable Windows package 成功
 - [ ] 内层 zip 的 SHA256、字节数与该次 Actions 摘要一致
+- [ ] `v4.0.1` 及以后：内层 zip 有 `FBA_Smart_Tool/BUILDINFO.txt`，其中 `git_sha` 与这次 tag 的提交一致（v4.0.0 没有该文件）
 - [ ] Release 正文写了哈希和运行链接
 - [ ] Release 附件只有 `FBA_Smart_Tool_V4_Portable.zip`（ASCII；SHA256 与内层 zip 一致）
 - [ ] Windows 上实际打开过
