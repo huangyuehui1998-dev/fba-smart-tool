@@ -443,7 +443,15 @@ def import_retail_rows(
     fx_by_pair: Optional[Dict[str, Any]] = None,
     synced_at: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """站点过滤后再匹配产品库。非美国站即使有汇率也不写入。"""
+    """零售导入（Accept C4 的换算路径）。先滤站点，再匹配产品库。
+
+    美国站非 USD：用 fx_by_pair 里的「币种/USD」换成美元再写入；缺汇率或汇率 ≤ 0
+    抛 FX_RATE_REQUIRED（路由层 409）。非美国站整行跳过（「非目标站点」），有汇率也不写。
+    币种为空跳过，不默认 USD。
+
+    领星 xlsx 预览不走这里。lingxing_listing_xlsx.parse_listing_xlsx 对已知站点的错币种
+    只报「价格币种应为 USD/CAD」并跳过该行，不在 xlsx 路径上静默换汇。
+    """
     fx_by_pair = fx_by_pair or {}
     parsed: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []

@@ -297,6 +297,35 @@ def test_listing_xlsx_round_trip_and_forbidden_names():
     assert module.forbidden_real_hits(path.parents[1]) == []
 
 
+def test_currency_accept_fixture_retail_rows():
+    """U5-M2-P2 夹具锚点。xlsx 异常文案和申报价闸门在 tests/v4/test_v4_currency_accept.py。"""
+    import json
+    from pathlib import Path
+
+    payload = json.loads(
+        (Path(__file__).resolve().parent / "tests/fixtures/synthetic/currency/rows.json").read_text(encoding="utf-8")
+    )
+    by_id = {row["id"]: row for row in payload["rows"]}
+    products = {row["msku"]: {"fnsku": "X00TEST"} for row in payload["rows"]}
+    mixed = import_retail_rows(
+        [by_id["us_usd"], by_id["ca_cad"], by_id["us_empty"], by_id["us_cad"]],
+        products,
+        source="lingxing_mcp",
+        fx_by_pair={"CAD/USD": "1.25"},
+    )
+    assert mixed["prices"]["TEST_US_PETMAT"] == 39.99
+    assert mixed["prices"]["TEST_US_CAD"] == float(money_half_up(Decimal("65.11") / Decimal("1.25")))
+    assert "TEST_CA_PETMAT" not in mixed["prices"]
+    assert "TEST_US_EMPTY" not in mixed["prices"]
+    assert any(item["reason"] == "非目标站点" for item in mixed["skipped"])
+    assert any(item["reason"] == "币种为空" for item in mixed["skipped"])
+    from fba_tool.declared_value import FxRateRequired
+
+    with pytest.raises(FxRateRequired) as exc:
+        import_retail_rows([by_id["us_cad"]], products, source="lingxing_mcp", fx_by_pair={})
+    assert exc.value.code == "FX_RATE_REQUIRED"
+
+
 def test_tax_fx_basis_locked_for_twelve_months(monkeypatch, tmp_path):
     _isolated(monkeypatch, tmp_path)
     first = update_rule_profile({"tax_fx_basis": "day"})

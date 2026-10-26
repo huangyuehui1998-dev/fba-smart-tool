@@ -1,0 +1,50 @@
+{
+  "note": "合成零售行。价格形态对齐脱敏对照（39.99 USD / 65.11 CAD），SKU 一律 TEST_*。不是领星在售导出，也不是真实 xlsx。",
+  "rows": [
+    {
+      "id": "us_usd",
+      "msku": "TEST_US_PETMAT",
+      "country": "美国",
+      "marketplace": "US",
+      "currency": "USD",
+      "price": 39.99,
+      "shop": "TEST-US"
+    },
+    {
+      "id": "ca_cad",
+      "msku": "TEST_CA_PETMAT",
+      "country": "加拿大",
+      "marketplace": "CA",
+      "currency": "CAD",
+      "price": 65.11,
+      "shop": "TEST-CA"
+    },
+    {
+      "id": "us_cad",
+      "msku": "TEST_US_CAD",
+      "country": "美国",
+      "marketplace": "US",
+      "currency": "CAD",
+      "price": 65.11,
+      "shop": "TEST-US"
+    },
+    {
+      "id": "us_empty",
+      "msku": "TEST_US_EMPTY",
+      "country": "美国",
+      "marketplace": "US",
+      "currency": "",
+      "price": 39.99,
+      "shop": "TEST-US"
+    },
+    {
+      "id": "ca_usd",
+      "msku": "TEST_CA_USD",
+      "country": "加拿大",
+      "marketplace": "CA",
+      "currency": "USD",
+      "price": 65.11,
+      "shop": "TEST-CA"
+    }
+  ]
+}
