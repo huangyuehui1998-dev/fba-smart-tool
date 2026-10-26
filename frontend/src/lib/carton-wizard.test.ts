@@ -73,6 +73,43 @@ describe("carton wizard", () => {
     expect(review.warnings.some((item) => item.includes("23"))).toBe(false);
   });
 
+  const draft = (gross: string) => ({
+    sku: "BOX-LIMIT",
+    unit: "cm" as const,
+    length: "40",
+    width: "30",
+    height: "20",
+    qty: "10",
+    gross,
+    tare: "",
+    unitWeight: "",
+  });
+
+  it("does not treat 22.5kg as the 70kg library block", () => {
+    const review = cartonWizardReview(draft("22.5"));
+    expect(review.blockers).toEqual([]);
+    expect(review.warnings.some((item) => item.includes("无法保存") || item.includes("系统上限"))).toBe(false);
+    // Wizard warn is OVERWEIGHT_KG 23. Policy / L-FBA 22.5 is side evidence, not this warning.
+    expect(review.warnings.some((item) => item.includes("超过 23"))).toBe(false);
+  });
+
+  it("warns at 24kg and at exactly 70kg without blocking save", () => {
+    for (const gross of ["24", "70", "70.00"]) {
+      const review = cartonWizardReview(draft(gross));
+      expect(review.blockers).toEqual([]);
+      expect(review.warnings.some((item) => item.includes("超过 23"))).toBe(true);
+      expect(review.warnings.some((item) => item.includes("无法保存"))).toBe(false);
+    }
+  });
+
+  it("blocks 70.1kg the same way as 80kg", () => {
+    for (const gross of ["70.1", "80"]) {
+      const review = cartonWizardReview(draft(gross));
+      expect(review.blockers.some((item) => item.includes("70") && item.includes("无法保存"))).toBe(true);
+      expect(review.warnings.some((item) => item.includes("超过 23"))).toBe(false);
+    }
+  });
+
   it("converts inches to centimeters", () => {
     expect(toCm("10", "in")).toBeCloseTo(25.4);
     const payload = cartonWizardPayload({

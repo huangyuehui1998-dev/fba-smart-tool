@@ -1,0 +1,64 @@
+{
+  "note": "合成箱规毛重边界。SKU 一律 TEST_BW_*。不是真实过机表，也不是 STA 表。≠箱规超重已关，≠Publish。",
+  "g3": {
+    "wizard_overweight_kg": 23,
+    "policy_internal_warn_kg": 22.5,
+    "library_hard_max_kg": 70,
+    "accept_primary_anchor": "箱规向导预警（超过 23 kg 仍可继续）+ 箱规库硬限 70 kg",
+    "side_evidence_only": "L-FBA / Step2 内部余量 22.5 kg 只作旁证，不并入 W1–W4"
+  },
+  "cases": [
+    {
+      "id": "bw_ref_03",
+      "ref": "BW-REF-03",
+      "sku": "TEST_BW_225",
+      "gross_kg": 22.5,
+      "http": 200,
+      "wizard": "under_wizard_warn",
+      "note": "约 22.5 kg 不得误判为库硬限。向导预警是超过 23 kg；本点低于向导预警，也低于 70。"
+    },
+    {
+      "id": "bw_ref_01",
+      "ref": "BW-REF-01",
+      "sku": "TEST_BW_24",
+      "gross_kg": 24,
+      "http": 200,
+      "wizard": "warn"
+    },
+    {
+      "id": "exact_70",
+      "ref": "G2",
+      "sku": "TEST_BW_70",
+      "gross_kg": 70,
+      "http": 200,
+      "wizard": "warn"
+    },
+    {
+      "id": "exact_70_00",
+      "ref": "G2",
+      "sku": "TEST_BW_7000",
+      "gross_kg": "70.00",
+      "http": 200,
+      "wizard": "warn",
+      "note": "恰好 70.00 可保存。"
+    },
+    {
+      "id": "bw_ref_02_70_1",
+      "ref": "BW-REF-02",
+      "sku": "TEST_BW_701",
+      "gross_kg": 70.1,
+      "http": 422,
+      "error_contains": "不能大于 70",
+      "wizard": "blocker"
+    },
+    {
+      "id": "bw_ref_02_80",
+      "ref": "BW-REF-02",
+      "sku": "TEST_BW_80",
+      "gross_kg": 80,
+      "http": 422,
+      "error_contains": "不能大于 70",
+      "wizard": "blocker"
+    }
+  ]
+}
