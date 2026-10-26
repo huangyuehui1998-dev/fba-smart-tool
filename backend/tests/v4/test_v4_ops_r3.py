@@ -9,6 +9,13 @@ from pathlib import Path
 
 import pytest
 
+from tests.v4.rebox_scan import (
+    _batch_csvs,
+    _invoice_files,
+    _is_fist_part,
+    _rebox_or_fist_path,
+)
+
 ROOT = Path(__file__).resolve().parents[3]
 FORWARDERS = ("send", "jiufang", "qiluo", "qiluo_t5", "qiluo_t6", "deshu")
 
@@ -360,79 +367,6 @@ def test_run_app_candidate_ports_skip_8010():
     assert 8010 not in ports
 
 
-def _relative_parts(path: Path, root: Path) -> tuple[str, ...]:
-    try:
-        return path.relative_to(root).parts
-    except ValueError:
-        return path.parts
-
-
-def _is_fist_part(folded: str) -> bool:
-    """目录名或文件名是 FIST。不把别的词里夹着的 fist 算进去。"""
-    if folded == "fist":
-        return True
-    stem, dot, _ext = folded.rpartition(".")
-    if dot and stem == "fist":
-        return True
-    return folded.startswith("fist") and len(folded) > 4 and not folded[4].isalnum()
-
-
-def _rebox_or_fist_path(path: Path, root: Path) -> bool:
-    """刷箱、FIST、golden samples，以及文件名里的「待分配」，不是第 13/14 批命名货件。"""
-    if "待分配" in path.name:
-        return True
-    rel_parts = _relative_parts(path, root)
-    folded_parts = [part.strip().casefold() for part in rel_parts]
-    for part, folded in zip(rel_parts, folded_parts):
-        text = part.strip()
-        if "刷箱" in text or _is_fist_part(folded):
-            return True
-        if "golden" in folded and "sample" in folded:
-            return True
-        if folded == "golden":
-            return True
-    for left, right in zip(folded_parts, folded_parts[1:]):
-        if "golden" in left and "sample" in right:
-            return True
-    return False
-
-
-def _packing_or_send_boxlist(path: Path, root: Path) -> bool:
-    """只留装箱明细，以及 SEND 的箱单。刷箱里的 SEND 不是这种箱单。"""
-    text = str(Path(*_relative_parts(path, root)))
-    if "装箱明细" in text:
-        return True
-    return "箱单" in text and "send" in text.casefold()
-
-
-def _batch_csvs(root: Path) -> dict[str, list[Path]]:
-    found = {"13": [], "14": []}
-    for path in root.rglob("*.csv"):
-        if path.name.startswith("~$") or _rebox_or_fist_path(path, root) or not _packing_or_send_boxlist(path, root):
-            continue
-        text = str(path).replace("\\", "/")
-        if "第13批" in text or "/13/" in text:
-            found["13"].append(path)
-        elif "第14批" in text or "/14/" in text:
-            found["14"].append(path)
-    return found
-
-
-def _invoice_files(root: Path) -> list[Path]:
-    found = []
-    for path in root.rglob("*"):
-        if not path.is_file() or path.name.startswith("~$") or _rebox_or_fist_path(path, root):
-            continue
-        if path.suffix.lower() not in {".xlsx", ".xlsm"}:
-            continue
-        name = path.name.lower()
-        if any(token in path.name for token in ("发票", "箱单", "Invoice", "invoice")):
-            found.append(path)
-        elif "send" in name and "amazon" not in name:
-            found.append(path)
-    return found
-
-
 def test_batch_csv_scan_skips_fist_and_rebox_dirs(tmp_path):
     """rglob 会走进刷箱/FIST、刷箱/SEND 和 golden samples。只留装箱明细和 SEND/箱单。"""
     packing13 = tmp_path / "第13批" / "装箱明细"
@@ -476,6 +410,15 @@ def test_batch_csv_scan_skips_fist_and_rebox_dirs(tmp_path):
     (tmp_path / "batches" / "14" / "named" / "loose14.csv").write_text("loose", encoding="utf-8")
     (tmp_path / "batches" / "14" / "SEND" / "箱单").mkdir(parents=True)
     (tmp_path / "batches" / "14" / "SEND" / "箱单" / "b.csv").write_text("named", encoding="utf-8")
+
+    assert _is_fist_part("fist")
+    assert _is_fist_part("fist.csv")
+    assert not _is_fist_part("manifest")
+    assert _rebox_or_fist_path(rebox / "fist.csv", tmp_path)
+    assert _rebox_or_fist_path(send_rebox / "send.csv", tmp_path)
+    assert _rebox_or_fist_path(golden / "gold.csv", tmp_path)
+    assert _rebox_or_fist_path(tmp_path / "第13批" / "待分配.csv", tmp_path)
+    assert not _rebox_or_fist_path(packing13 / "第一票.csv", tmp_path)
 
     found = _batch_csvs(tmp_path)
     assert {path.name for path in found["13"]} == {"第一票.csv", "send-box.csv", "ship.csv"}
