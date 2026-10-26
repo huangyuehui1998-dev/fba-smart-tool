@@ -1,6 +1,8 @@
 # Windows onedir zip for FBA Smart Tool V4.
 # Download and Release steps: docs/delivery/PORTABLE_WINDOWS_CI.md
 # This workflow uploads an Actions artifact only. It does not create a GitHub Release.
+# Third-party actions are pinned to full commit SHAs. The comment is the release
+# tag that SHA resolved to. Do not switch these back to floating @vN tags.
 
 name: Portable Windows package
 
@@ -53,21 +55,24 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          # So a manual rerun of a tagged commit can still fill git_tag via describe.
+          fetch-tags: true
 
       - name: Enable long paths
         shell: pwsh
         run: git config --global core.longpaths true
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
       - name: Set up Python 3.12
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
           cache: pip
@@ -111,6 +116,16 @@ jobs:
           $env:PYINSTALLER_CONFIG_DIR = Join-Path (Get-Location) "build\pyinstaller-config"
           New-Item -ItemType Directory -Force -Path $env:PYINSTALLER_CONFIG_DIR | Out-Null
           Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+          # finish_portable_dist.py writes FBA_Smart_Tool/BUILDINFO.txt from these
+          # toolchain versions plus GITHUB_SHA, GITHUB_RUN_ID, and the tag ref.
+          $nodeVer = & node.exe --version
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:BUILDINFO_NODE_VERSION = "$nodeVer".Trim()
+          $pyver = & backend\.venv\Scripts\python.exe -c "import platform; print(platform.python_version())"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $env:BUILDINFO_PYTHON_VERSION = "$pyver".Trim()
+          Write-Host "BUILDINFO_NODE_VERSION=$env:BUILDINFO_NODE_VERSION"
+          Write-Host "BUILDINFO_PYTHON_VERSION=$env:BUILDINFO_PYTHON_VERSION"
           & .\scripts\build_standalone.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
@@ -123,7 +138,7 @@ jobs:
           if ($hyphen.Count -ge 70) { throw "too many hyphen locale chunks: $($hyphen.Count)" }
 
       - name: Upload portable zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: FBA_Smart_Tool_V4_便携版.zip
           path: dist/FBA_Smart_Tool_V4_便携版.zip
@@ -137,6 +152,10 @@ jobs:
         run: |
           $zip = Get-Item -LiteralPath "dist\FBA_Smart_Tool_V4_便携版.zip"
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip.FullName).Hash.ToLower()
+          $infoPath = "dist\FBA_Smart_Tool\BUILDINFO.txt"
+          if (-not (Test-Path -LiteralPath $infoPath)) { throw "BUILDINFO.txt missing from portable folder" }
+          $info = Get-Content -LiteralPath $infoPath -Raw -Encoding utf8
+          $fence = '```'
           @"
           ## Portable package
 
@@ -146,5 +165,9 @@ jobs:
           - SHA256: ``$hash``
 
           The download is wrapped in an outer zip. Unzip once and attach the inner file to a Release. Do not re-pack it.
-          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+          ### BUILDINFO
+
+          "@ + $fence + "`n" + $info.TrimEnd() + "`n" + $fence + "`n" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           Write-Host "SHA256 $hash"
+          Write-Host $info

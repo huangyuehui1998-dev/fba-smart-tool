@@ -37,6 +37,14 @@
 - 长生命周期的整理分支可以存在。PR 说明里写清基线，避免把无关的本地脚本一起提交。
 - 带注释的 Git tag（`v4*`）表示「这一个提交要出包」。打 tag 的步骤在 [RELEASING.md](RELEASING.md)。不要在未准备发布时推 tag。
 
+## CI、Action 钉版与 BUILDINFO
+
+- 审 PR 的常规检查看 **CI**（`.github/workflows/ci.yml`）：后端 pytest 和前端 build。发布用的 Windows zip 看 **Portable Windows package**（`.github/workflows/portable-windows.yml`）。后者只上传 artifact，不创建 GitHub Release。
+- 这两个工作流里的 Action 都钉在 40 位 commit SHA 上，同一行注释写着对应的版本标签（例如 `# v4.4.0`）。不要改回浮动的 `@v4` / `@v5`。`.github/dependabot.yml` 只跟踪 `github-actions`，每周开更新 PR，不自动合并。npm 和 pip 不在这份配置里。
+- 从下一只发布起（`v4.0.1` 及以后的便携包），zip 里有 `FBA_Smart_Tool/BUILDINFO.txt`。已经挂在 Release 上的 v4.0.0（SHA256 `616e939e…`）没有这个文件；不要重打，也不要移动那个 tag。写法见 [PORTABLE_WINDOWS_CI.md](delivery/PORTABLE_WINDOWS_CI.md)。
+- `ci.yml` 里有两条在 `main` 上已经失败的测试，用 `--deselect` 留着，并标了 TODO。修测试之前不要拿掉这两行。
+- 密钥扫描（secret scanning，以及可选的 push protection）可以在仓库 Settings → Code security 里打开。这里只说明可以开；这次改动没有在网页上改仓库设置，开没开以 GitHub 上的设置为准。
+
 ## 版本号
 
 两套号码不要混用。

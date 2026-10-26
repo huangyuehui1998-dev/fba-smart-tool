@@ -6,10 +6,15 @@ zip 内的中文文件名使用 UTF-8 标志（EFS）。不要在 Linux 上解�
 from __future__ import annotations
 
 import hashlib
+import os
+import platform
 import shutil
+import subprocess
 import sys
 import time
 import zipfile
+from collections.abc import Callable, Mapping
+from datetime import datetime, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -21,6 +26,21 @@ PORTABLE_NAME = f"FBA_Smart_Tool_{RELEASE_VERSION}_便携版"
 ZIP_PREFIX = "FBA_Smart_Tool"
 LAUNCHER_NAME = "启动FBA工具.bat"
 README_NAME = "使用说明.txt"
+BUILDINFO_NAME = "BUILDINFO.txt"
+BUILDINFO_FIELDS = (
+    "git_sha",
+    "git_tag",
+    "github_run_id",
+    "built_at_utc",
+    "python_version",
+    "node_version",
+    "app_version",
+)
+# v4.0.0 的已发布 zip 没有这个文件。下一只包（v4.0.1 起）才写入。
+BUILDINFO_COMMENT = (
+    "# FBA Smart Tool portable build. Included from the next package after v4.0.0; "
+    "the published v4.0.0 zip does not contain this file."
+)
 UTF8_NAME_FLAG = 0x800
 SKIP_DIR_NAMES = {"app_data", "__pycache__"}
 _OUR_TREES = {"config", "templates"}
@@ -132,6 +152,12 @@ def verify_portable_zip(zip_path: Path, required: list[str]) -> None:
             raise SystemExit("中文文件名未设置 UTF-8 标志：" + ", ".join(bad_flags))
         if forbidden:
             raise SystemExit("zip 含禁止发布的文件：" + ", ".join(forbidden))
+        buildinfo_arc = f"{ZIP_PREFIX}/{BUILDINFO_NAME}"
+        if buildinfo_arc in names:
+            payload = zf.read(buildinfo_arc)
+            for key in BUILDINFO_FIELDS:
+                if f"{key}=".encode("ascii") not in payload:
+                    raise SystemExit(f"BUILDINFO.txt 缺少 {key}")
 
 
 def _required_zip_members() -> list[str]:
@@ -139,10 +165,116 @@ def _required_zip_members() -> list[str]:
         f"{ZIP_PREFIX}/FBA_Smart_Tool.exe",
         f"{ZIP_PREFIX}/{LAUNCHER_NAME}",
         f"{ZIP_PREFIX}/{README_NAME}",
+        f"{ZIP_PREFIX}/{BUILDINFO_NAME}",
     ]
     for path in expected_internal_files(OUT):
         members.append(ZIP_PREFIX + "/" + path.relative_to(OUT).as_posix())
     return members
+
+
+CommandRunner = Callable[[list[str]], str]
+
+
+def _env_text(env: Mapping[str, str], key: str) -> str:
+    return (env.get(key) or "").strip()
+
+
+def _command_output(args: list[str]) -> str:
+    try:
+        proc = subprocess.run(
+            args,
+            cwd=ROOT,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    if proc.returncode != 0:
+        return ""
+    return (proc.stdout or "").strip()
+
+
+def _normalize_python_version(value: str) -> str:
+    text = value.strip()
+    if text.lower().startswith("python "):
+        text = text.split(None, 1)[1].strip()
+    return text
+
+
+def resolve_buildinfo(
+    env: Mapping[str, str] | None = None,
+    *,
+    now: datetime | None = None,
+    runner: CommandRunner | None = None,
+    which: Callable[[str], str | None] | None = None,
+) -> dict[str, str]:
+    """Collect the identity of this portable build.
+
+    Tag pushes set ``GITHUB_REF_TYPE=tag``. Other Actions runs and local builds
+    record a tag only when ``git describe --exact-match`` finds one. A missing
+    tool becomes ``unknown`` (versions) or an empty field (tag, run id); packaging
+    still continues.
+    """
+    env = os.environ if env is None else env
+    run = runner or _command_output
+    find = which or shutil.which
+
+    sha = _env_text(env, "GITHUB_SHA") or run(["git", "rev-parse", "HEAD"]) or "unknown"
+    if _env_text(env, "GITHUB_REF_TYPE") == "tag":
+        tag = _env_text(env, "GITHUB_REF_NAME")
+    else:
+        tag = run(["git", "describe", "--tags", "--exact-match"])
+
+    python_version = _normalize_python_version(_env_text(env, "BUILDINFO_PYTHON_VERSION"))
+    if not python_version:
+        python_version = platform.python_version()
+    node_version = _env_text(env, "BUILDINFO_NODE_VERSION")
+    if not node_version:
+        node = find("node")
+        node_version = run([node, "--version"]) if node else ""
+    if not node_version:
+        node_version = "unknown"
+
+    moment = now or datetime.now(timezone.utc)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    else:
+        moment = moment.astimezone(timezone.utc)
+
+    info = {
+        "git_sha": sha,
+        "git_tag": tag,
+        "github_run_id": _env_text(env, "GITHUB_RUN_ID"),
+        "built_at_utc": moment.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "python_version": python_version,
+        "node_version": node_version,
+        "app_version": RELEASE_VERSION,
+    }
+    for key, value in info.items():
+        if any(ch in value for ch in "\r\n"):
+            raise SystemExit(f"BUILDINFO 字段含换行：{key}")
+    return info
+
+
+def format_buildinfo(info: Mapping[str, str]) -> str:
+    lines = [BUILDINFO_COMMENT]
+    for key in BUILDINFO_FIELDS:
+        lines.append(f"{key}={info.get(key, '')}")
+    return "\n".join(lines) + "\n"
+
+
+def write_buildinfo(
+    out_dir: Path,
+    env: Mapping[str, str] | None = None,
+    *,
+    now: datetime | None = None,
+) -> Path:
+    """Write ``BUILDINFO.txt`` into the portable app folder (next to the exe)."""
+    path = out_dir / BUILDINFO_NAME
+    path.write_text(format_buildinfo(resolve_buildinfo(env, now=now)), encoding="utf-8", newline="\n")
+    return path
 
 
 def _write_launcher(out_dir: Path) -> None:
@@ -190,6 +322,8 @@ def main() -> None:
             shutil.copy2(legacy, OUT / "工作流与运行逻辑.txt")
 
     _write_launcher(OUT)
+    info_path = write_buildinfo(OUT)
+    print(f"BUILDINFO: {info_path}")
 
     zip_path = ROOT / "dist" / f"{PORTABLE_NAME}.zip"
     write_utf8_zip(OUT, zip_path)

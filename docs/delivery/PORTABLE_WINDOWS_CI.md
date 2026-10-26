@@ -2,7 +2,7 @@
 
 产品版本 `V4`。安装包只在 **GitHub Actions 的 `windows-latest`** 上打，不要在一台随意的电脑上手工打包再拿来发布。
 
-工作流：`.github/workflows/portable-windows.yml`（名称 **Portable Windows package**）。
+工作流：`.github/workflows/portable-windows.yml`（名称 **Portable Windows package**）。里面的 Action 钉在完整 commit SHA 上，行尾注释是该 SHA 对应的版本标签。不要改回浮动的 `@v4` / `@v5`。
 
 它只上传 workflow artifact，**不会创建或发布 GitHub Release**。人工模拟测试通过之后，再由 Marco / bots 把 zip 挂到 Release 上。
 
@@ -37,6 +37,7 @@ zip 内（正斜杠，中文名带 UTF-8 标志）：
 - `FBA_Smart_Tool/FBA_Smart_Tool.exe`
 - `FBA_Smart_Tool/启动FBA工具.bat`
 - `FBA_Smart_Tool/使用说明.txt`
+- `FBA_Smart_Tool/BUILDINFO.txt`（从下一只包起；已发布的 v4.0.0 没有，见下节）
 - `FBA_Smart_Tool/_internal/templates/`（含 `forwarders/qiluo.xlsx`）
 - `FBA_Smart_Tool/_internal/config/`
 - `FBA_Smart_Tool/_internal/dist/`（前端）
@@ -46,6 +47,35 @@ zip 内（正斜杠，中文名带 UTF-8 标志）：
 不要打进包里的东西：`realdata`、`app_data`、领星密钥（`lingxing.json`）、发票历史（`invoice_history.default.json`）、会话、数据库。出厂规则 `policy.default.json`、`category_map.default.json`、`item_size_policy.default.json`、`forwarder_registry.default.json`、`sta_dropdowns.default.json` 在白名单里，否则首次启动会找不到 `_internal/config/policy.json`。
 
 中文文件名是在 **Windows 构建机上的 Python** 写进 zip 的。不要在 Linux 上解压再重新压缩，locale 不对时中文名会坏。
+
+## BUILDINFO.txt（下一只包起，不回溯 v4.0.0）
+
+`scripts/finish_portable_dist.py` 在打 zip 之前，把 `BUILDINFO.txt` 写到应用目录 `dist/FBA_Smart_Tool/`（和 exe、`使用说明.txt` 同级）。zip 里的路径是 `FBA_Smart_Tool/BUILDINFO.txt`。缺这个文件，或少了下面任一 `key=value` 字段，这次打包失败，不会上传。
+
+已发布的 [v4.0.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v4.0.0) 附件 `FBA_Smart_Tool_V4_Portable.zip`（SHA256 以 `616e939e` 开头，全文在 [RELEASING.md](../RELEASING.md)）**没有**这个文件。不要为了补它而重打、改 tag，或替换那只 zip。从下一只发布（`v4.0.1` 及以后）开始，新打的包才带它。在那之前的 PR 构建如果已经跑了更新后的脚本，artifact 里也会有，那只是预览，不是去改 v4.0.0。
+
+工作流在调用 `scripts/build_standalone.ps1` 之前设置：
+
+- `BUILDINFO_NODE_VERSION`：`node.exe --version`（通常带前缀 `v`）
+- `BUILDINFO_PYTHON_VERSION`：打包装进 `backend\.venv` 的 Python（`platform.python_version()`）
+
+脚本再读 Actions 已经放进环境里的 `GITHUB_SHA`、`GITHUB_RUN_ID`。tag 推送（`GITHUB_REF_TYPE=tag`）时 `git_tag` 用 `GITHUB_REF_NAME`。其他情况只在当前提交恰好有 tag 时填写（checkout 开了 `fetch-tags`，本机则靠本地 git）。没有 tag、或不在 Actions 上时，`git_tag` 和 `github_run_id` 留空，键仍在。探测不到 Node 时 `node_version` 写成 `unknown`，打包不因此中断。本机直接跑 `build_standalone.ps1` 走同一段写入。
+
+文件是 UTF-8、LF。注释行以 `#` 开头，其余是 `key=value`：
+
+| 字段 | 含义 |
+|---|---|
+| `git_sha` | 这次构建的提交。Actions 上用 `GITHUB_SHA` |
+| `git_tag` | 有 tag 才写，例如 `v4.0.1`。PR 和普通分支留空 |
+| `github_run_id` | Actions 运行号。本机留空 |
+| `built_at_utc` | UTC 时间，`YYYY-MM-DDTHH:MM:SSZ` |
+| `python_version` | 打包用的 Python |
+| `node_version` | 构建前端的 Node |
+| `app_version` | `APP_VERSION`，当前 `V4` |
+
+运行摘要（Summary）里除了 SHA256，还会附上同一份文本。核对发布物时用这一次运行的摘要，不要用 v4.0.0 的哈希。
+
+要撤回：删掉 `write_buildinfo` 的调用、zip 必含条目，以及工作流里那两行环境变量和摘要里的 BUILDINFO 段。已经发出的带这个文件的包不用改回去。
 
 ## 构建机
 

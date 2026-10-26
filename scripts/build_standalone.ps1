@@ -52,6 +52,9 @@ if ($LASTEXITCODE -ne 0) { throw "PyInstaller failed" }
 $outDir = Join-Path $Root "dist\FBA_Smart_Tool"
 & $VenvPy (Join-Path $Root "scripts\finish_portable_dist.py")
 if ($LASTEXITCODE -ne 0) { throw "finish_portable_dist failed" }
+$buildInfo = Join-Path $outDir "BUILDINFO.txt"
+if (-not (Test-Path -LiteralPath $buildInfo)) { throw "BUILDINFO.txt missing from $outDir" }
+Write-Host "BUILDINFO:" $buildInfo
 
 $versionFile = Join-Path $Root "backend\fba_tool\app_version.py"
 $versionText = Get-Content -Raw -Encoding UTF8 $versionFile

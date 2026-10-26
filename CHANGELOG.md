@@ -12,6 +12,7 @@
 
 - GitHub Release 附件是 `FBA_Smart_Tool_V4_Portable.zip`（与 `FBA_Smart_Tool_V4_便携版.zip` 同一份字节）。README、`llms.txt`、`docs/RELEASING.md` 已按这两个名字对齐。
 - Linux CI（`.github/workflows/ci.yml`）在 PR 和 `main` 上跑后端 pytest 与前端 `npm run build`。便携包工作流对纯文档 PR（`docs/**`、`*.md`、`review/**`）不再构建；`v4*` tag 与手动 Run workflow 仍会构建。
+- GitHub Actions 改为钉死 commit SHA。下一只便携包（`v4.0.1` 起）会带 `FBA_Smart_Tool/BUILDINFO.txt`；已发布的 v4.0.0 不重打。
 
 ## [4.0.0] - 2026-10-26
 
