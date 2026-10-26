@@ -28,6 +28,7 @@
 ### 说明补充
 
 - 源码默认和便携包仍有差别的地方（货代原件上的图片、说明文字里的历史样例文件名、不进安装包的样表）写在 `docs/OPEN_SOURCE.md`。
+- README「怎么拿到 Windows 便携版」：日常用户用 GitHub Release 上的 V4 zip `FBA_Smart_Tool_V4_便携版.zip`。在 v4.0.0 成为 Latest 之前，Latest 仍是 v3.3.0（附件 `FBA_Smart_Tool_V3.3_Portable.zip`），不要当作日常 V4；维护者用 Actions 工作流 Portable Windows package 的 artifact。`docs/RELEASING.md` 写明运营机器人不点 Publish，只有维护者发布。
 
 ### 说明
 

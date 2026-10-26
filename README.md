@@ -4,6 +4,12 @@ Local-first tool for Amazon FBA packing, shipment checks, forwarder invoices, an
 
 本地运行的亚马逊 FBA 装箱、货件核对、货代发票和报关工具。浏览器里操作，数据留在你自己的电脑上。
 
+## 怎么拿到 Windows 便携版
+
+日常使用请到 [GitHub Releases](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases) 下载 **V4** 的 `FBA_Smart_Tool_V4_便携版.zip`。解压后双击包里的 `启动FBA工具.bat`。使用步骤见 [`docs/使用说明.md`](docs/使用说明.md)。维护者打 tag、核对 SHA256 再发布的顺序见 [`docs/RELEASING.md`](docs/RELEASING.md)。
+
+**在 v4.0.0 成为 Latest Release 之前，不要用页面上的 Latest。** 那时 Latest 仍是 [v3.3.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v3.3.0)（产品代际 **V3.3**），附件名是 `FBA_Smart_Tool_V3.3_Portable.zip`。不要把这一只当作日常使用的 V4。维护者改从 Actions 里成功的 **Portable Windows package** 下载 artifact **`FBA_Smart_Tool_V4_便携版.zip`**。GitHub 下载 artifact 时会再套一层 zip，里面那个同名文件才是便携包。这个工作流不会创建 Release。v4.0.0 发布并成为 Latest 之后，日常用户改用上面的 Release V4 zip。
+
 ## 这是什么
 
 运营同学每天要过几关：把货装进合规的箱子，对上亚马逊货件，按货代模板开发票，再整理报关资料。这些规则散落在表格、经验和各家货代的版式里，错一格往往要返工。
@@ -42,7 +48,7 @@ FBA Smart Tool 把这条流水线收成一台本机程序：FastAPI 做业务，
 
 - 单机工具。业务数据在本机 `app_data/`（SQLite、你改过的配置、导出历史）。
 - 领星 MCP Key 写在本机 `app_data/config/lingxing.json`（DPAPI 密文）。DeepSeek Key 只在 Windows 上写入 `app_data/secrets/deepseek_key.bin`（同样是 DPAPI）；其它系统保存会得到 422。仓库不提供这两把钥匙。
-- 便携版面向 Windows。源码也可以在其他系统上跑开发和测试；正式 zip 只在 GitHub Actions 的 Windows 构建机上打。
+- 便携版面向 Windows。源码也可以在其他系统上跑开发和测试；正式 zip 只在 GitHub Actions 的 Windows 构建机上打。日常拿哪一只包，见上文「怎么拿到 Windows 便携版」。
 - 产品入口 `run_app.py` 监听 `127.0.0.1`，首选端口 **8002**（占用时按 `PREFERRED_PORTS` 顺延，跳过 8010）。开发时请显式启动在 8002。直接执行 `python backend/main.py` 时端口来自 `FBA_PORT`，没设则是 8000，那不是日常入口。监听地址默认 `FBA_HOST=127.0.0.1`；改成非本机地址时必须同时设置 `FBA_ACCESS_TOKEN`，否则拒绝启动。
 - 出厂规则在 `backend/config/*.default.json`。你的改动写到 `app_data/config/`，不要改出厂文件来“保存设置”。
 - 产品代际是 `V4`，写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`。FastAPI 自带的 `version` 字符串是 API 文档号，和产品版本无关。

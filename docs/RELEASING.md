@@ -58,6 +58,8 @@ sha256sum FBA_Smart_Tool_V4_便携版.zip
 
 ## GitHub Release
 
+运营机器人从不点 Publish；只有维护者本人发布。
+
 1. 打开仓库的 Releases → Draft a new release。
 2. 选刚刚推送的 tag（`v4.0.0` 这类）。不要在这里又新建一个不同的 tag，除非你有意再触发一次构建，并且随后只用新运行的 zip。
 3. 标题与 tag 一致。正文贴上 `CHANGELOG.md` 里该版本的条目，并写上：
