@@ -36,7 +36,7 @@
 | 状态 | **壳就绪 · 待测** |
 | 落盘时间 | **2026-10-26 16:25:00 EDT**（America/New_York, UTC-4） |
 | 基线 | `main` @ `bba71522f10bcbf1dbfccf3ebaa1cc7d8f955320` |
-| 实现锚点 | branch `u5-m2-p5-demo-blindrun-accept` · 只补文档与薄断言（≠DEMO 齐全 ≠社区自助齐全 ≠Publish） |
+| 实现锚点 | branch `u5-m2-p5-demo-blindrun-accept` · docs `4735ac55c9f83fc88a1fec2fe7d662a152cf7903` · PR https://github.com/huangyuehui1998-dev/fba-smart-tool/pull/34 （≠DEMO 齐全 ≠社区自助齐全 ≠Publish） |
 | 失败回打 | **code**（句子落点）/ **test**（薄断言）/ **ops**（≤45 分钟盲跑与 D1–D7） |
 | ≠ Publish | **确认** |
 | 挡宣称 | **「DEMO 齐全」「社区自助齐全」「计费已改」「刷箱同等验收」「M2 首包已全部完成」** — 本壳未全绿前禁称 |
@@ -130,7 +130,7 @@
 | 盲跑时钟（≤45 分钟） | `_待填_` | **ops** |
 | D1–D7 勾选 | 全表仍为待测 | **ops** |
 | 挡宣称句出现位置 | 本页标题 / §3.1 / §6 | ops |
-| 实现 tip / PR | branch `u5-m2-p5-demo-blindrun-accept` · `_待填 PR_` | **code** |
+| 实现 tip / PR | `4735ac55c9f83fc88a1fec2fe7d662a152cf7903` · https://github.com/huangyuehui1998-dev/fba-smart-tool/pull/34 | **code** |
 
 ---
 
