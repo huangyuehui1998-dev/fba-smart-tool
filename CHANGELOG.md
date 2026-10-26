@@ -8,6 +8,8 @@
 
 ## [Unreleased]
 
+## [4.0.0] - 2026-10-26
+
 ### 新增
 
 - 开源与协作文档：`README.md`、`CONTRIBUTING.md`、`CODE_OF_CONDUCT.md`、`SECURITY.md`、`LICENSE`、`llms.txt`、`docs/OPEN_SOURCE.md`、`docs/MAINTAINING.md`、`docs/RELEASING.md`。
@@ -28,9 +30,8 @@
 ### 说明补充
 
 - 源码默认和便携包仍有差别的地方（货代原件上的图片、说明文字里的历史样例文件名、不进安装包的样表）写在 `docs/OPEN_SOURCE.md`。
-- README「怎么拿到 Windows 便携版」：日常用户用 GitHub Release 上的 V4 zip `FBA_Smart_Tool_V4_便携版.zip`。在 v4.0.0 成为 Latest 之前，Latest 仍是 v3.3.0（附件 `FBA_Smart_Tool_V3.3_Portable.zip`），不要当作日常 V4；维护者用 Actions 工作流 Portable Windows package 的 artifact。`docs/RELEASING.md` 写明运营机器人不点 Publish，只有维护者发布。
+- README「怎么拿到 Windows 便携版」：尚无 v4.0.0 Latest 时先读警告，不要用 Latest（仍是 v3.3.0，附件 `FBA_Smart_Tool_V3.3_Portable.zip`）；日常用户暂时没有 GitHub Release 上的 V4 包，维护者用 Actions Portable Windows package 的内层 `FBA_Smart_Tool_V4_便携版.zip`。v4.0.0 成为 Latest 之后，日常用户再到 Releases 下载该 zip。`docs/RELEASING.md` 写明运营机器人不点 Publish，只有维护者发布。
 
 ### 说明
 
 - git 历史没有改写。旧提交里仍可能检出该工作簿。见 `docs/OPEN_SOURCE.md`。
-- V4 尚未打 `v4*` 正式 tag。发布那天把 `Unreleased` 挪到具体版本标题下，并写上日期。见 `docs/RELEASING.md`。

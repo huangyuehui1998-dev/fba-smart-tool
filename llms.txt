@@ -33,7 +33,7 @@
 - 便携包只由 GitHub Actions 工作流 Portable Windows package 在 `windows-latest` 上构建。Python 3.12，Node 22。
 - tag 过滤器：`v4*`。工作流不创建 GitHub Release。
 - 产物：`dist/FBA_Smart_Tool_V4_便携版.zip`。发布前用 Actions 摘要核对 SHA256。
-- 日常用户下载 GitHub Release 上的 V4 zip。在 v4.0.0 成为 Latest 之前，Latest 仍是 v3.3.0（附件 `FBA_Smart_Tool_V3.3_Portable.zip`，产品代际 V3.3），不要当作日常 V4。维护者用 Actions 工作流 Portable Windows package 的 artifact `FBA_Smart_Tool_V4_便携版.zip`。运营机器人不点 Publish，只有维护者发布。见 README「怎么拿到 Windows 便携版」。
+- 尚无 v4.0.0 Latest 时不要用 Latest（仍是 v3.3.0，附件 `FBA_Smart_Tool_V3.3_Portable.zip`，产品代际 V3.3）；日常用户暂时没有 GitHub Release 上的 V4 包，维护者用 Actions 工作流 Portable Windows package 的内层 artifact `FBA_Smart_Tool_V4_便携版.zip`。v4.0.0 成为 Latest 之后，日常用户再到 Releases 下载该 V4 zip。运营机器人不点 Publish，只有维护者发布。见 README「怎么拿到 Windows 便携版」。
 - 细节：`docs/delivery/PORTABLE_WINDOWS_CI.md`，发布顺序：`docs/RELEASING.md`。
 
 ## 测试
