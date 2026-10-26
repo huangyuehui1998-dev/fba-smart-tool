@@ -920,7 +920,7 @@ def test_fb01_fb02_bill_carry(isolated):
     assert gaps == [Decimal("0.30"), Decimal("0.02"), Decimal("0.38"), Decimal("0.24"), Decimal("0.36")]
     assert sum(gaps) == Decimal("1.30")
     notes = bill_warnings([{"bill_kg": 20, "rows": [{"weight_kg": 10, "chargeable_kg": 10}]}])
-    assert notes == ["货代账单计费重偏高，请核对"]
+    assert notes == ["与货代账单不一致，待确认"]
 
 
 def test_delete_measurement_batch(isolated):

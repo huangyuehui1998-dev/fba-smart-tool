@@ -29,6 +29,9 @@ DEFAULT_TOLERANCES = {
     "bill_warn_kg": Decimal("1"),
 }
 
+# 账单高于逐箱计费重 Σ 至少 1kg 时的对比页黄字。不改计费。
+BILL_MISMATCH_WARNING = "与货代账单不一致，待确认"
+
 
 def D(value: Any) -> Decimal:
     if isinstance(value, Decimal):
@@ -370,8 +373,9 @@ def bill_warnings(tickets: Sequence[Dict[str, Any]], divisor: Any = DEFAULT_DIM_
             else:
                 line_sum += q(scan.get("chargeable_kg") if scan.get("chargeable_kg") is not None else scan["weight_kg"], 3)
         gap = q(ticket["bill_kg"], 2) - q(line_sum, 2)
-        if gap > DEFAULT_TOLERANCES["bill_warn_kg"]:
-            notes.append("货代账单计费重偏高，请核对")
+        # 恰好 +1.00kg（账单 101、逐箱 Σ 100）也要提示。阈值以下的进位（如 0.30）不提示。
+        if gap >= DEFAULT_TOLERANCES["bill_warn_kg"]:
+            notes.append(BILL_MISMATCH_WARNING)
             break
     return notes
 

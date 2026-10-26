@@ -39,6 +39,11 @@ export interface CompareReport {
     suggest_text?: string;
   };
   message?: string;
+  bill_warnings?: string[];
+}
+
+export function billWarningLines(report: CompareReport): string[] {
+  return (report.bill_warnings ?? []).map((item) => item.trim()).filter((item) => item.length > 0);
 }
 
 export function dupExcludedNote(duplicateCount: number): string {

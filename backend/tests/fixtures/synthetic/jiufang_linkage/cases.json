@@ -1,0 +1,42 @@
+{
+  "note": "合成九方账单≠逐箱 Σ。箱号一律 FBATEST*。不是真实 LCL，也不是 STA 表。≠九方联动已关，≠已改计费，≠Publish。黄字不关闭第 15 批疑案，也不把 +1 并进第 13 批总差。",
+  "warning": "与货代账单不一致，待确认",
+  "dims_cm": [61, 46.5, 37.5],
+  "box_count": 5,
+  "weight_kg": "20",
+  "tool_sum_kg": "100.00",
+  "cases": [
+    {
+      "id": "jf_ref_01",
+      "ref": "JF-REF-01",
+      "gate": "G2",
+      "bill_kg": "101",
+      "gap_kg": "1.00",
+      "expect_warning": true,
+      "note": "6JJ6A / S97BA 风格。gap=1.00 必须出黄字。逐箱计费重仍是 20，Σ 仍是 100。"
+    },
+    {
+      "id": "jf_ref_02",
+      "ref": "JF-REF-02",
+      "bill_kg": "100",
+      "gap_kg": "0.00",
+      "expect_warning": false,
+      "note": "账单与工具 Σ 相等，无黄字。"
+    },
+    {
+      "id": "jf_ref_03",
+      "ref": "JF-REF-03",
+      "bill_kg": "102",
+      "gap_kg": "2.00",
+      "expect_warning": true,
+      "note": "gap>1 仍提示。不是第 15 批已关闭。"
+    }
+  ],
+  "batch13_anchors": {
+    "carry_total_kg": "1.30",
+    "bills_kg": ["509", "332.5", "604", "584", "517"],
+    "line_sums_kg": ["508.70", "332.48", "603.62", "583.76", "516.64"],
+    "gaps_kg": ["0.30", "0.02", "0.38", "0.24", "0.36"],
+    "note": "第 13 批进位合计保持 1.30。禁止把第 15 批 +1.00 并进总差（不是 2.30）。不断言第 15 批已关闭。"
+  }
+}
