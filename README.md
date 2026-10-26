@@ -6,9 +6,13 @@ Local-first tool for Amazon FBA packing, shipment checks, forwarder invoices, an
 
 ## 怎么拿到 Windows 便携版
 
-日常使用请到 [GitHub Releases](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases) 下载 **V4** 的 `FBA_Smart_Tool_V4_便携版.zip`。解压后双击包里的 `启动FBA工具.bat`。使用步骤见 [`docs/使用说明.md`](docs/使用说明.md)。维护者打 tag、核对 SHA256 再发布的顺序见 [`docs/RELEASING.md`](docs/RELEASING.md)。
+**在 v4.0.0 成为 Latest Release 之前，不要用页面上的 Latest。** 那时 Latest 仍是 [v3.3.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v3.3.0)（产品代际 **V3.3**），附件名是 `FBA_Smart_Tool_V3.3_Portable.zip`。不要把这一只当作 V4。
 
-**在 v4.0.0 成为 Latest Release 之前，不要用页面上的 Latest。** 那时 Latest 仍是 [v3.3.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v3.3.0)（产品代际 **V3.3**），附件名是 `FBA_Smart_Tool_V3.3_Portable.zip`。不要把这一只当作日常使用的 V4。维护者改从 Actions 里成功的 **Portable Windows package** 下载 artifact **`FBA_Smart_Tool_V4_便携版.zip`**。GitHub 下载 artifact 时会再套一层 zip，里面那个同名文件才是便携包。这个工作流不会创建 Release。v4.0.0 发布并成为 Latest 之后，日常用户改用上面的 Release V4 zip。
+**状态 A（尚无 v4.0.0 Latest）**：日常用户暂时没有 GitHub Release 上的 V4 包可下。维护者从 Actions 里成功的 **Portable Windows package** 下载 artifact，取内层 **`FBA_Smart_Tool_V4_便携版.zip`**。GitHub 下载 artifact 时会再套一层 zip，里面那个同名文件才是便携包。这个工作流不会创建 Release。
+
+**状态 B（v4.0.0 已成为 Latest 之后）**：日常用户再到 [GitHub Releases](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases) 下载 `FBA_Smart_Tool_V4_便携版.zip`。
+
+解压后双击包里的 `启动FBA工具.bat`。使用步骤见 [`docs/使用说明.md`](docs/使用说明.md)。维护者打 tag、核对 SHA256 再发布的顺序见 [`docs/RELEASING.md`](docs/RELEASING.md)。
 
 ## 这是什么
 
