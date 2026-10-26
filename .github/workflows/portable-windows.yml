@@ -4,9 +4,32 @@
 
 name: Portable Windows package
 
+# workflow_dispatch and v4* tag pushes are unconditional.
+# GitHub does not evaluate path filters on tag pushes; do not put paths under push.
+# pull_request cannot set both paths and paths-ignore. Positive paths limit the
+# run to packaging inputs. The ! patterns are the inverse (paths-ignore equivalent)
+# for docs/**, *.md, and review/**, and must stay after the positive patterns.
 on:
   workflow_dispatch:
   pull_request:
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "packaging/**"
+      - "run_app.py"
+      - "scripts/build_standalone.ps1"
+      - "scripts/check_spreadsheet_deps.py"
+      - "scripts/finish_portable_dist.py"
+      - "scripts/generate_qiluo_template.py"
+      - "scripts/release_guard.py"
+      - "scripts/sync_frontend_static.py"
+      - "scripts/verify_bundled_resources.py"
+      - "scripts/verify_release_dist.py"
+      - ".github/workflows/portable-windows.yml"
+      - "!docs/**"
+      - "!*.md"
+      - "!**/*.md"
+      - "!review/**"
   push:
     tags:
       - "v4*"

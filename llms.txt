@@ -21,7 +21,7 @@
 - 合成夹具：`backend/tests/fixtures/synthetic/`（例如 `lingxing_us_columns_82.xlsx`，文件名不含 `listing`）。
 - 本机私有领星表：环境变量 `FBA_LINGXING_OWNER_XLSX`。未设置或文件不存在则 pytest skip。
 - 本机货件批次：`FBA_REALDATA_DIR`。路径不存在则 skip（「需要 box realdata」）。未设置时部分用例仍看 `/workspace/fba_tool/realdata`。
-- GitHub Actions 目前只有 Portable Windows package，不跑 pytest。
+- Linux `ci`（`.github/workflows/ci.yml`）在 pull request 和 `main` 上跑 pytest 与前端 `npm run build`。Portable Windows package 在打包相关路径的 PR、`workflow_dispatch` 和 `v4*` tag 上打 Windows zip。`docs/**`、`*.md`、`review/**` 的纯文档 PR 不跑这只构建；tag 与手动触发不受路径过滤。工作流不创建 GitHub Release。
 - 已忽略：`lingxing.json`、`.env`、`app_data/`、`*.db`、`fba_tool/realdata/`、`backend/tests/golden/*.json`。
 - `frontend/.env.example` 只有占位。不要写入真实 URL 以外的钥匙。
 - 2026-10-20 留下的三份样表（发货录入样表、工厂表、货代表）在 `backend/templates/`，不进便携包白名单。不要在无关改动里删除它们。

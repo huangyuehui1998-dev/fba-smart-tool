@@ -136,7 +136,7 @@ cd frontend
 npm test
 ```
 
-`FBA_LINGXING_OWNER_XLSX` 没设或文件不在，对应用例会 skip。货件批次路径不存在时，相关用例 skip，原因里带「需要 box realdata」。GitHub Actions 里目前只有便携包工作流，它不跑 pytest。细节见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
+`FBA_LINGXING_OWNER_XLSX` 没设或文件不在，对应用例会 skip。货件批次路径不存在时，相关用例 skip，原因里带「需要 box realdata」。GitHub Actions 的 `ci` 在 Linux 上跑 pytest 和前端 `npm run build`。便携包工作流另打 Windows zip；纯文档 PR 不跑那只构建。细节见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
 ## 文档
 

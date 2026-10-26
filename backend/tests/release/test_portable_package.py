@@ -183,9 +183,40 @@ def test_windows_workflow_uploads_artifact_and_does_not_publish():
     assert "secrets." not in text
     doc = (ROOT / "docs" / "delivery" / "PORTABLE_WINDOWS_CI.md").read_text(encoding="utf-8")
     assert "FBA_Smart_Tool_V4_便携版.zip" in doc
+    assert "FBA_Smart_Tool_V4_Portable.zip" in doc
     assert "Run workflow" in doc
     assert "不要在 Linux 上解压再重新压缩" in doc
     assert "不会创建或发布 GitHub Release" in doc
     assert "首次启动崩溃根因与防再发" in doc
     assert "test_factory_policy_defaults_are_in_whitelist_and_datas" in doc
     assert "39569887016" in doc
+
+
+def test_portable_pr_paths_do_not_filter_tags_or_dispatch():
+    """PR builds only for packaging paths. Tag pushes and workflow_dispatch stay unconditional."""
+    import yaml
+
+    text = (ROOT / ".github" / "workflows" / "portable-windows.yml").read_text(encoding="utf-8")
+    data = yaml.safe_load(text)
+    # PyYAML 1.1 treats the bare key "on" as boolean true.
+    triggers = data["on"] if "on" in data else data[True]
+    assert list(triggers) == ["workflow_dispatch", "pull_request", "push"]
+    assert triggers["workflow_dispatch"] in (None, {})
+
+    pull = triggers["pull_request"]
+    assert "paths-ignore" not in pull
+    paths = pull["paths"]
+    assert "backend/**" in paths
+    assert "frontend/**" in paths
+    assert "packaging/**" in paths
+    assert ".github/workflows/portable-windows.yml" in paths
+    # Inverse patterns (paths-ignore equivalent). They must follow the positive ones.
+    for pattern in ("!docs/**", "!*.md", "!review/**"):
+        assert pattern in paths
+        assert paths.index("backend/**") < paths.index(pattern)
+
+    push = triggers["push"]
+    assert push["tags"] == ["v4*"]
+    assert "paths" not in push
+    assert "paths-ignore" not in push
+    assert "branches" not in push
