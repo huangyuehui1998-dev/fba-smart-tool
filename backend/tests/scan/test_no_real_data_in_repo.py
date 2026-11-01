@@ -109,8 +109,17 @@ def test_walk_matches_git_listing_in_worktree(tmp_path):
 
     git_dir = root / ".git"
     import shutil
+    import stat
+    import os
 
-    shutil.rmtree(git_dir)
+    def _remove_readonly(func, path, _):
+        os.chmod(path, stat.S_IWRITE)
+        func(path)
+
+    try:
+        shutil.rmtree(git_dir, onexc=_remove_readonly)
+    except TypeError:
+        shutil.rmtree(git_dir, onerror=_remove_readonly)
     assert git_text_files(root) == ["backend/note.txt", "keep.py"]
 
 
