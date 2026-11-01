@@ -6,11 +6,11 @@ Local-first tool for Amazon FBA packing, shipment checks, forwarder invoices, an
 
 ## 怎么拿到 Windows 便携版
 
-日常使用打开 [GitHub Releases](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases)，下载 Latest [v4.0.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v4.0.0) 的 **`FBA_Smart_Tool_V4_Portable.zip`**。
+日常使用打开 [GitHub Releases](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases)，下载 Latest [v5.0.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v5.0.0) 的 **`FBA_Smart_Tool_V5_便携版.zip`**。
 
-「Latest 仍是 v3.3.0、Release 上还没有 V4」这句已经过时。当前 Latest 就是 v4.0.0。更早的 [v3.3.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v3.3.0) 仍在列表里，附件是 `FBA_Smart_Tool_V3.3_Portable.zip`（产品代际 V3.3）。
+当前 Latest 为全新发布的 v5.0.0（V5 生产定稿版）。更早的 [v3.3.0](https://github.com/huangyuehui1998-dev/fba-smart-tool/releases/tag/v3.3.0) 仍在列表里，附件是 `FBA_Smart_Tool_V3.3_Portable.zip`（产品代际 V3.3）。
 
-Actions artifact 和构建输出里，内层 zip 仍可能显示中文名 `FBA_Smart_Tool_V4_便携版.zip`。Release 页面上的文件名是 `FBA_Smart_Tool_V4_Portable.zip`。来自同一个 tag 那次构建时，两份是同一批字节，用 SHA256 核对。
+发布产物为 `FBA_Smart_Tool_V5_便携版.zip`。包含完整的二进制可执行文件与静态资源，解压即用。来自同一个 tag 那次构建时，两份是同一批字节，用 SHA256 核对。
 
 解压后双击包里的 `启动FBA工具.bat`。使用步骤见 [`docs/使用说明.md`](docs/使用说明.md)。维护者打 tag、核对 SHA256 再发布的顺序见 [`docs/RELEASING.md`](docs/RELEASING.md)。
 
@@ -57,7 +57,7 @@ FBA Smart Tool 把这条流水线收成一台本机程序：FastAPI 做业务，
 - 便携版面向 Windows。源码也可以在其他系统上跑开发和测试；正式 zip 只在 GitHub Actions 的 Windows 构建机上打。日常拿哪一只包，见上文「怎么拿到 Windows 便携版」。
 - 产品入口 `run_app.py` 监听 `127.0.0.1`，首选端口 **8002**（占用时按 `PREFERRED_PORTS` 顺延，跳过 8010）。开发时请显式启动在 8002。直接执行 `python backend/main.py` 时端口来自 `FBA_PORT`，没设则是 8000，那不是日常入口。监听地址默认 `FBA_HOST=127.0.0.1`；改成非本机地址时必须同时设置 `FBA_ACCESS_TOKEN`，否则拒绝启动。
 - 出厂规则在 `backend/config/*.default.json`。你的改动写到 `app_data/config/`，不要改出厂文件来“保存设置”。
-- 产品代际是 `V4`，写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`。FastAPI 自带的 `version` 字符串是 API 文档号，和产品版本无关。
+- 产品代际是 `V5`，写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`。FastAPI 自带的 `version` 字符串是 API 文档号，和产品版本无关。
 
 更细的使用步骤见 `docs/使用说明.md`（文中个别版号可能还停在更早的交付说明上，以 `APP_VERSION` 为准）。代码地图见 `docs/架构说明.md`。
 

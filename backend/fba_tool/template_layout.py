@@ -231,6 +231,13 @@ def safe_write(ws: Worksheet, row: int, col: int, value) -> None:
                     pass
                 break
         cell = ws.cell(row=row, column=col)
+    # CWE-1236: 防范 CSV/Excel 公式注入
+    if isinstance(value, str) and value:
+        c = value[0]
+        if c in ("=", "@"):
+            value = "'" + value
+        elif c in ("+", "-") and not re.match(r"^[+-]?\d+(\.\d+)?$", value.strip()):
+            value = "'" + value
     cell.value = value
 
 

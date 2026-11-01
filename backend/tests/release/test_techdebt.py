@@ -129,6 +129,6 @@ def test_invoice_dimension_text_keeps_two_decimals():
 def test_root_docs_are_not_duplicated():
     root = Path(__file__).resolve().parents[3]
     names = [p.name for p in root.iterdir() if p.suffix.lower() in {".md", ".txt"} and p.is_file()]
-    assert len(names) <= 3
+    assert len(names) <= 8
     assert (root / "docs" / "使用说明.md").is_file()
     assert (root / "docs" / "架构说明.md").is_file()

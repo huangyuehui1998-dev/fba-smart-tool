@@ -39,10 +39,19 @@ FBA_MAX_SIDE_CM = round(FBA_MAX_SIDE_IN * 2.54, 1)
 # ---- S1e 判定口径（方案 v8 §3.4）：只按 kg/cm 判定，比较一律用“>”，计算用 Decimal ----
 LB_TO_KG_EXACT = Decimal("0.45359237")
 IN_TO_CM_EXACT = Decimal("2.54")
-GROSS_BLOCK_KG = gross_block_kg()   # 50 lb，> 阻断（多件箱）
-GROSS_WARN_KG = gross_warn_kg()     # > 内部余量，不阻断
-SIDE_BLOCK_CM = other_side_limit_cm()  # 另两边 25 in
-MECH_LIFT_KG = mech_lift_kg()       # 100 lb，> 提示 Mechanical Lift
+# 动态获取当前配置阈值（热重载即时生效）
+def current_gross_block_kg() -> Decimal:
+    return gross_block_kg()
+
+def current_gross_warn_kg() -> Decimal:
+    return gross_warn_kg()
+
+def current_side_block_cm() -> Decimal:
+    return other_side_limit_cm()
+
+def current_mech_lift_kg() -> Decimal:
+    return mech_lift_kg()
+
 BULKY_TIERS = frozenset({"small_oversize", "large_oversize", "extra_large"})
 
 Number = Union[int, float, str, Decimal]
@@ -74,20 +83,20 @@ def classify_box_weight(gross_kg: Number, single_oversize: bool = False) -> str:
     """返回 ok / warn / block / team_lift / mechanical_lift。"""
     g = to_decimal(gross_kg)
     if single_oversize:
-        if g > MECH_LIFT_KG:
+        if g > current_mech_lift_kg():
             return "mechanical_lift"
-        if g > GROSS_BLOCK_KG:
+        if g > current_gross_block_kg():
             return "team_lift"
         return "ok"
-    if g > GROSS_BLOCK_KG:
+    if g > current_gross_block_kg():
         return "block"
-    if g > GROSS_WARN_KG:
+    if g > current_gross_warn_kg():
         return "warn"
     return "ok"
 
 
 def side_exceeds(side_cm: Number) -> bool:
-    return to_decimal(side_cm) > SIDE_BLOCK_CM
+    return to_decimal(side_cm) > current_side_block_cm()
 
 
 _engine = PlacementFeeEngine()
@@ -108,7 +117,7 @@ def _unit_tier(sku: Optional[SkuRow]) -> Optional[str]:
 def _unit_over_50(sku: Optional[SkuRow]) -> bool:
     if sku is None or not sku.unit_weight_kg:
         return False
-    return to_decimal(sku.unit_weight_kg) > GROSS_BLOCK_KG
+    return to_decimal(sku.unit_weight_kg) > current_gross_block_kg()
 
 
 def _sku_is_oversize(sku: SkuRow, gross_kg: Optional[float] = None) -> bool:
@@ -151,19 +160,21 @@ def _scan_boxes(
     metrics_df: pd.DataFrame,
     destination: str = "FBA",
 ) -> List[Dict[str, Any]]:
-    """按 200141510 的 (a)(b)(c) 给每箱一个结论。"""
     if editor_df is None or editor_df.empty:
         return []
     sku_map = {s.sku: s for s in sku_rows}
     gross = _gross_by_box(metrics_df)
-    longest_limit = to_decimal(rule_value("fba_multi_longest_in"))
-    longer_slack = to_decimal(rule_value("box_longer_than_item_in"))
+    longest_limit = to_decimal(rule_value("single_oversize_exemption_in", 25.0))
+    longer_slack = to_decimal(rule_value("cushion_max_slack_in", 2.0))
     limit_65 = single_oversize_max_kg()
     limit_100 = mech_lift_kg()
     awd = str(destination or "FBA").upper() == "AWD"
     out: List[Dict[str, Any]] = []
     for box_no, group in editor_df.groupby("箱号"):
-        bn = int(box_no)
+        try:
+            bn = int(box_no)
+        except (ValueError, TypeError):
+            bn = 0
         carrier = _carrier_sku(group, sku_map)
         sku = _single_sku(group, sku_map)
         tier = _unit_tier(sku)
@@ -179,25 +190,50 @@ def _scan_boxes(
             sides_cm = sorted([carrier.length_cm, carrier.width_cm, carrier.height_cm], reverse=True)
             box_longest = _sorted_inches(carrier.length_cm, carrier.width_cm, carrier.height_cm)[0]
             over_dim = dimension_blocked(carrier.length_cm, carrier.width_cm, carrier.height_cm, destination)
-        condition_c = bool(single_bulky and item_longest is not None and item_longest > longest_limit)
+        
+        # 单件装箱判定：箱内商品总件数必须严格为 1，且仅有 1 个 SKU
+        total_box_qty = int(pd.to_numeric(group["数量"], errors="coerce").fillna(0).sum()) if "数量" in group.columns else 0
+        sku_unique_count = group["SKU简称"].nunique() if "SKU简称" in group.columns else 1
+        single_box = bool(total_box_qty == 1 and sku_unique_count == 1)
+
+        # 单件大件豁免条件 C：仅单箱单件大件商品时豁免；若单品净尺寸缺失则柔性降级放行（不硬阻断）
+        if single_box:
+            if item_longest is not None:
+                condition_c = bool(item_longest > longest_limit or single_bulky)
+            else:
+                condition_c = bool(box_longest is not None and box_longest > longest_limit)
+        else:
+            condition_c = False
+
         g = to_decimal(gross[bn]) if bn in gross else None
-        over_50 = g is not None and g > GROSS_BLOCK_KG
+        over_50 = g is not None and g > current_gross_block_kg()
         over_65 = g is not None and g > limit_65
         over_100 = g is not None and g > limit_100
         within = not over_dim
         pending_overlay = bool(condition_c and item_over_50 and over_dim and over_50)
 
-        dim_blocked = bool(over_dim and (awd or not condition_c))
+        # AWD 仓库严格禁止单件大件豁免，超过 25 in 必须硬阻断；FBA 仓库在符合 condition_c 时豁免
+        # 若外箱次长边 > 25 in 且单品次长边 <= 25 in，则外箱次长边不可豁免，必须阻断
+        box_second = _sorted_inches(carrier.length_cm, carrier.width_cm, carrier.height_cm)[1] if carrier else None
+        item_second = _sorted_inches(sku.unit_length_cm, sku.unit_width_cm, sku.unit_height_cm)[1] if (sku and tier) else None
+        side_two_unexempt = bool(box_second is not None and box_second > 25.0 and (item_second is None or item_second <= 25.0))
+        dim_blocked = bool(over_dim and (awd or not condition_c or side_two_unexempt))
         weight_blocked = False
         lift = None
+
         if g is not None:
-            if pending_overlay or item_over_50:
+            if awd and over_50:
+                # AWD 仓库禁止单箱毛重超过 50 lb，无大件重量豁免
+                weight_blocked = True
+            elif pending_overlay or item_over_50:
                 if over_100:
                     lift = "Mechanical Lift"
                 elif over_50:
                     lift = "Team Lift"
-            elif single_bulky and within:
-                if over_65:
+            elif single_bulky or condition_c:
+                if over_100:
+                    lift = "Mechanical Lift"
+                elif over_65:
                     weight_blocked = True
                 elif over_50:
                     lift = "Team Lift"
@@ -209,7 +245,7 @@ def _scan_boxes(
             and not single_bulky
             and not item_over_50
             and not weight_blocked
-            and g > GROSS_WARN_KG
+            and g > current_gross_warn_kg()
         )
         longer = bool(
             condition_c
@@ -230,8 +266,11 @@ def _scan_boxes(
                 "lift": lift,
                 "longer_than_item": longer,
                 "pending_overlay": pending_overlay,
-                "awd": awd and over_dim,
+                "awd": awd and (over_dim or over_50),
+                "awd_weight": bool(awd and over_50),
                 "exempt": exempt,
+                "single_box": single_box,
+                "condition_c": condition_c,
             }
         )
     return out
@@ -251,10 +290,21 @@ def _carrier_sku(group: pd.DataFrame, sku_map: Dict[str, SkuRow]) -> Optional[Sk
     return best
 
 
-def _gross_by_box(metrics_df: pd.DataFrame) -> Dict[int, float]:
+def _gross_by_box(metrics_df: pd.DataFrame) -> Dict[Any, float]:
     if metrics_df is None or metrics_df.empty or "毛重(kg)" not in metrics_df.columns:
         return {}
-    return {int(r["箱号"]): float(r["毛重(kg)"]) for _, r in metrics_df.iterrows()}
+    res: Dict[Any, float] = {}
+    for _, r in metrics_df.iterrows():
+        b = r.get("箱号")
+        try:
+            k = int(b)
+        except (ValueError, TypeError):
+            k = str(b).strip() if b is not None else ""
+        try:
+            res[k] = float(r["毛重(kg)"])
+        except (ValueError, TypeError):
+            pass
+    return res
 
 
 def _fmt_sides(sides: List[float]) -> str:
@@ -302,11 +352,12 @@ def check_box_weight_notices(
     editor_df: pd.DataFrame,
     sku_rows: List[SkuRow],
     metrics_df: pd.DataFrame,
+    destination: str = "FBA",
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """返回 (内部余量预警, Team/Mechanical Lift)。单件超大箱不触发 22.5kg 预警。"""
     warns: List[Dict[str, Any]] = []
     lifts: List[Dict[str, Any]] = []
-    for row in _scan_boxes(editor_df, sku_rows, metrics_df):
+    for row in _scan_boxes(editor_df, sku_rows, metrics_df, destination):
         g = row["gross_kg"]
         if g is None:
             continue
@@ -324,6 +375,11 @@ def check_box_weight_notices(
         if row["lift"]:
             label = row["lift"]
             pending = "待核实。" if row["pending_overlay"] else ""
+            msg = (
+                f"箱 {bn} 毛重 {g:.2f} kg，超过 100 lb，须在顶部及 4 个侧面共贴 5 张 Mechanical Lift 标签。{pending}"
+                if label == "Mechanical Lift"
+                else f"箱 {bn} 毛重 {g:.2f} kg，超过 50 lb，须在顶部及 4 个侧面共贴 5 张 Team Lift 标签。{pending}"
+            )
             lifts.append(
                 {
                     "box_no": bn,
@@ -332,7 +388,7 @@ def check_box_weight_notices(
                     "source": "pending" if row["pending_overlay"] else "amazon",
                     "source_type": "pending_verification" if row["pending_overlay"] else "amazon_official",
                     "pending_verification": bool(row["pending_overlay"]),
-                    "message": f"箱 {bn} 毛重 {g:.2f} kg，请贴 {label} 标签。{pending}",
+                    "message": msg,
                 }
             )
     return warns, lifts
@@ -342,11 +398,12 @@ def check_box_fit_warnings(
     editor_df: pd.DataFrame,
     sku_rows: List[SkuRow],
     metrics_df: pd.DataFrame,
+    destination: str = "FBA",
 ) -> List[Dict[str, Any]]:
     """箱子最长边比商品长出的英寸数超过内部阈值时提示，不阻断。"""
     out: List[Dict[str, Any]] = []
     entry = rule("box_longer_than_item_in")
-    for row in _scan_boxes(editor_df, sku_rows, metrics_df):
+    for row in _scan_boxes(editor_df, sku_rows, metrics_df, destination):
         if not row["longer_than_item"]:
             continue
         out.append(
@@ -355,7 +412,7 @@ def check_box_fit_warnings(
                 "level": "warn",
                 "source": "internal",
                 "source_type": entry.get("source_type"),
-                "message": f"箱 {row['box_no']} 箱子明显长于商品",
+                "message": f"箱 {row['box_no']} 箱子明显长于商品（外箱长于商品超过 2 英寸），请确认包装缓冲衬垫厚度 ≤ 2 英寸，避免入库缺陷费",
             }
         )
     return out
@@ -389,32 +446,45 @@ def check_carton_side_warnings(sku_rows: List[SkuRow]) -> List[Dict[str, Any]]:
                 "limit_in": FBA_MAX_SIDE_IN,
                 "message": (
                     f"SKU {sku.sku} 外箱{over_side.replace('(cm)', '')} {sides[over_side]:.1f} cm "
-                    f"超过多件箱尺寸上限 36×25×25 in，存在拒收风险"
+                    f"超过多件箱尺寸上限 25×25×25 in（63.5cm），存在拒收风险"
                 ),
             }
         )
     return warnings
 
 
+def _calc_box_count(editor_df: pd.DataFrame) -> int:
+    """安全计算箱数，使用 nunique 防御离散箱号，空值/字符串脏数据优雅回退。"""
+    if editor_df is None or editor_df.empty or "箱号" not in editor_df.columns:
+        return 0
+    s = pd.to_numeric(editor_df["箱号"], errors="coerce").dropna()
+    if not s.empty:
+        return int(s.nunique())
+    return int(editor_df["箱号"].astype(str).str.strip().nunique())
+
+
 def check_box_count_limit(
     editor_df: pd.DataFrame,
     transport_mode: str = SPD_PARTNERED,
 ) -> Optional[Dict[str, Any]]:
-    """按运输方式检查单票箱数。自选承运人没有官方上限，只提示。"""
+    """按运输方式检查单票箱数。自选承运人上限 500 箱，合作承运人 200 箱，LTL 5000 箱。"""
+    if editor_df is None or editor_df.empty:
+        return None
+    box_count = _calc_box_count(editor_df)
     mode = normalize_transport(transport_mode)
     if mode == SPD_OWN:
         entry = rule("boxes_spd_own")
+        limit = int(entry.get("value") or 500)
+        if box_count <= limit:
+            return None
         return {
-            "box_count": int(editor_df["箱号"].astype(int).max()) if editor_df is not None and not editor_df.empty else 0,
-            "limit": None,
-            "level": "info",
-            "source": "internal",
+            "box_count": box_count,
+            "limit": limit,
+            "level": "warn",
+            "source": result_source(entry.get("source_type")),
             "source_type": entry.get("source_type"),
-            "message": "自选承运人小包裹箱数上限未找到官方出处，请以 STA 页面为准",
+            "message": f"当前方案共 {box_count} 箱，超过自选承运人单票建议上限 {limit} 箱，请核实 Send to Amazon 页面要求并考虑拆分货件",
         }
-    if editor_df is None or editor_df.empty:
-        return None
-    box_count = int(editor_df["箱号"].astype(int).max())
     if mode == LTL:
         entry = rule("boxes_ltl")
         limit = int(entry["value"])
@@ -446,16 +516,20 @@ def check_box_gross_violations(
     editor_df: pd.DataFrame,
     sku_rows: List[SkuRow],
     metrics_df: pd.DataFrame,
+    destination: str = "FBA",
 ) -> List[Dict[str, Any]]:
-    """超过 50 lb 或单件超大箱超过 65 lb 时阻断。条件 (a) 和 36×25×25 内的 50–65 lb 不阻断。"""
+    """超过 50 lb 或单件超大箱超过 65 lb 时阻断。AWD 仓库超过 50 lb 严禁入库。"""
     if metrics_df is None or metrics_df.empty or editor_df is None or editor_df.empty:
         return []
     violations: List[Dict[str, Any]] = []
-    for row in _scan_boxes(editor_df, sku_rows, metrics_df):
+    for row in _scan_boxes(editor_df, sku_rows, metrics_df, destination):
         if not row["weight_blocked"] or row["gross_kg"] is None:
             continue
         gross_kg = float(row["gross_kg"])
-        if row["weight_over_65"]:
+        if row.get("awd_weight"):
+            entry = rule("awd_max_weight_lb")
+            message = f"箱 {row['box_no']} 毛重 {gross_kg:.2f} kg 超过 AWD 仓库上限 50 lb（22.68kg），AWD 严禁超重箱"
+        elif row["weight_over_65"]:
             entry = rule("single_oversize_max_lb")
             message = f"箱 {row['box_no']} 毛重 {gross_kg:.2f} kg 超过 65 lb（29.48kg）上限"
         else:
@@ -464,10 +538,7 @@ def check_box_gross_violations(
         violations.append(
             {
                 "box_no": row["box_no"],
-                "gross_kg": round(gross_kg, 3),
-                "limit_kg": FBA_MAX_STANDARD_GROSS_KG,
-                "limit_lb": FBA_MAX_STANDARD_GROSS_LB,
-                "exempt_oversize_single": False,
+                "gross_kg": gross_kg,
                 "source": result_source(entry.get("source_type")),
                 "source_type": entry.get("source_type"),
                 "message": message,
@@ -577,10 +648,10 @@ def evaluate_fba_boxing_compliance(
 ) -> Dict[str, Any]:
     """汇总 FBA 物理红线：blocked = 存在不可豁免的毛重、尺寸或政策硬限制。"""
     side_warnings = check_carton_side_warnings(sku_rows)
-    gross_violations = check_box_gross_violations(editor_df, sku_rows, metrics_df)
+    gross_violations = check_box_gross_violations(editor_df, sku_rows, metrics_df, destination)
     side_violations = check_box_side_violations(editor_df, sku_rows, metrics_df, destination)
-    weight_warnings, lift_notices = check_box_weight_notices(editor_df, sku_rows, metrics_df)
-    fit_warnings = check_box_fit_warnings(editor_df, sku_rows, metrics_df)
+    weight_warnings, lift_notices = check_box_weight_notices(editor_df, sku_rows, metrics_df, destination)
+    fit_warnings = check_box_fit_warnings(editor_df, sku_rows, metrics_df, destination)
     box_count_warning = check_box_count_limit(editor_df, transport_mode)
     policy_findings = _policy_box_findings(editor_df, sku_rows, metrics_df)
 
@@ -618,8 +689,8 @@ def evaluate_fba_boxing_compliance(
             "max_standard_gross_lb": FBA_MAX_STANDARD_GROSS_LB,
             "max_side_cm": float(FBA_MAX_SIDE_CM),
             "max_side_in": FBA_MAX_SIDE_IN,
-            "warn_gross_kg": float(GROSS_WARN_KG),
-            "mechanical_lift_kg": float(MECH_LIFT_KG),
+            "warn_gross_kg": float(current_gross_warn_kg()),
+            "mechanical_lift_kg": float(current_mech_lift_kg()),
             "single_oversize_max_kg": float(single_oversize_max_kg()),
             "max_longest_in": float(rule_value("fba_multi_longest_in")),
             "max_other_side_in": float(rule_value("fba_multi_other_side_in")),
@@ -654,3 +725,15 @@ def boxing_api_compliance(
         editor_df, sku_rows, enriched, transport_mode=transport_mode
     )
     return enriched, compliance
+
+
+def __getattr__(name: str):
+    if name == "GROSS_BLOCK_KG":
+        return current_gross_block_kg()
+    if name == "GROSS_WARN_KG":
+        return current_gross_warn_kg()
+    if name == "SIDE_BLOCK_CM":
+        return current_side_block_cm()
+    if name == "MECH_LIFT_KG":
+        return current_mech_lift_kg()
+    raise AttributeError(f"module '{__name__}' has no attribute '{name}'")

@@ -24,7 +24,7 @@ WAREHOUSE_CODE_RE = re.compile(r"^[A-Z]{3}\d{1,2}$")
 BUILTIN_WAREHOUSE_CODES: frozenset[str] = frozenset(
     {
         # AZ
-        "PHX3", "PHX5", "PHX6", "PHX7", "PHX8", "PHX9", "TFC1", "GYR2", "GYR4",
+        "PHX3", "PHX5", "PHX6", "PHX7", "PHX8", "PHX9", "TFC1", "GYR1", "GYR2", "GYR3", "GYR4",
         "DPX1", "DPX3", "DPX7", "DPX8", "TUS1", "TUS2", "RAZ1", "RPX1",
         # CA
         "LGB3", "LGB4", "LGB5", "LGB6", "LGB7", "LGB8", "LGB9", "OAK3", "OAK4",
@@ -137,6 +137,7 @@ def reload_user_warehouse_codes() -> None:
     _user_warehouse_codes.cache_clear()
 
 
+@lru_cache(maxsize=1)
 def _db_warehouse_codes() -> frozenset[str]:
     """产品库 fba_warehouse 表里的仓库代码（琪珞仓库表导入）。表不存在或读失败时返回空集。"""
     try:
@@ -147,6 +148,13 @@ def _db_warehouse_codes() -> frozenset[str]:
         return frozenset()
 
 
+def reload_warehouse_codes_cache() -> None:
+    _db_warehouse_codes.cache_clear()
+    _user_warehouse_codes.cache_clear()
+    known_warehouse_codes.cache_clear()
+
+
+@lru_cache(maxsize=1)
 def known_warehouse_codes() -> frozenset[str]:
     """fba_warehouse 表 + 内置 + 用户自定义的完整白名单。"""
     return _db_warehouse_codes() | BUILTIN_WAREHOUSE_CODES | _user_warehouse_codes()

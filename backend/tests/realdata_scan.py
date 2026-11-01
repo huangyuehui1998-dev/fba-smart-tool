@@ -50,6 +50,8 @@ def _keep_text_rel(rel: str) -> bool:
 
 
 def _git_available(root: Path) -> bool:
+    if not (root / ".git").exists():
+        return False
     try:
         subprocess.check_output(
             ["git", "rev-parse", "--is-inside-work-tree"],

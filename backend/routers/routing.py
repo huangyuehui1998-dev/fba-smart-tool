@@ -1,6 +1,11 @@
-from typing import List
-from fastapi import APIRouter, File, UploadFile, HTTPException
+import asyncio
 import json
+import re
+from typing import Any, Dict, List, Tuple
+from urllib.parse import quote
+
+from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 import pandas as pd
 from loguru import logger
 
@@ -27,85 +32,89 @@ class RoutingSnapshotSaveBody(BaseModel):
 class RoutingExportBody(BaseModel):
     forwarder: List[Dict[str, Any]]
 
-@router.post("/api/routing/preview")
-async def api_routing_preview(files: List[UploadFile] = File(...)):
-    """上传多个刷仓CSV，合并生成货代表数据预览"""
-    if not files:
-        raise HTTPException(status_code=400, detail="未上传文件")
-
-    # 根据票数排序文件
-    sorted_files = sorted(files, key=lambda f: extract_ticket_rank(f.filename or ""))
-    
+def _process_routing_batch_sync(file_payloads: List[Tuple[str, bytes]]) -> Tuple[List[Dict[str, Any]], List[str]]:
+    """在工作线程中同步执行重度 Pandas 解析与数据聚合，不阻塞 FastAPI 主事件循环。"""
+    sorted_files = sorted(file_payloads, key=lambda item: extract_ticket_rank(item[0]))
     all_specs = []
     all_items = []
-    # 记录仓库到票序的映射，用于最后排序
     warehouse_rank_map = {}
-
     warnings: List[str] = []
-    for idx, file in enumerate(sorted_files):
-        filename = file.filename or "UNKNOWN.csv"
+
+    for idx, (filename, content) in enumerate(sorted_files):
         rank = extract_ticket_rank(filename)
         try:
-            content = await file.read()
-            # 开启 allow_unassigned_fba 模式；file_name 留空，只取 CSV 自身的仓库代码（S8 D2）
             shipment = parse_csv_shipment(content, allow_unassigned_fba=True, file_name="")
-            warehouse_code, _src, warn = resolve_routing_warehouse(shipment.warehouse_code, filename)
+            warehouse_code, _src, warn = resolve_routing_warehouse(shipment.warehouse_code, filename, is_routing_mode=True)
             if warn:
                 warnings.append(warn)
             if warehouse_code not in warehouse_rank_map:
                 warehouse_rank_map[warehouse_code] = rank if rank != 999 else 1000 + idx
-            
-            # 覆盖仓库代码
+
             if not shipment.box_specs.empty:
                 shipment.box_specs["仓库代码"] = warehouse_code
+                shipment.box_specs["原始仓库代码"] = shipment.warehouse_code or "UNKN"
                 all_specs.append(shipment.box_specs)
-                
+
             if not shipment.box_items.empty:
                 shipment.box_items["仓库代码"] = warehouse_code
+                shipment.box_items["原始仓库代码"] = shipment.warehouse_code or "UNKN"
                 all_items.append(shipment.box_items)
-                
         except Exception as e:
             logger.exception(f"解析 {filename} 失败")
             raise HTTPException(status_code=400, detail=f"解析 {filename} 失败: {str(e)}")
 
     if not all_specs:
-        raise HTTPException(status_code=400, detail="上传的文件未能解析出任何箱规数据")
+        raise HTTPException(status_code=400, detail="上传文件未能解析出任何装箱数据")
 
     combined_specs = pd.concat(all_specs, ignore_index=True)
     combined_items = pd.concat(all_items, ignore_index=True) if all_items else None
 
-    # 生成货代表
     forwarder_df = build_forwarder_df(combined_specs, combined_items)
-    
-    # 按预期的票序排序
+
     if not forwarder_df.empty:
-        # 去掉小计行进行排序，然后再重新加上？
-        # 其实可以直接利用 _ticket_rank
-        # 为了不破坏原有的小计，我们自己处理排序：
-        # 先分离出非小计行进行排序，然后重新调用小计？
-        # forwarder_quote 提供了 sort_forwarder_by_warehouse_ticket，但它期望对象。我们可以自己构造。
         from fba_tool.forwarder_quote import _strip_subtotal_rows, append_warehouse_subtotals
-        
         detail = _strip_subtotal_rows(forwarder_df)
         if not detail.empty:
             work = detail.copy()
             work["_ticket_rank"] = work["仓库代码"].astype(str).map(lambda w: warehouse_rank_map.get(w, 9999))
-            
             sort_cols = ["_ticket_rank", "仓库代码"]
             if "SKU" in work.columns:
                 sort_cols.append("SKU")
-                
             work = work.sort_values(sort_cols, kind="stable").drop(columns=["_ticket_rank"])
             forwarder_df = append_warehouse_subtotals(work)
 
-    # 替换 NaN
     forwarder_df = forwarder_df.fillna("")
-    from urllib.parse import quote
-    from fastapi.responses import JSONResponse
     from fastapi.encoders import jsonable_encoder
+    records = jsonable_encoder(forwarder_df.to_dict(orient="records"))
+    return records, warnings
 
-    headers = {"X-Routing-Warnings": quote(json.dumps(warnings, ensure_ascii=False))} if warnings else {}
-    return JSONResponse(jsonable_encoder(forwarder_df.to_dict(orient="records")), headers=headers)
+
+@router.post("/api/routing/preview")
+async def api_routing_preview(files: List[UploadFile] = File(...)):
+    """上传刷仓CSV合并生成货代表预估（带 DoS 熔断与工作线程池卸载）。"""
+    if not files:
+        raise HTTPException(status_code=400, detail="未上传文件")
+    if len(files) > 50:
+        raise HTTPException(status_code=400, detail="单次批量上传最多支持 50 个文件")
+
+    total_bytes = 0
+    file_payloads: List[Tuple[str, bytes]] = []
+    for file in files:
+        content = await file.read()
+        total_bytes += len(content)
+        if total_bytes > 50 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="批量上传总文件大小超过 50MB 限制")
+        file_payloads.append((file.filename or "UNKNOWN.csv", content))
+
+    forwarder_records, warnings = await asyncio.to_thread(_process_routing_batch_sync, file_payloads)
+
+    clean_warnings = [re.sub(r"[\r\n]+", " ", str(w)).strip() for w in warnings if w]
+    encoded_warn = quote(json.dumps(clean_warnings, ensure_ascii=False))
+    if len(encoded_warn) > 3500:
+        clean_warnings = clean_warnings[:10] + ["... (告警较多已截断)"]
+        encoded_warn = quote(json.dumps(clean_warnings, ensure_ascii=False))
+    headers = {"X-Routing-Warnings": encoded_warn} if clean_warnings else {}
+    return JSONResponse(forwarder_records, headers=headers)
 
 
 @router.post("/api/routing/export")
