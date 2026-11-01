@@ -32,8 +32,17 @@ def rule(key: str) -> Dict[str, Any]:
     return dict(found)
 
 
-def rule_value(key: str) -> Any:
-    return rule(key).get("value")
+def reload_policy() -> None:
+    """清除政策缓存，使得运行时热更新生效。"""
+    load_policy.cache_clear()
+
+
+def rule_value(key: str, default: Any = None) -> Any:
+    try:
+        val = rule(key).get("value")
+        return default if val is None else val
+    except KeyError:
+        return default
 
 
 def inches_to_cm(inches: Any) -> Decimal:
@@ -86,6 +95,18 @@ def other_side_limit_cm() -> Decimal:
 
 def awd_side_limit_cm() -> Decimal:
     return inches_to_cm(rule_value("awd_box_side_in"))
+
+
+def single_oversize_exemption_limit_cm() -> Decimal:
+    return inches_to_cm(rule_value("single_oversize_exemption_in", 25.0))
+
+
+def cushion_max_slack_cm() -> Decimal:
+    return inches_to_cm(rule_value("cushion_max_slack_in", 2.0))
+
+
+def awd_max_weight_kg() -> Decimal:
+    return pounds_to_kg(rule_value("awd_max_weight_lb", 50.0)).quantize(Decimal("0.01"))
 
 
 def gross_block_kg() -> Decimal:

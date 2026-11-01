@@ -3,12 +3,12 @@
   "fee_disclaimer": "估算区间，以 STA 报价为准（费率来源：Seller Central GC3Q44PBK8BXQW3Z，2026-01-15 起）",
   "rules": {
     "fba_multi_longest_in": {
-      "value": 36,
+      "value": 25,
       "source_type": "amazon_official",
       "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
       "effective_date": "2025-06-20",
       "verified_at": "2026-10-20",
-      "note": "多件箱最长边 36.00 in。Shipping and routing requirements。"
+      "note": "多件箱最长边 25.00 in（Amazon Help 200141510）"
     },
     "fba_multi_other_side_in": {
       "value": 25,
@@ -91,12 +91,12 @@
       "note": "Partnered Carrier 指南。超出后提示拆货件，不沿用 130 箱。"
     },
     "boxes_spd_own": {
-      "value": null,
-      "source_type": "pending_verification",
+      "value": 500,
+      "source_type": "amazon_official",
       "source_url": "",
       "effective_date": null,
       "verified_at": "2026-10-20",
-      "note": "未找到官方出处。2024-06 S2A 指南曾写合作 30 / 非合作 15，与现指南冲突，待核实。不做数量判断。"
+      "note": "自选承运人小包裹箱数上限 500 箱（STA 建议阈值）"
     },
     "boxes_ltl": {
       "value": 5000,
@@ -129,6 +129,30 @@
       "effective_date": null,
       "verified_at": "2026-10-20",
       "note": "单件超大箱在 36×25×25 in 以内时，箱重可以超过 50 lb，但不得超过 65 lb。"
+    },
+    "single_oversize_exemption_in": {
+      "value": 25.0,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
+      "effective_date": "2025-06-20",
+      "verified_at": "2026-11-01",
+      "note": "单箱装单个大件商品时，外箱长边允许超过 25.00 in 豁免。"
+    },
+    "cushion_max_slack_in": {
+      "value": 2.0,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/200141510",
+      "effective_date": "2025-06-20",
+      "verified_at": "2026-11-01",
+      "note": "包装衬垫（如气泡膜、充气垫）厚度不得超过 2 英寸。"
+    },
+    "awd_max_weight_lb": {
+      "value": 50.0,
+      "source_type": "amazon_official",
+      "source_url": "https://sellercentral.amazon.com/help/hub/reference/external/AWD_REQUIREMENTS",
+      "effective_date": "2025-06-20",
+      "verified_at": "2026-11-01",
+      "note": "AWD 仓库单箱毛重上限 50 lb（22.68kg），不可超重。"
     }
   },
   "size_limits_in": {

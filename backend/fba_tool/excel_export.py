@@ -627,7 +627,7 @@ def _write_forwarder_simple(df: pd.DataFrame) -> bytes:
         for ci, col in enumerate(display_cols, start=1):
             if is_forwarder_subtotal_row(row) and col in ("箱子宽(cm)", "箱子高(cm)"):
                 continue
-            ws.cell(row_idx, ci, _format_forwarder_export_cell(col, row))
+            safe_write(ws, row_idx, ci, _format_forwarder_export_cell(col, row))
 
         if is_forwarder_subtotal_row(row):
             subtotal_rows.append(row_idx)

@@ -51,8 +51,9 @@ def _eval_box(length, width, height, gross, qty=2, category="other", kinds=1, de
 
 
 def test_dimension_boundaries():
-    assert _eval_box(90, 60, 60, 10)["blocked"] is False
-    assert _eval_box(92, 60, 60, 10)["blocked"] is True
+    # 多件箱边长上限 25.00 in (63.50 cm)
+    assert _eval_box(63, 60, 60, 10)["blocked"] is False
+    assert _eval_box(64, 60, 60, 10)["blocked"] is True
     assert _eval_box(64, 64, 40, 10)["blocked"] is True
 
 
@@ -89,8 +90,17 @@ def test_unit_count_and_transport():
         pd.DataFrame(),
         "spd_own",
     )
-    notes = [line for line in own["summary_lines"] if "上限未找到官方出处" in line]
-    assert notes == ["自选承运人小包裹箱数上限未找到官方出处，请以 STA 页面为准"]
+    assert own["box_count_warning"] is None
+    assert own["blocked"] is False
+    own_over = evaluate_fba_boxing_compliance(
+        pd.DataFrame({"箱号": list(range(1, 502)), "SKU简称": "TEST_A", "数量": 1}),
+        [],
+        pd.DataFrame(),
+        "spd_own",
+    )
+    assert own_over["box_count_warning"] is not None
+    assert own_over["box_count_warning"]["level"] == "warn"
+    assert "500" in own_over["box_count_warning"]["message"]
     assert own["blocked"] is False
 
 

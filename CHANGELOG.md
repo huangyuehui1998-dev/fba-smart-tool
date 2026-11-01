@@ -2,11 +2,20 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-产品代际写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`（当前 **V4**）。Git tag 使用 `v4.MINOR.PATCH`。发布步骤见 `docs/RELEASING.md`。
+产品代际写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`（当前 **V5**）。Git tag 使用 `v5.MINOR.PATCH`。发布步骤见 `docs/RELEASING.md`。
 
 更早的交付说明在 `docs/delivery/`。那些文档记录的是当时的包，不从这份骨架倒推成已发布的 GitHub Release。
 
 ## [Unreleased]
+
+## [5.0.0] - 2026-11-01
+
+### 新增与核心优化
+- **官方大件 25 英寸（63.5 cm）政策豁免放行**：严格按亚马逊官方 Help 200141510 规范，单箱单件大件商品纸箱依法豁免 25 英寸箱长限制；多件混装箱超 25 英寸坚决阻断；AWD 仓库双重物理硬阻断（长边 > 25 in 或毛重 > 50 lb）。
+- **Team Lift / Mechanical Lift 规范贴标**：单件大件毛重在 50~65 lb 之间柔性放行并强制要求贴附 5 面 Team Lift 标签；超过 100 lb 强制提示 Mechanical Lift；未填单品净尺寸自动柔性降级提示核实缓冲衬垫（≤ 2 英寸）。
+- **货代刷仓双模优先级与智能路由解耦**：刷仓模式（`is_routing_mode=True`）下文件名优先级决胜内部旧仓码；内置 `BLACKLIST_TOKENS` 过滤 `BOX1`、`CASE1` 等伪仓码；各仓 Subtotal CBM 自动汇总并导出浅蓝高亮货代表；普通单票发货模式 100% 维持历史向后兼容。
+- **箱数阶梯限额与离散容错计数**：支持 SPD Partnered（200 箱）、SPD Own（500 箱）、LTL（5,000 箱）阶梯拦截，采用 `nunique()` 离散纸箱计数彻底消除跳号 `[1, 2, 205]` 误判超标的顽疾。
+- **工业级全栈安全与高并发强化**：全量 Excel 导出接入 `safe_write` 单引号前置转义，彻底消灭 CWE-1236 公式注入；50 个文件与 50MB 批量上传 DoS 熔断；Pandas 密集计算移交 `asyncio.to_thread` 工作线程；动态政策热重载与白名单 LRU 单例缓存。
 
 ### 变更
 
