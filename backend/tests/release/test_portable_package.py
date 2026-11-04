@@ -218,7 +218,7 @@ def test_portable_pr_paths_do_not_filter_tags_or_dispatch():
         assert paths.index("backend/**") < paths.index(pattern)
 
     push = triggers["push"]
-    assert push["tags"] == ["v4*"]
+    assert push["tags"] == ["v4*", "v5*"]
     assert "paths" not in push
     assert "paths-ignore" not in push
     assert "branches" not in push
