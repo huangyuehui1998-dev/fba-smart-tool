@@ -6,7 +6,7 @@
 
 ## 产品
 
-- 代际：`APP_VERSION = "V5"`，文件 `backend/fba_tool/app_version.py`。界面和便携包文件名跟它走。
+- 代际：`APP_VERSION = "V5.1"`，文件 `backend/fba_tool/app_version.py`。界面和便携包文件名跟它走。
 - FastAPI 的 `version` 字符串是 API 文档号，不是产品版本。
 - 界面名字和 step id：`1 录入`=1，`2 排箱`=2，`3 导出`=3，`7 刷仓`=3.5，`4 货件校验`=4，`5 发票`=4.5（Univer 离线预览），`6 报关`=5。见 `frontend/src/lib/workflow-steps.ts`。
 - 货代模板 id：`send`、`jiufang`（九方）、`qiluo`（琪珞）、`qiluo_t5`、`qiluo_t6`、`deshu`（德速）。
@@ -26,14 +26,14 @@
 - `frontend/.env.example` 只有占位。不要写入真实 URL 以外的钥匙。
 - 2026-10-20 留下的三份样表（发货录入样表、工厂表、货代表）在 `backend/templates/`，不进便携包白名单。不要在无关改动里删除它们。
 - `packaging/Step5报关资料_架构与工作流.txt` 的示例是 `DEMO-ORDER` / `DEMO` / `FBA-DEMO`。`backend/tests` 与 `docs/方案`、`docs/用户决策记录.md` 里可能仍有历史货件号 / SKU，不要当成可外发的业务数据。
-- 已核对的历史便携包内层文件名是 `FBA_Smart_Tool_V3.3_便携版.zip`（历史包名、非当前 V4）。当前 artifact 是 `FBA_Smart_Tool_V5_便携版.zip`。
+- 已核对的历史便携包内层文件名是 `FBA_Smart_Tool_V3.3_便携版.zip`（历史包名、非当前 V4）。当前 artifact 是 `FBA_Smart_Tool_V5.1_便携版.zip`。
 
 ## 构建与发布
 
 - 便携包只由 GitHub Actions 工作流 Portable Windows package 在 `windows-latest` 上构建。Python 3.12，Node 22。
 - tag 过滤器：`v4*`。工作流不创建 GitHub Release。
-- 产物：`dist/FBA_Smart_Tool_V5_便携版.zip`。发布前用 Actions 摘要核对 SHA256。
-- Release 附件是 `FBA_Smart_Tool_V5_便携版.zip`（与 Actions 内层 `FBA_Smart_Tool_V5_便携版.zip` 同一份字节）。文档已按这两个名字对齐：日常用户从 Releases 的 Latest v4.0.0 下载 Portable.zip。运营机器人不点 Publish，只有维护者发布。见 README「怎么拿到 Windows 便携版」。
+- 产物：`dist/FBA_Smart_Tool_V5.1_便携版.zip`。发布前用 Actions 摘要核对 SHA256。
+- Release 附件是 `FBA_Smart_Tool_V5.1_便携版.zip`（与 Actions 内层 `FBA_Smart_Tool_V5.1_便携版.zip` 同一份字节）。文档已按这两个名字对齐：日常用户从 Releases 的 Latest v4.0.0 下载 Portable.zip。运营机器人不点 Publish，只有维护者发布。见 README「怎么拿到 Windows 便携版」。
 - 细节：`docs/delivery/PORTABLE_WINDOWS_CI.md`，发布顺序：`docs/RELEASING.md`。
 
 ## 测试

@@ -1,4 +1,4 @@
-﻿import { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { ConfirmDialog } from "@/components/feedback/confirm-dialog";
 import { Package, RefreshCw, Check, X, FileBox, Loader2, CloudOff, Moon, Sun, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -90,7 +90,7 @@ export function AppHeader({
             </h1>
           </div>
           <p className="mt-1 text-[11px] leading-tight text-muted-foreground">
-            U盘便携版 V5 · 点击步骤名可跳转 · 当前任务：{taskName || "未命名"}
+            U盘便携版 V5.1 · 点击步骤名可跳转 · 当前任务：{taskName || "未命名"}
             {!projectFileName && (
               <span className="text-amber-700 dark:text-amber-400">
                 {" "}

@@ -2,7 +2,7 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-产品代际写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`（当前 **V5**）。Git tag 使用 `v5.MINOR.PATCH`。发布步骤见 `docs/RELEASING.md`。
+产品代际写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`（当前 **V5.1**）。Git tag 使用 `v5.MINOR.PATCH`。发布步骤见 `docs/RELEASING.md`。
 
 更早的交付说明在 `docs/delivery/`。那些文档记录的是当时的包，不从这份骨架倒推成已发布的 GitHub Release。
 

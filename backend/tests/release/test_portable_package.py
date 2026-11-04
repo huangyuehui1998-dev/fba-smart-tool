@@ -255,7 +255,7 @@ def test_buildinfo_records_tag_push_toolchain_and_run_id(tmp_path):
     assert info["built_at_utc"] == "2026-10-26T17:30:00Z"
     assert info["python_version"] == "3.12.8"
     assert info["node_version"] == "v22.14.0"
-    assert info["app_version"] == "V5"
+    assert info["app_version"] == "V5.1"
     text = FIN.format_buildinfo(info)
     assert text.startswith("# ")
     for key in FIN.BUILDINFO_FIELDS:
