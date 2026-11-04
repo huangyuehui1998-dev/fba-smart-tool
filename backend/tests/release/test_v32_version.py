@@ -1,4 +1,4 @@
-"""V5.1：各处产品版本号一致（界面顶栏、/api/health、打包脚本、spec、启动器、使用说明）。"""
+"""V5.2：各处产品版本号一致（界面顶栏、/api/health、打包脚本、spec、启动器、使用说明）。"""
 from __future__ import annotations
 
 import re
@@ -14,7 +14,7 @@ def _text(rel: str) -> str:
 
 
 def test_version_is_v5():
-    assert APP_VERSION == "V5.1"
+    assert APP_VERSION == "V5.2"
 
 
 def test_health_reports_version():

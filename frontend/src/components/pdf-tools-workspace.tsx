@@ -797,10 +797,41 @@ export function PdfToolsWorkspace() {
 
                   <p className="text-[11px] text-muted-foreground">
 
-                    自动在生成的标签底部正中央添加一行文本（常用于产地标或内部 SKU）。目前仅支持英文与数字
+                    自动在生成的标签底部正中央添加一行文本（常用于产地标或内部 SKU）。支持中文、英文与数字，采用垂直基线精算居中。
 
                   </p>
 
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 pt-2 border-t border-border/40 sm:grid-cols-2">
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={advanced.centerBarcode}
+                      onChange={(e) => updateAdvanced("centerBarcode", e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-medium">FNSKU 条码对称居中</span>
+                      <p className="text-[11px] text-muted-foreground">
+                        智能定位 Code 128 条码并对齐到热敏纸物理中轴，消除标题长短导致的条码偏心
+                      </p>
+                    </div>
+                  </label>
+                  <label className="flex items-start gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={advanced.centerContent}
+                      onChange={(e) => updateAdvanced("centerContent", e.target.checked)}
+                      className="mt-0.5 h-4 w-4 rounded border-border text-primary focus:ring-primary"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="text-xs font-medium">内容上下/左右智能居中</span>
+                      <p className="text-[11px] text-muted-foreground">
+                        采用 4:5 垂直光学浮动律自适应均分留白，消除标签贴箱后的下坠沉底感
+                      </p>
+                    </div>
+                  </label>
                 </div>
 
               </AccordionContent>

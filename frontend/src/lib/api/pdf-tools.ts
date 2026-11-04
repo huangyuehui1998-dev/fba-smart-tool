@@ -51,9 +51,30 @@ type SsePayload = {
   filename?: string;
   pdf_base64?: string;
   files?: SseFilePayload[];
+  batch_id?: string;
+  download_url?: string;
 };
 
 async function downloadResultFiles(payload: SsePayload) {
+  if (payload.batch_id) {
+    const downloadUrl = payload.download_url
+      ? resolveApiUrl(payload.download_url)
+      : resolveApiUrl(`/api/pdf/download_batch/${payload.batch_id}`);
+    const res = await fetch(downloadUrl);
+    if (!res.ok) {
+      throw new ApiError(res.status, "下载批次文件失败");
+    }
+    const blob = await res.blob();
+    const disposition = res.headers.get("content-disposition");
+    const match = disposition?.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    const filename = match
+      ? decodeURIComponent(match[1])
+      : payload.files?.length === 1
+        ? payload.files[0].filename
+        : "标签转换.zip";
+    await triggerBrowserDownload(blob, filename);
+    return;
+  }
   if (payload.files?.length) {
     for (const [index, file] of payload.files.entries()) {
       await triggerBrowserDownload(
@@ -151,6 +172,12 @@ export async function convertLabelPdfs(files: File[], options: PdfConvertOptions
     form.append("detect_dpi", String(payload.detect_dpi));
     if (payload.custom_text) {
       form.append("custom_text", String(payload.custom_text));
+    }
+    if (payload.center_barcode !== undefined) {
+      form.append("center_barcode", String(payload.center_barcode));
+    }
+    if (payload.center_content !== undefined) {
+      form.append("center_content", String(payload.center_content));
     }
   }
 
