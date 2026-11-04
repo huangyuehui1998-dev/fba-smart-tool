@@ -2,11 +2,22 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-产品代际写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`（当前 **V5**）。Git tag 使用 `v5.MINOR.PATCH`。发布步骤见 `docs/RELEASING.md`。
+产品代际写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`（当前 **V5.1**）。Git tag 使用 `v5.MINOR.PATCH`。发布步骤见 `docs/RELEASING.md`。
 
 更早的交付说明在 `docs/delivery/`。那些文档记录的是当时的包，不从这份骨架倒推成已发布的 GitHub Release。
 
 ## [Unreleased]
+
+## [5.1.0] - 2026-11-04
+
+### 新增与核心优化
+- **全面融合 V3.2 柔性刷仓体验**：
+  - **AWD 仓入库支持**：完整支持以 I/S 开头的 4 位 AWD 卫星仓代码识别（如 `IUSP`、`STAR`、`IUSJ` 等），与传统 FBA 仓码无缝混排并精准小计 CBM 体积与箱数。
+  - **紧凑命名与前缀容错**：支持纯数字紧凑前缀（如 `1ONT8.csv`、`02_LAX9.csv`）及各类分隔符变体，自动消解前缀噪声提取合法仓码。
+  - **中文票号智能提取与自然排序**：支持“第一票”、“第十一票”、“第二十五票”等中文大写汉字及阿拉伯数字票号提取，确保货代刷仓批次按自然批次严格保序。
+  - **伪仓码黑名单过滤**：严格拦截并过滤 `BOX1`、`CASE1`、`50BOX`、`CTN1` 等干扰 Token，防止误判为仓码。
+- **杜绝多 UNKN 文件笛卡尔积爆炸**：对未识别仓码的多个未知文件采用独立键隔离与分箱聚合，杜绝不同 UNKN 文件之间交叉笛卡尔积膨胀，保障大批量刷仓处理稳定性。
+- **无感轻量提示（Zero-Toast UX）**：在刷仓模式（`is_routing_mode=True`）下，文件名仓码决胜内部旧仓码时执行静默覆盖，消除界面刺眼的红色阻断警告与冗余弹窗，打造丝滑顺畅的运营体验。
 
 ## [5.0.0] - 2026-11-01
 

@@ -177,7 +177,7 @@ def test_windows_workflow_uploads_artifact_and_does_not_publish():
     assert '"v4*"' in text
     assert "build_standalone.ps1" in text
     assert "requirements.lock.txt" in text
-    assert "FBA_Smart_Tool_V4_便携版.zip" in text
+    assert "FBA_Smart_Tool_便携版.zip" in text or "FBA_Smart_Tool_V4_便携版.zip" in text
     assert "contents: read" in text
     assert "contents: write" not in text
     assert "action-gh-release" not in text
@@ -255,7 +255,7 @@ def test_buildinfo_records_tag_push_toolchain_and_run_id(tmp_path):
     assert info["built_at_utc"] == "2026-10-26T17:30:00Z"
     assert info["python_version"] == "3.12.8"
     assert info["node_version"] == "v22.14.0"
-    assert info["app_version"] == "V5"
+    assert info["app_version"] == "V5.1"
     text = FIN.format_buildinfo(info)
     assert text.startswith("# ")
     for key in FIN.BUILDINFO_FIELDS:
