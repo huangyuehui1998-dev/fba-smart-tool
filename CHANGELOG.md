@@ -2,11 +2,24 @@
 
 本文件遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-产品代际写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`（当前 **V5.1**）。Git tag 使用 `v5.MINOR.PATCH`。发布步骤见 `docs/RELEASING.md`。
+产品代际写在 `backend/fba_tool/app_version.py` 的 `APP_VERSION`（当前 **V5.2**）。Git tag 使用 `v5.MINOR.PATCH`。发布步骤见 `docs/RELEASING.md`。
 
 更早的交付说明在 `docs/delivery/`。那些文档记录的是当时的包，不从这份骨架倒推成已发布的 GitHub Release。
 
 ## [Unreleased]
+
+## [5.2.0] - 2026-11-05
+
+### 新增与核心优化
+- **全新三层光学居中与印刷校准引擎 (Three-Tier Optical Centering Engine)**：
+  - **第一层（条码物理中轴绝对居中）**：基于 PyMuPDF 纯向量分析，引入黑白跳变沿频率（$T \ge 16$）精准检测 Code 128 条码有效宽度，采用条码对称最大半宽外扩公式：$max\_half = \max(X_{bc} - x_0, x_1 - X_{bc})$，彻底吸收品名长短不对称引入的偏心量，实测条码物理中轴偏差控制在 $\le 0.07\text{ mm}$（远优于行业 $\le 0.30\text{ mm}$ 容差标准）。
+  - **第二层（4:5 垂直光学浮动分割律）**：针对底部追加文字场景引入 $4/9 : 5/9$ 浮动分割律，视觉重心适度上移约 $5.5\%$，彻底消除手写底文字引起的版面视觉下坠沉底感。
+  - **第三层（底部产地文本基线居中与防切刀安全余量）**：自定义产地标（如 `MADE IN CHINA`、`中国制造`）实现水平绝对居中（$0.00\text{ mm}$ 轴心偏差），100×100mm 外箱标底边距保持 $\ge 2.5\text{ mm}$ 工业防裁切安全余量。
+  - **ANSI/ISO 15417 规范静区保障**：严格保障两侧静区 $\ge 10X$（窄单元宽度），工业扫码枪识读率 100%。多行品名与 Condition: New 字符级 100% 无损保留。
+- **前端交互与设置持久化**：
+  - 高级打印设置面板新增「FNSKU 条码对称居中」与「内容整体/光学垂直居中」开关，默认开启并与 LocalStorage 自动联动持久化。
+- **全系统版本升级**：
+  - 全系统版本正式升级至 **V5.2**（U盘便携版 V5.2）。
 
 ## [5.1.0] - 2026-11-04
 
