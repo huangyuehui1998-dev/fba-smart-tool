@@ -140,8 +140,8 @@ jobs:
       - name: Upload portable zip
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: FBA_Smart_Tool_V4_便携版.zip
-          path: dist/FBA_Smart_Tool_V4_便携版.zip
+          name: FBA_Smart_Tool_便携版.zip
+          path: dist/FBA_Smart_Tool_*_便携版.zip
           if-no-files-found: error
           retention-days: 30
           # The zip is already compressed. Store it as-is so the inner UTF-8 names are not rebuilt.
@@ -150,7 +150,7 @@ jobs:
       - name: Record SHA256
         shell: pwsh
         run: |
-          $zip = Get-Item -LiteralPath "dist\FBA_Smart_Tool_V4_便携版.zip"
+          $zip = Get-ChildItem -Path "dist" -Filter "FBA_Smart_Tool_*_便携版.zip" | Select-Object -First 1
           $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip.FullName).Hash.ToLower()
           $infoPath = "dist\FBA_Smart_Tool\BUILDINFO.txt"
           if (-not (Test-Path -LiteralPath $infoPath)) { throw "BUILDINFO.txt missing from portable folder" }
@@ -159,7 +159,7 @@ jobs:
           @"
           ## Portable package
 
-          - Artifact: ``FBA_Smart_Tool_V4_便携版.zip``
+          - Artifact: ``$($zip.Name)``
           - File: ``$($zip.Name)``
           - Size: $($zip.Length) bytes
           - SHA256: ``$hash``
