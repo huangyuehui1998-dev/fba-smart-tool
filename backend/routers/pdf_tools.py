@@ -7,7 +7,7 @@ import os
 import zipfile
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from fba_tool.pdf_label_processor import (
@@ -18,7 +18,7 @@ from fba_tool.pdf_label_processor import (
     resolve_size_params,
     thermal_labels_pdf,
 )
-from fba_tool.pdf_sse import iter_convert_labels_sse, pdf_download_filename
+from fba_tool.pdf_sse import BATCH_STORE, iter_convert_labels_sse, pdf_download_filename
 from utils.responses import file_response, pdf_response
 
 router = APIRouter()
@@ -40,8 +40,11 @@ def _parse_mm(value: Optional[str]) -> Optional[float]:
     return n
 
 
+MAX_DOC_PAGES = 100
+
+
 def _ensure_pdf(name: str, raw: bytes) -> None:
-    """S8 D7：坏 PDF / 冒充 PDF 的文件返回 400 并写明是哪个文件，不再 500。"""
+    """S8 D7 / S9：坏 PDF / 冒充 PDF / 加密保护 / 超出 100 页均返回 400 业务报错，彻底杜绝 500。"""
     head = raw[:1024].lstrip()
     if not head.startswith(b"%PDF"):
         raise HTTPException(status_code=400, detail=f"{name} 不是 PDF 文件（文件头不是 %PDF），请上传亚马逊下载的箱唛 PDF")
@@ -49,8 +52,18 @@ def _ensure_pdf(name: str, raw: bytes) -> None:
         import fitz  # PyMuPDF
 
         with fitz.open(stream=raw, filetype="pdf") as doc:
+            if doc.is_encrypted or doc.needs_pass:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{name} 已被加密或设置了密码保护，请先解除密码后再上传",
+                )
             if doc.page_count < 1:
-                raise ValueError("没有页面")
+                raise HTTPException(status_code=400, detail=f"{name} 没有页面内容")
+            if doc.page_count > MAX_DOC_PAGES:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"{name} 页面数量（{doc.page_count} 页）超过系统限制（最大 {MAX_DOC_PAGES} 页），请拆分后重新上传",
+                )
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -81,6 +94,11 @@ def _options_from_form(
     ignore_bottom_mm: Optional[str] = None,
     detect_dpi: Optional[str] = None,
     custom_text: Optional[str] = None,
+    auto_rotate: Optional[str] = None,
+    insert_separator: Optional[str] = None,
+    carrier_adaptive: Optional[str] = None,
+    center_barcode: Optional[str] = None,
+    center_content: Optional[str] = None,
 ) -> ProcessOptions:
     return parse_process_options(
         padding_mm=padding_mm,
@@ -88,6 +106,11 @@ def _options_from_form(
         ignore_bottom_mm=ignore_bottom_mm,
         detect_dpi=detect_dpi,
         custom_text=custom_text,
+        auto_rotate=auto_rotate,
+        insert_separator=insert_separator,
+        carrier_adaptive=carrier_adaptive,
+        center_barcode=center_barcode,
+        center_content=center_content,
     )
 
 
@@ -121,6 +144,7 @@ def api_thermal_labels(body: Dict[str, Any]):
     if not b64_list:
         raise HTTPException(status_code=400, detail="pdf_base64 为空")
 
+    shipments = body.get("shipments") or []
     size_key = str(body.get("size_key") or "carton_100x100")
     width_mm = _parse_mm(body.get("width_mm"))
     height_mm = _parse_mm(body.get("height_mm"))
@@ -133,6 +157,7 @@ def api_thermal_labels(body: Dict[str, Any]):
             width_mm=width_mm,
             height_mm=height_mm,
             options=options,
+            shipments_meta=shipments,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"PDF 标签转换失败：{exc}") from exc
@@ -152,6 +177,8 @@ async def api_convert_labels(
     ignore_bottom_mm: Optional[str] = Form(None),
     detect_dpi: Optional[str] = Form(None),
     custom_text: Optional[str] = Form(None),
+    center_barcode: Optional[str] = Form(None),
+    center_content: Optional[str] = Form(None),
 ):
     """模块 B：通用批量上传转换（同步，兼容旧客户端）。"""
     if not files:
@@ -165,7 +192,8 @@ async def api_convert_labels(
     h_mm = _parse_mm(height_mm)
     size = resolve_size_params(size_key, w_mm, h_mm)
     options = _options_from_form(
-        padding_mm, ignore_top_mm, ignore_bottom_mm, detect_dpi, custom_text
+        padding_mm, ignore_top_mm, ignore_bottom_mm, detect_dpi, custom_text,
+        center_barcode=center_barcode, center_content=center_content
     )
     try:
         processed = process_files_parallel(items, size, options=options)
@@ -187,6 +215,7 @@ async def api_convert_labels(
 
 @router.post("/api/pdf/convert_labels/stream")
 async def api_convert_labels_stream(
+    request: Request,
     files: List[UploadFile] = File(...),
     size_key: str = Form("carton_100x100"),
     width_mm: Optional[str] = Form(None),
@@ -196,30 +225,34 @@ async def api_convert_labels_stream(
     ignore_bottom_mm: Optional[str] = Form(None),
     detect_dpi: Optional[str] = Form(None),
     custom_text: Optional[str] = Form(None),
+    center_barcode: Optional[str] = Form(None),
+    center_content: Optional[str] = Form(None),
 ):
-    """模块 B 流式版：SSE 实时推送进度，完成后按原文件名返回多个 PDF。"""
+    """模块 B 流式版：SSE 实时推送进度，原生异步生成器零占用 AnyIO 线程池，支持客户端断开检测。"""
     if not files:
         raise HTTPException(status_code=400, detail="请至少上传一个 PDF 文件")
 
     w_mm = _parse_mm(width_mm)
     h_mm = _parse_mm(height_mm)
     options = _options_from_form(
-        padding_mm, ignore_top_mm, ignore_bottom_mm, detect_dpi, custom_text
+        padding_mm, ignore_top_mm, ignore_bottom_mm, detect_dpi, custom_text,
+        center_barcode=center_barcode, center_content=center_content
     )
 
     items = await _read_pdf_uploads(files)
     if not items:
         raise HTTPException(status_code=400, detail="上传文件为空")
 
-    # 必须用同步 generate + StreamingResponse：Starlette 会放到线程池执行，
-    # 若在 async def 里同步 for chunk in ... 会阻塞整个事件循环，导致 SSE 无法推送。
-    def generate():
-        yield from iter_convert_labels_sse(
-            items, size_key, w_mm, h_mm, options=options
-        )
-
     return StreamingResponse(
-        generate(),
+        iter_convert_labels_sse(
+            items,
+            size_key,
+            w_mm,
+            h_mm,
+            options=options,
+            request=request,
+            keepalive_interval=4.0,
+        ),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -227,3 +260,24 @@ async def api_convert_labels_stream(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/api/pdf/download_batch/{batch_id}")
+async def api_download_batch(batch_id: str):
+    """模块 B：根据 batch_id 单一分块流式下载处理后的 PDF 或打包 ZIP，避免内存 Base64 膨胀。"""
+    files = BATCH_STORE.get(batch_id)
+    if not files:
+        raise HTTPException(status_code=404, detail="下载批次已过期或不存在，请重新提交转换")
+
+    if len(files) == 1:
+        name, data = files[0]
+        return pdf_response(data, os.path.basename(name))
+
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for name, data in files:
+            zf.writestr(os.path.basename(name), data)
+    return file_response(buf.getvalue(), "标签转换.zip", "application/zip")

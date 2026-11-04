@@ -10,6 +10,8 @@ export type PdfLabelAdvancedOptions = {
   ignoreBottomMm: number;
   detectDpi: PdfLabelDetectDpi;
   customText: string;
+  centerBarcode: boolean;
+  centerContent: boolean;
 };
 
 export const DEFAULT_PDF_LABEL_ADVANCED_OPTIONS: PdfLabelAdvancedOptions = {
@@ -18,6 +20,8 @@ export const DEFAULT_PDF_LABEL_ADVANCED_OPTIONS: PdfLabelAdvancedOptions = {
   ignoreBottomMm: 0,
   detectDpi: 120,
   customText: "",
+  centerBarcode: true,
+  centerContent: true,
 };
 
 function clampNonNeg(value: unknown, fallback: number, max = 50): number {
@@ -52,6 +56,14 @@ export function loadPdfLabelAdvancedOptions(): PdfLabelAdvancedOptions {
       ),
       detectDpi: parseDetectDpi(parsed.detectDpi),
       customText: parseCustomText(parsed.customText),
+      centerBarcode:
+        typeof parsed.centerBarcode === "boolean"
+          ? parsed.centerBarcode
+          : DEFAULT_PDF_LABEL_ADVANCED_OPTIONS.centerBarcode,
+      centerContent:
+        typeof parsed.centerContent === "boolean"
+          ? parsed.centerContent
+          : DEFAULT_PDF_LABEL_ADVANCED_OPTIONS.centerContent,
     };
   } catch {
     return { ...DEFAULT_PDF_LABEL_ADVANCED_OPTIONS };
@@ -69,6 +81,8 @@ export function advancedOptionsToApiPayload(options: PdfLabelAdvancedOptions) {
     ignore_top_mm: options.ignoreTopMm,
     ignore_bottom_mm: options.ignoreBottomMm,
     detect_dpi: options.detectDpi,
+    center_barcode: options.centerBarcode ? "true" : "false",
+    center_content: options.centerContent ? "true" : "false",
   };
   const text = options.customText.trim();
   if (text) {
