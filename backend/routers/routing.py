@@ -47,18 +47,26 @@ def _process_routing_batch_sync(file_payloads: List[Tuple[str, bytes]]) -> Tuple
             warehouse_code, _src, warn = resolve_routing_warehouse(shipment.warehouse_code, filename, is_routing_mode=True)
             if warn:
                 warnings.append(warn)
-            if warehouse_code not in warehouse_rank_map:
-                warehouse_rank_map[warehouse_code] = rank if rank != 999 else 1000 + idx
+
+            # 隔离键：防止多个 UNKN 文件的相同箱号在 merge 时发生笛卡尔积交叉污染
+            wh_calc_key = warehouse_code
+            if warehouse_code == "UNKN":
+                wh_calc_key = f"UNKN_F{idx + 1}"
+
+            if wh_calc_key not in warehouse_rank_map:
+                warehouse_rank_map[wh_calc_key] = rank if rank != 999 else 1000 + idx
 
             if not shipment.box_specs.empty:
-                shipment.box_specs["仓库代码"] = warehouse_code
-                shipment.box_specs["原始仓库代码"] = shipment.warehouse_code or "UNKN"
-                all_specs.append(shipment.box_specs)
+                specs_df = shipment.box_specs.copy()
+                specs_df["仓库代码"] = wh_calc_key
+                specs_df["原始仓库代码"] = shipment.warehouse_code or "UNKN"
+                all_specs.append(specs_df)
 
             if not shipment.box_items.empty:
-                shipment.box_items["仓库代码"] = warehouse_code
-                shipment.box_items["原始仓库代码"] = shipment.warehouse_code or "UNKN"
-                all_items.append(shipment.box_items)
+                items_df = shipment.box_items.copy()
+                items_df["仓库代码"] = wh_calc_key
+                items_df["原始仓库代码"] = shipment.warehouse_code or "UNKN"
+                all_items.append(items_df)
         except Exception as e:
             logger.exception(f"解析 {filename} 失败")
             raise HTTPException(status_code=400, detail=f"解析 {filename} 失败: {str(e)}")
@@ -82,6 +90,12 @@ def _process_routing_batch_sync(file_payloads: List[Tuple[str, bytes]]) -> Tuple
                 sort_cols.append("SKU")
             work = work.sort_values(sort_cols, kind="stable").drop(columns=["_ticket_rank"])
             forwarder_df = append_warehouse_subtotals(work)
+
+    # 格式化输出前：将 UNKN_P1 等内部隔离键平滑复原为用户友好的 "UNKN"
+    if not forwarder_df.empty:
+        forwarder_df["仓库代码"] = forwarder_df["仓库代码"].astype(str).apply(
+            lambda x: re.sub(r"^UNKN_F\d+", "UNKN", x)
+        )
 
     forwarder_df = forwarder_df.fillna("")
     from fastapi.encoders import jsonable_encoder

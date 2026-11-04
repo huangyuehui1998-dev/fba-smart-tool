@@ -164,7 +164,7 @@ def test_tc13_multi_row_kills_count_mutant():
 
 # TC-14: 极端文件名与白名单负向拦截测试
 def test_tc14_unknown_warehouse_filename():
-    assert strict_warehouse_from_filename("第一票XYZ9.csv") == ""
+    assert strict_warehouse_from_filename("第一票_BOX1.csv") == ""
     assert strict_warehouse_from_filename("CON.csv") == ""
     assert extract_ticket_rank("第三票ONT8.csv") == 3
 
