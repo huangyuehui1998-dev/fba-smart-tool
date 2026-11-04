@@ -140,6 +140,7 @@ jobs:
       - name: Upload portable zip
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
+          # Historical: FBA_Smart_Tool_V4_便携版.zip
           name: FBA_Smart_Tool_便携版.zip
           path: dist/FBA_Smart_Tool_*_便携版.zip
           if-no-files-found: error

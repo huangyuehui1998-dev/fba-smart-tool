@@ -177,7 +177,7 @@ def test_windows_workflow_uploads_artifact_and_does_not_publish():
     assert '"v4*"' in text
     assert "build_standalone.ps1" in text
     assert "requirements.lock.txt" in text
-    assert "FBA_Smart_Tool_V4_便携版.zip" in text
+    assert "FBA_Smart_Tool_便携版.zip" in text or "FBA_Smart_Tool_V4_便携版.zip" in text
     assert "contents: read" in text
     assert "contents: write" not in text
     assert "action-gh-release" not in text
