@@ -88,7 +88,7 @@ export function Step35RoutingWorkspace() {
       const { rows: data, warnings } = await exportRoutingPreviewWithWarnings(files);
       setPreviewData(data);
       setWhWarnings(warnings);
-      warnings.forEach((w) => toast.warning(w, { duration: 10000 }));
+      if (warnings.length > 0) { toast.info(`已按文件名完成 ${warnings.length} 票分仓识别，详见提示栏`); }
       setActiveSnapshotId(null);
       setSaveName("");
       clearStageStale("routing");
